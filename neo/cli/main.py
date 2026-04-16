@@ -116,9 +116,11 @@ def run(
     from neo.core.brain import Brain
     from neo.core.connectors import ConnectorRegistry
     from neo.core.consciousness import Consciousness
+    from neo.core.discovery import discover_all
     from neo.core.handlers import register_builtin_handlers
     from neo.core.memory import Memory
     from neo.core.personality import Personality
+    from neo.core.registry import Registry
 
     consciousness = Consciousness()
 
@@ -134,6 +136,16 @@ def run(
 
     # Register real handlers — this is what makes Neo DO things, not just talk
     register_builtin_handlers(connectors, memory)
+
+    # Discovery — scan everything and make Neo self-aware
+    registry = Registry()
+    discover_all(
+        registry=registry,
+        pkg_dir=PKG_DIR,
+        connectors=connectors,
+        active_channels=["web"],
+    )
+    consciousness.become_aware(registry)
 
     brain = Brain(
         consciousness=consciousness,

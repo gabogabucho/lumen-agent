@@ -162,14 +162,8 @@ class Brain:
             for mem in context["memories"]:
                 system_parts.append(f"- [{mem['category']}] {mem['content']}")
 
-        # Available connectors
-        connectors = self.connectors.list()
-        if connectors:
-            system_parts.append("\n## Available Connectors")
-            for conn in connectors:
-                system_parts.append(
-                    f"- {conn['name']}: {conn['actions']} — {conn['description']}"
-                )
+        # Note: connectors and capabilities are already included via
+        # consciousness.as_context() which has the full registry.
 
         system_message = "\n".join(system_parts)
 
