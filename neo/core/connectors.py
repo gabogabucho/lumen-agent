@@ -1,5 +1,7 @@
 """Connectors — logical actions Neo can execute. Exposed as LLM tools."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any, Callable, Coroutine
 
