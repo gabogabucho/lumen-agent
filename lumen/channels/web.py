@@ -295,6 +295,42 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         session_manager.remove(session_id)
 
 
+# ─── Debug API ───
+
+
+@app.get("/api/debug/prompt")
+async def api_debug_prompt():
+    """Show the exact system prompt the LLM receives. For debugging."""
+    if not _brain:
+        return {"error": "Brain not initialized"}
+
+    from lumen.core.session import Session
+    from lumen.core.registry import CapabilityKind
+
+    session = Session()
+    context = {
+        "consciousness": _brain.consciousness.as_context(),
+        "personality": _brain.personality.as_context(),
+        "body": _brain.registry.as_context(),
+        "catalog": _brain.catalog.as_context(
+            installed_names={
+                c.name
+                for c in _brain.registry.list_by_kind(CapabilityKind.MODULE)
+            }
+        ),
+        "active_flow": None,
+        "filled_slots": {},
+        "pending_slots": [],
+        "memories": [],
+        "available_flows": _brain.flows,
+    }
+    messages = _brain._build_prompt(context, "test", session)
+    return {
+        "system_prompt": messages[0]["content"],
+        "length": len(messages[0]["content"]),
+    }
+
+
 # ─── Module Management API ───
 
 
