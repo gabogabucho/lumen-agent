@@ -1,0 +1,16 @@
+intent: "search"
+triggers:
+  - "busca sobre"
+  - "buscar"
+  - "que es"
+  - "contame sobre"
+  - "investiga"
+
+slots:
+  query:
+    ask: "¿Que queres que busque?"
+    type: text
+    required: true
+
+on_complete: [web__search]
+interruption_policy: "answer_and_resume"

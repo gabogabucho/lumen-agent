@@ -1,0 +1,21 @@
+intent: "create_note"
+triggers:
+  - "anota que"
+  - "guarda esto"
+  - "recordar que"
+  - "tomar nota"
+  - "apunta que"
+  - "nota"
+
+slots:
+  content:
+    ask: "¿Que queres que anote?"
+    type: text
+    required: true
+  tag:
+    ask: "¿Alguna etiqueta para esta nota? (opcional)"
+    type: text
+    required: false
+
+on_complete: [memory__write]
+interruption_policy: "answer_and_resume"

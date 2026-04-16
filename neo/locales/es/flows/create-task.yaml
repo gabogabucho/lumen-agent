@@ -1,0 +1,26 @@
+intent: "create_task"
+triggers:
+  - "tengo que"
+  - "recordame que"
+  - "agregar tarea"
+  - "crear tarea"
+  - "necesito"
+  - "pendiente"
+
+slots:
+  description:
+    ask: "¿Que necesitas hacer?"
+    type: text
+    required: true
+  due_date:
+    ask: "¿Para cuando? (opcional, podes saltear)"
+    type: date
+    required: false
+  priority:
+    ask: "¿Que prioridad? (baja, media, alta)"
+    type: choice
+    options: [baja, media, alta]
+    required: false
+
+on_complete: [memory__write]
+interruption_policy: "answer_and_resume"

@@ -1,0 +1,16 @@
+intent: "search"
+triggers:
+  - "search for"
+  - "look up"
+  - "find out about"
+  - "what is"
+  - "tell me about"
+
+slots:
+  query:
+    ask: "What should I search for?"
+    type: text
+    required: true
+
+on_complete: [web__search]
+interruption_policy: "answer_and_resume"

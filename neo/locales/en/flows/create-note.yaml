@@ -1,0 +1,21 @@
+intent: "create_note"
+triggers:
+  - "write down"
+  - "note that"
+  - "save this"
+  - "remember that"
+  - "take note"
+  - "jot down"
+
+slots:
+  content:
+    ask: "What should I write down?"
+    type: text
+    required: true
+  tag:
+    ask: "Any tag for this note? (optional)"
+    type: text
+    required: false
+
+on_complete: [memory__write]
+interruption_policy: "answer_and_resume"

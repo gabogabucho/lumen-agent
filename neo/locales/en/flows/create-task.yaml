@@ -1,0 +1,26 @@
+intent: "create_task"
+triggers:
+  - "I need to"
+  - "remind me to"
+  - "add task"
+  - "create task"
+  - "todo"
+  - "I have to"
+
+slots:
+  description:
+    ask: "What do you need to do?"
+    type: text
+    required: true
+  due_date:
+    ask: "When is it due? (optional, you can skip)"
+    type: date
+    required: false
+  priority:
+    ask: "What priority? (low, medium, high)"
+    type: choice
+    options: [low, medium, high]
+    required: false
+
+on_complete: [memory__write]
+interruption_policy: "answer_and_resume"
