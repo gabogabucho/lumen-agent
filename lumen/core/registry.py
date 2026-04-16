@@ -131,25 +131,34 @@ class Registry:
         lines = [
             "## Body (my active capabilities)",
             "",
-            "IMPORTANT: Everything listed as READY below is something I CAN "
-            "and SHOULD do when the user asks. I do NOT need to install "
-            "anything — these are already active. Use neo__read_skill to "
-            "get detailed instructions for any skill.",
+            "IMPORTANT: Everything below under 'What I CAN do' is READY and "
+            "ACTIVE. I do NOT need to install anything for these.",
         ]
 
-        # Ready capabilities — grouped by kind
+        # Ready capabilities with inline instructions
         if all_ready:
             lines.append("\n### What I CAN do (READY — use immediately)")
+
             for c in all_ready:
-                tier = (
-                    f" [{c.min_capability}]"
-                    if c.min_capability != "tier-1"
-                    else ""
-                )
-                lines.append(
-                    f"- **{c.name}** ({c.kind.value}): "
-                    f"{c.description}{tier}"
-                )
+                lines.append(f"- **{c.name}** ({c.kind.value}): {c.description}")
+
+                # For skills with SKILL.md, inject the content directly
+                skill_path = c.metadata.get("path")
+                if skill_path and c.kind == CapabilityKind.SKILL:
+                    try:
+                        from pathlib import Path
+
+                        content = Path(skill_path).read_text(encoding="utf-8")
+                        # Strip frontmatter, keep only instructions
+                        if content.startswith("---"):
+                            end = content.index("---", 3)
+                            content = content[end + 3:].strip()
+                        if content:
+                            # Indent skill instructions under the skill entry
+                            for instruction_line in content.split("\n")[:15]:
+                                lines.append(f"  {instruction_line}")
+                    except Exception:
+                        pass
 
         # Gaps — things that need extension
         if all_gaps:
