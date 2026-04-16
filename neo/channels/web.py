@@ -1,47 +1,127 @@
-"""Web channel — FastAPI dashboard + WebSocket chat. UI-FIRST."""
+"""Web channel — FastAPI dashboard + WebSocket chat. UI-FIRST.
+
+Routing logic:
+  /  → no config? → /setup
+  /  → config but not awakened? → awakening animation
+  /  → config and awakened? → /dashboard
+"""
 
 import json
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from neo.core.brain import Brain
 from neo.core.session import SessionManager
 
 
-# Set at startup by CLI, before uvicorn starts
-_brain: Brain | None = None
+# State — initialized lazily after web setup or by CLI
+_brain = None
 _locale: dict = {}
 _config: dict = {}
-_neo_dir: Path = Path.home() / ".neo"
+
+NEO_DIR = Path.home() / ".neo"
+CONFIG_PATH = NEO_DIR / "config.yaml"
+PKG_DIR = Path(__file__).parent.parent
 
 
-def configure(brain: Brain, locale: dict, config: dict):
-    """Configure the web channel with brain, locale, and config."""
+def configure(brain, locale: dict, config: dict):
+    """Configure the web channel (called by CLI when config exists)."""
     global _brain, _locale, _config
     _brain = brain
     _locale = locale
     _config = config
 
 
+def _has_config() -> bool:
+    return CONFIG_PATH.exists()
+
+
 def _has_awakened() -> bool:
-    """Check if Neo has completed its first awakening."""
-    return (_neo_dir / ".awakened").exists()
+    return (NEO_DIR / ".awakened").exists()
 
 
 def _mark_awakened():
-    """Mark that Neo has completed its first awakening."""
-    _neo_dir.mkdir(parents=True, exist_ok=True)
-    (_neo_dir / ".awakened").write_text("1")
+    NEO_DIR.mkdir(parents=True, exist_ok=True)
+    (NEO_DIR / ".awakened").write_text("1")
+
+
+def _init_brain_from_config():
+    """Lazy brain initialization — runs once after web setup saves config."""
+    global _brain, _locale, _config
+
+    if _brain is not None:
+        return True
+
+    if not _has_config():
+        return False
+
+    # Late imports to avoid circular deps
+    from neo.core.brain import Brain
+    from neo.core.connectors import ConnectorRegistry
+    from neo.core.consciousness import Consciousness
+    from neo.core.discovery import discover_all
+    from neo.core.handlers import register_builtin_handlers
+    from neo.core.memory import Memory
+    from neo.core.personality import Personality
+    from neo.core.registry import Registry
+
+    _config = yaml.safe_load(CONFIG_PATH.read_text())
+
+    # Set API key in environment
+    if _config.get("api_key") and _config.get("api_key_env"):
+        os.environ[_config["api_key_env"]] = _config["api_key"]
+
+    consciousness = Consciousness()
+
+    lang = _config.get("language", "en")
+    personality = Personality(PKG_DIR / "locales" / lang / "personality.yaml")
+
+    memory = Memory(NEO_DIR / "memory.db")
+
+    connectors = ConnectorRegistry()
+    built_in_path = PKG_DIR / "connectors" / "built-in.yaml"
+    if built_in_path.exists():
+        connectors.load(built_in_path)
+
+    register_builtin_handlers(connectors, memory)
+
+    registry = Registry()
+    discover_all(
+        registry=registry,
+        pkg_dir=PKG_DIR,
+        connectors=connectors,
+        active_channels=["web"],
+    )
+
+    _brain = Brain(
+        consciousness=consciousness,
+        personality=personality,
+        memory=memory,
+        connectors=connectors,
+        registry=registry,
+        model=_config.get("model", "deepseek/deepseek-chat"),
+    )
+
+    # Load flows
+    flows_dir = PKG_DIR / "locales" / lang / "flows"
+    _brain.load_flows(flows_dir)
+
+    # Load UI locale
+    ui_path = PKG_DIR / "locales" / lang / "ui.yaml"
+    if ui_path.exists():
+        _locale = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
+
+    return True
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize async resources (memory DB) on startup, clean up on shutdown."""
+    """Initialize async resources on startup."""
     if _brain:
         await _brain.memory.init()
     yield
@@ -55,23 +135,79 @@ templates = Jinja2Templates(directory=str(templates_dir))
 session_manager = SessionManager()
 
 
+# ─── Routes ───
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """First visit: awakening. After that: dashboard."""
+    """Smart routing: setup → awakening → dashboard."""
+    if not _has_config():
+        return templates.TemplateResponse("setup.html", {"request": request})
+
+    _init_brain_from_config()
+
+    # Init memory if brain just loaded
+    if _brain and _brain.memory._db is None:
+        await _brain.memory.init()
+
     if not _has_awakened():
         return templates.TemplateResponse(
             "awakening.html",
-            {
-                "request": request,
-                "language": _config.get("language", "en"),
-            },
+            {"request": request, "language": _config.get("language", "en")},
         )
+
     return RedirectResponse(url="/dashboard")
+
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request):
+    """Setup wizard — for manual access or re-configuration."""
+    return templates.TemplateResponse("setup.html", {"request": request})
+
+
+@app.post("/api/setup")
+async def api_setup(request: Request):
+    """Save configuration from the web setup wizard."""
+    try:
+        body = await request.json()
+
+        config = {
+            "language": body.get("language", "en"),
+            "model": body.get("model", "deepseek/deepseek-chat"),
+            "port": body.get("port", 3000),
+        }
+
+        if body.get("api_key_env"):
+            config["api_key_env"] = body["api_key_env"]
+        if body.get("api_key"):
+            config["api_key"] = body["api_key"]
+
+        NEO_DIR.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(yaml.dump(config, default_flow_style=False))
+
+        # Initialize brain with new config
+        _init_brain_from_config()
+
+        if _brain and _brain.memory._db is None:
+            await _brain.memory.init()
+
+        return {"status": "ok"}
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(e)},
+        )
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """The main dashboard — Neo's UI-FIRST experience."""
+    if not _has_config():
+        return RedirectResponse(url="/")
+
+    _init_brain_from_config()
+
     ui = _locale.get("dashboard", {})
     return templates.TemplateResponse(
         "dashboard.html",
@@ -88,7 +224,7 @@ async def dashboard(request: Request):
 
 
 @app.post("/api/awakened")
-async def mark_awakened():
+async def mark_awakened_endpoint():
     """Called by the awakening animation when it completes."""
     _mark_awakened()
     return {"status": "ok"}
@@ -109,15 +245,12 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
             if not user_text or not _brain:
                 continue
 
-            # Typing indicator
             await websocket.send_text(
                 json.dumps({"type": "typing", "status": True})
             )
 
-            # Brain thinks
             result = await _brain.think(user_text, session)
 
-            # Send response
             await websocket.send_text(
                 json.dumps(
                     {
@@ -128,7 +261,6 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 )
             )
 
-            # Stop typing
             await websocket.send_text(
                 json.dumps({"type": "typing", "status": False})
             )
@@ -139,7 +271,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
 
 @app.get("/api/status")
 async def api_status():
-    """API endpoint for Neo's current status — from the Body (registry)."""
+    """Neo's current status — from the Body (registry)."""
     registry = _brain.registry if _brain else None
 
     flows_info = []
@@ -159,7 +291,7 @@ async def api_status():
             capabilities.append(cap.to_dict())
 
     return {
-        "status": "active",
+        "status": "active" if _brain else "not_configured",
         "version": "0.1.0",
         "model": _config.get("model", "not configured"),
         "language": _config.get("language", "en"),

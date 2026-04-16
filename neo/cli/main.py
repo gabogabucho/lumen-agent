@@ -96,92 +96,94 @@ def install():
 
 @app.command()
 def run(
-    port: int = typer.Option(None, help="Override dashboard port"),
+    port: int = typer.Option(3000, help="Dashboard port"),
 ):
-    """Start Neo — opens the dashboard in your browser."""
-    if not CONFIG_PATH.exists():
-        console.print(
-            "[red]Neo is not installed. Run [bold]neo install[/bold] first.[/red]"
-        )
-        raise typer.Exit(1)
+    """Start Neo — opens the dashboard in your browser.
 
-    config = yaml.safe_load(CONFIG_PATH.read_text())
-
-    # Set API key in environment
-    if config.get("api_key") and config.get("api_key_env"):
-        os.environ[config["api_key_env"]] = config["api_key"]
-
-    # Initialize core
+    If Neo is not configured yet, the browser will show the setup wizard.
+    No 'neo install' needed — the web handles everything.
+    """
     from neo.channels.web import app as web_app, configure
-    from neo.core.brain import Brain
-    from neo.core.connectors import ConnectorRegistry
-    from neo.core.consciousness import Consciousness
-    from neo.core.discovery import discover_all
-    from neo.core.handlers import register_builtin_handlers
-    from neo.core.memory import Memory
-    from neo.core.personality import Personality
-    from neo.core.registry import Registry
 
-    consciousness = Consciousness()
+    # If config exists, pre-initialize brain (faster first page load)
+    if CONFIG_PATH.exists():
+        config = yaml.safe_load(CONFIG_PATH.read_text())
 
-    lang = config.get("language", "en")
-    personality = Personality(PKG_DIR / "locales" / lang / "personality.yaml")
+        if config.get("api_key") and config.get("api_key_env"):
+            os.environ[config["api_key_env"]] = config["api_key"]
 
-    memory = Memory(NEO_DIR / "memory.db")
+        from neo.core.brain import Brain
+        from neo.core.connectors import ConnectorRegistry
+        from neo.core.consciousness import Consciousness
+        from neo.core.discovery import discover_all
+        from neo.core.handlers import register_builtin_handlers
+        from neo.core.memory import Memory
+        from neo.core.personality import Personality
+        from neo.core.registry import Registry
 
-    connectors = ConnectorRegistry()
-    built_in_path = PKG_DIR / "connectors" / "built-in.yaml"
-    if built_in_path.exists():
-        connectors.load(built_in_path)
+        consciousness = Consciousness()
+        lang = config.get("language", "en")
+        personality = Personality(PKG_DIR / "locales" / lang / "personality.yaml")
+        memory = Memory(NEO_DIR / "memory.db")
 
-    # Register real handlers — this is what makes Neo DO things, not just talk
-    register_builtin_handlers(connectors, memory)
+        connectors = ConnectorRegistry()
+        built_in_path = PKG_DIR / "connectors" / "built-in.yaml"
+        if built_in_path.exists():
+            connectors.load(built_in_path)
+        register_builtin_handlers(connectors, memory)
 
-    # Discovery — scan everything so Neo knows what it has (the Body)
-    registry = Registry()
-    discover_all(
-        registry=registry,
-        pkg_dir=PKG_DIR,
-        connectors=connectors,
-        active_channels=["web"],
-    )
-
-    brain = Brain(
-        consciousness=consciousness,
-        personality=personality,
-        memory=memory,
-        connectors=connectors,
-        registry=registry,
-        model=config.get("model", "deepseek/deepseek-chat"),
-    )
-
-    # Load flows for the selected language
-    flows_dir = PKG_DIR / "locales" / lang / "flows"
-    brain.load_flows(flows_dir)
-
-    # Load UI locale
-    ui_path = PKG_DIR / "locales" / lang / "ui.yaml"
-    locale = {}
-    if ui_path.exists():
-        locale = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
-
-    # Wire up web channel — memory.init() happens in FastAPI lifespan
-    configure(brain, locale, config)
-
-    use_port = port or config.get("port", 3000)
-
-    console.print(
-        Panel(
-            f"[bold cyan]Neo[/bold cyan] is running\n\n"
-            f"  Dashboard:  [link]http://localhost:{use_port}[/link]\n"
-            f"  Model:      {config.get('model')}\n"
-            f"  Language:   {lang}\n"
-            f"  Flows:      {len(brain.flows)}",
-            title="Neo",
-            expand=False,
-            border_style="cyan",
+        registry = Registry()
+        discover_all(
+            registry=registry,
+            pkg_dir=PKG_DIR,
+            connectors=connectors,
+            active_channels=["web"],
         )
-    )
+
+        brain = Brain(
+            consciousness=consciousness,
+            personality=personality,
+            memory=memory,
+            connectors=connectors,
+            registry=registry,
+            model=config.get("model", "deepseek/deepseek-chat"),
+        )
+
+        flows_dir = PKG_DIR / "locales" / lang / "flows"
+        brain.load_flows(flows_dir)
+
+        ui_path = PKG_DIR / "locales" / lang / "ui.yaml"
+        locale = {}
+        if ui_path.exists():
+            locale = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
+
+        configure(brain, locale, config)
+        use_port = port or config.get("port", 3000)
+
+        console.print(
+            Panel(
+                f"[bold cyan]Neo[/bold cyan] is running\n\n"
+                f"  Dashboard:  [link]http://localhost:{use_port}[/link]\n"
+                f"  Model:      {config.get('model')}\n"
+                f"  Language:   {lang}\n"
+                f"  Flows:      {len(brain.flows)}",
+                title="Neo",
+                expand=False,
+                border_style="cyan",
+            )
+        )
+    else:
+        use_port = port
+        console.print(
+            Panel(
+                f"[bold cyan]Neo[/bold cyan] — First time setup\n\n"
+                f"  Opening [link]http://localhost:{use_port}[/link]\n"
+                f"  Follow the setup wizard in your browser.",
+                title="Neo",
+                expand=False,
+                border_style="cyan",
+            )
+        )
 
     webbrowser.open(f"http://localhost:{use_port}")
 
