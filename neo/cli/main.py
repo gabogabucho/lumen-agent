@@ -137,7 +137,7 @@ def run(
     # Register real handlers — this is what makes Neo DO things, not just talk
     register_builtin_handlers(connectors, memory)
 
-    # Discovery — scan everything and make Neo self-aware
+    # Discovery — scan everything so Neo knows what it has (the Body)
     registry = Registry()
     discover_all(
         registry=registry,
@@ -145,13 +145,13 @@ def run(
         connectors=connectors,
         active_channels=["web"],
     )
-    consciousness.become_aware(registry)
 
     brain = Brain(
         consciousness=consciousness,
         personality=personality,
         memory=memory,
         connectors=connectors,
+        registry=registry,
         model=config.get("model", "deepseek/deepseek-chat"),
     )
 

@@ -1,8 +1,10 @@
-"""Unified Registry — single source of truth for everything Neo knows about itself.
+"""Registry (the Body) — WHAT Neo has. Discovered at startup.
 
 If Neo doesn't know something exists, it doesn't exist.
 Every skill, connector, module, channel, and MCP server must register here.
-This is what makes Neo CONSCIOUS — not just capable, but self-aware.
+
+The Body is separate from Consciousness (WHO Neo is) and Brain (HOW Neo thinks).
+Consciousness is immutable. The Body changes as you install or remove things.
 """
 
 from __future__ import annotations
@@ -118,12 +120,12 @@ class Registry:
         return result
 
     def as_context(self) -> str:
-        """Format self-awareness for the LLM system prompt.
+        """Format the Body for the LLM system prompt.
 
-        This is THE critical output — it tells the LLM exactly what Neo
-        can and cannot do right now.
+        This tells the LLM exactly what Neo has and what's missing
+        RIGHT NOW — discovered at startup, not hardcoded.
         """
-        lines = ["## My Capabilities"]
+        lines = ["## Body (what I have — discovered at startup)"]
 
         # Group by kind
         for kind in CapabilityKind:

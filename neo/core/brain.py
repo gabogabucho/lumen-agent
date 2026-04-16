@@ -1,10 +1,13 @@
-"""Brain — the context assembler. Neo's heart.
+"""Brain (the Mind) — HOW Neo thinks. The context assembler.
 
 The brain is NOT intelligent. The LLM is intelligent. The brain assembles
-the right context (personality, active flow, slots, connectors, memory)
-and lets the LLM decide everything.
+the right context and lets the LLM decide everything.
 
-~200 lines. That's all it takes.
+The brain combines three sources into one prompt:
+  - Consciousness (who I am — immutable soul)
+  - Personality (who I am in this context — swappable)
+  - Body/Registry (what I have — discovered at startup)
+  + Active flow, memories, conversation history
 """
 
 import json
@@ -17,17 +20,15 @@ from neo.core.connectors import ConnectorRegistry
 from neo.core.consciousness import Consciousness
 from neo.core.memory import Memory
 from neo.core.personality import Personality
+from neo.core.registry import Registry
 from neo.core.session import Session
 
 
 class Brain:
     """Neo's brain — a context assembler, not a routing engine.
 
-    think() does 4 things:
-    1. Assemble context (personality + flow + slots + connectors + memory)
-    2. Build a dynamic prompt
-    3. Let the LLM decide (with connectors exposed as tools)
-    4. Process the structured response
+    Combines Consciousness + Personality + Body into a prompt,
+    lets the LLM decide, and executes tool calls.
     """
 
     def __init__(
@@ -36,6 +37,7 @@ class Brain:
         personality: Personality,
         memory: Memory,
         connectors: ConnectorRegistry,
+        registry: Registry,
         model: str = "deepseek/deepseek-chat",
         flows: list[dict] | None = None,
     ):
@@ -43,6 +45,7 @@ class Brain:
         self.personality = personality
         self.memory = memory
         self.connectors = connectors
+        self.registry = registry
         self.model = model
         self.flows = flows or []
 
@@ -58,10 +61,11 @@ class Brain:
             if triggered:
                 session.start_flow(triggered)
 
-        # 3. Build context
+        # 3. Build context — Consciousness + Personality + Body + State
         context = {
             "consciousness": self.consciousness.as_context(),
             "personality": self.personality.as_context(),
+            "body": self.registry.as_context(),
             "active_flow": session.active_flow,
             "filled_slots": session.slots,
             "pending_slots": session.get_pending_slots(),
@@ -107,18 +111,32 @@ class Brain:
     def _build_prompt(
         self, context: dict, message: str, session: Session
     ) -> list[dict]:
-        """Assemble the system prompt dynamically from context."""
+        """Assemble the system prompt from Consciousness + Personality + Body.
+
+        The prompt has clear sections:
+        1. Consciousness — who I am (immutable soul)
+        2. Personality — who I am in this context (swappable)
+        3. Body — what I have (discovered at startup)
+        4. Current state — active flow, memories, conversation
+        """
         system_parts = [
+            # 1. CONSCIOUSNESS — the soul (never changes)
             context["consciousness"],
             "",
+            # 2. PERSONALITY — context identity (changes per module)
             context["personality"],
+            "",
+            # 3. BODY — discovered capabilities (changes per install)
+            context["body"],
         ]
+
+        # 4. CURRENT STATE — what's happening right now
 
         # Active flow context — slot filling instructions
         if context["active_flow"]:
             flow = context["active_flow"]
             system_parts.append(
-                f"\n## Active Flow: {flow.get('intent', 'unknown')}"
+                f"\n## Current Task: {flow.get('intent', 'unknown')}"
             )
             system_parts.append(
                 f"Filled slots: {json.dumps(context['filled_slots'])}"
@@ -158,12 +176,9 @@ class Brain:
 
         # Relevant memories
         if context["memories"]:
-            system_parts.append("\n## Relevant Memories")
+            system_parts.append("\n## Memories (what I remember)")
             for mem in context["memories"]:
                 system_parts.append(f"- [{mem['category']}] {mem['content']}")
-
-        # Note: connectors and capabilities are already included via
-        # consciousness.as_context() which has the full registry.
 
         system_message = "\n".join(system_parts)
 
