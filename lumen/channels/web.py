@@ -146,7 +146,7 @@ session_manager = SessionManager()
 async def root(request: Request):
     """Smart routing: setup → awakening → dashboard."""
     if not _has_config():
-        return templates.TemplateResponse("setup.html", {"request": request})
+        return templates.TemplateResponse(request, "setup.html")
 
     _init_brain_from_config()
 
@@ -156,8 +156,9 @@ async def root(request: Request):
 
     if not _has_awakened():
         return templates.TemplateResponse(
+            request,
             "awakening.html",
-            {"request": request, "language": _config.get("language", "en")},
+            context={"language": _config.get("language", "en")},
         )
 
     return RedirectResponse(url="/dashboard")
@@ -166,7 +167,7 @@ async def root(request: Request):
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request):
     """Setup wizard — for manual access or re-configuration."""
-    return templates.TemplateResponse("setup.html", {"request": request})
+    return templates.TemplateResponse(request, "setup.html")
 
 
 @app.post("/api/setup")
@@ -214,9 +215,9 @@ async def dashboard(request: Request):
 
     ui = _locale.get("dashboard", {})
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
-        {
-            "request": request,
+        context={
             "ui": ui,
             "model": _config.get("model", "not configured"),
             "language": _config.get("language", "en"),
