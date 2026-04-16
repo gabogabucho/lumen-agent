@@ -106,7 +106,9 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
 
 @app.get("/api/status")
 async def api_status():
-    """API endpoint for Neo's current status."""
+    """API endpoint for Neo's current status — from the Body (registry)."""
+    registry = _brain.registry if _brain else None
+
     flows_info = []
     if _brain:
         for flow in _brain.flows:
@@ -118,13 +120,20 @@ async def api_status():
                 }
             )
 
+    # All data comes from the registry — single source of truth
+    capabilities = []
+    if registry:
+        for cap in registry.all():
+            capabilities.append(cap.to_dict())
+
     return {
         "status": "active",
         "version": "0.1.0",
         "model": _config.get("model", "not configured"),
         "language": _config.get("language", "en"),
-        "connectors": _brain.connectors.list() if _brain else [],
+        "capabilities": capabilities,
+        "summary": registry.summary() if registry else {},
         "flows": flows_info,
-        "skills": ["text-responder", "web-search", "file-reader"],
-        "channels": [{"name": "web", "status": "active"}],
+        "ready": len(registry.ready()) if registry else 0,
+        "gaps": len(registry.gaps()) if registry else 0,
     }

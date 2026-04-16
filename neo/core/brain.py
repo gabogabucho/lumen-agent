@@ -20,7 +20,7 @@ from neo.core.connectors import ConnectorRegistry
 from neo.core.consciousness import Consciousness
 from neo.core.memory import Memory
 from neo.core.personality import Personality
-from neo.core.registry import Registry
+from neo.core.registry import CapabilityKind, Registry
 from neo.core.session import Session
 
 
@@ -76,8 +76,36 @@ class Brain:
         # 4. Build prompt
         messages = self._build_prompt(context, message, session)
 
-        # 5. LLM decides everything — connectors as tools
-        tools = self.connectors.as_tools() or None
+        # 5. LLM decides everything — connectors as tools + introspection
+        tools = self.connectors.as_tools() or []
+
+        # Add read_skill tool — progressive disclosure (from OpenClaw pattern)
+        # The Body lists skill names/descriptions. This tool loads the full content.
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "neo__read_skill",
+                    "description": (
+                        "Read the full instructions of one of my installed skills. "
+                        "Use this when you need detailed guidance on how to perform "
+                        "a specific task that matches a skill."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "skill_name": {
+                                "type": "string",
+                                "description": "Name of the skill to read",
+                            }
+                        },
+                        "required": ["skill_name"],
+                    },
+                },
+            }
+        )
+
+        tools = tools if tools else None
 
         try:
             response = await acompletion(
@@ -98,6 +126,29 @@ class Brain:
         session.add_message("assistant", result["message"])
 
         return result
+
+    def _read_skill(self, arguments: str) -> dict:
+        """Read full SKILL.md content for on-demand loading (progressive disclosure).
+
+        The Body lists skill names and descriptions. This loads the full
+        markdown instructions when the LLM decides it needs them.
+        """
+        params = json.loads(arguments) if arguments else {}
+        skill_name = params.get("skill_name", "")
+
+        cap = self.registry.get(CapabilityKind.SKILL, skill_name)
+        if not cap:
+            return {"error": f"Skill '{skill_name}' not found"}
+
+        skill_path = cap.metadata.get("path")
+        if not skill_path:
+            return {"error": f"Skill '{skill_name}' has no file path"}
+
+        try:
+            content = Path(skill_path).read_text(encoding="utf-8")
+            return {"skill": skill_name, "content": content}
+        except Exception as e:
+            return {"error": f"Cannot read skill '{skill_name}': {e}"}
 
     def _match_flow_trigger(self, message: str) -> dict | None:
         """Check if a message matches any flow trigger."""
@@ -194,6 +245,45 @@ class Brain:
 
         return messages
 
+    @staticmethod
+    def _coerce_args(params: dict, tool_name: str, tools: list[dict] | None) -> dict:
+        """Coerce LLM arguments to match the declared schema types.
+
+        LLMs frequently return "5" (string) when the schema says integer,
+        or "true" (string) when it should be boolean. This prevents crashes.
+        Learned from Hermes — 10 lines that save hours of debugging.
+        """
+        if not tools:
+            return params
+
+        # Find the schema for this tool
+        schema = None
+        for t in tools:
+            if t.get("function", {}).get("name") == tool_name:
+                schema = t["function"].get("parameters", {}).get("properties", {})
+                break
+
+        if not schema:
+            return params
+
+        coerced = {}
+        for key, value in params.items():
+            expected = schema.get(key, {}).get("type")
+            if expected == "integer" and isinstance(value, str):
+                try:
+                    value = int(value)
+                except ValueError:
+                    pass
+            elif expected == "number" and isinstance(value, str):
+                try:
+                    value = float(value)
+                except ValueError:
+                    pass
+            elif expected == "boolean" and isinstance(value, str):
+                value = value.lower() in ("true", "1", "yes")
+            coerced[key] = value
+        return coerced
+
     async def _tool_use_loop(
         self,
         response,
@@ -232,24 +322,33 @@ class Brain:
             for tool_call in msg.tool_calls:
                 func = tool_call.function
                 try:
-                    connector_name, action = self.connectors.parse_tool_name(
-                        func.name
-                    )
-                    params = (
-                        json.loads(func.arguments)
-                        if func.arguments
-                        else {}
-                    )
-                    tool_result = await self.connectors.execute(
-                        connector_name, action, params
-                    )
-                    all_tool_calls.append(
-                        {
-                            "connector": connector_name,
-                            "action": action,
-                            "result": tool_result,
-                        }
-                    )
+                    # Introspection tools (neo__*) are handled by the brain
+                    if func.name == "neo__read_skill":
+                        tool_result = self._read_skill(func.arguments)
+                        all_tool_calls.append(
+                            {"name": func.name, "result": tool_result}
+                        )
+                    else:
+                        # Connector tools
+                        connector_name, action = self.connectors.parse_tool_name(
+                            func.name
+                        )
+                        params = (
+                            json.loads(func.arguments)
+                            if func.arguments
+                            else {}
+                        )
+                        params = self._coerce_args(params, func.name, tools)
+                        tool_result = await self.connectors.execute(
+                            connector_name, action, params
+                        )
+                        all_tool_calls.append(
+                            {
+                                "connector": connector_name,
+                                "action": action,
+                                "result": tool_result,
+                            }
+                        )
                 except Exception as e:
                     tool_result = {"error": str(e)}
                     all_tool_calls.append(
