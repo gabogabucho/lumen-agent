@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from neo.core.brain import Brain
@@ -17,6 +17,7 @@ from neo.core.session import SessionManager
 _brain: Brain | None = None
 _locale: dict = {}
 _config: dict = {}
+_neo_dir: Path = Path.home() / ".neo"
 
 
 def configure(brain: Brain, locale: dict, config: dict):
@@ -25,6 +26,17 @@ def configure(brain: Brain, locale: dict, config: dict):
     _brain = brain
     _locale = locale
     _config = config
+
+
+def _has_awakened() -> bool:
+    """Check if Neo has completed its first awakening."""
+    return (_neo_dir / ".awakened").exists()
+
+
+def _mark_awakened():
+    """Mark that Neo has completed its first awakening."""
+    _neo_dir.mkdir(parents=True, exist_ok=True)
+    (_neo_dir / ".awakened").write_text("1")
 
 
 @asynccontextmanager
@@ -44,8 +56,22 @@ session_manager = SessionManager()
 
 
 @app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    """First visit: awakening. After that: dashboard."""
+    if not _has_awakened():
+        return templates.TemplateResponse(
+            "awakening.html",
+            {
+                "request": request,
+                "language": _config.get("language", "en"),
+            },
+        )
+    return RedirectResponse(url="/dashboard")
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    """Serve the main dashboard — Neo's UI-FIRST experience."""
+    """The main dashboard — Neo's UI-FIRST experience."""
     ui = _locale.get("dashboard", {})
     return templates.TemplateResponse(
         "dashboard.html",
@@ -59,6 +85,13 @@ async def dashboard(request: Request):
             "flows_count": len(_brain.flows) if _brain else 0,
         },
     )
+
+
+@app.post("/api/awakened")
+async def mark_awakened():
+    """Called by the awakening animation when it completes."""
+    _mark_awakened()
+    return {"status": "ok"}
 
 
 @app.websocket("/ws/{session_id}")
@@ -120,7 +153,6 @@ async def api_status():
                 }
             )
 
-    # All data comes from the registry — single source of truth
     capabilities = []
     if registry:
         for cap in registry.all():
