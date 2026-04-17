@@ -1,0 +1,16 @@
+name: docs-helper
+display_name: "Docs Helper"
+description: "Answers documentation questions and can optionally lean on a docs MCP when one is connected."
+version: 1.0.0
+author: "Lumen Team"
+price: free
+min_capability: tier-1
+provides:
+  - docs.answer
+requires:
+  skills: [docs-helper]
+x-lumen:
+  requires:
+    advisory:
+      mcps: [docs-mcp]
+tags: [docs, example]

@@ -53,6 +53,33 @@ class CerebellumTests(unittest.TestCase):
         self.assertEqual(artifact.requires["connectors"], ["task"])
         self.assertEqual(artifact.tool_refs, ["task.create"])
 
+    def test_module_manifest_normalizes_x_lumen_advisory_mcps(self):
+        artifact = normalize_module_manifest(
+            {
+                "name": "docs-helper",
+                "description": "Helps with docs",
+                "x-lumen": {
+                    "requires": {
+                        "advisory": {
+                            "mcps": ["docs-mcp"],
+                        }
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(
+            artifact.metadata["x_lumen"]["advisory_requires"]["mcps"],
+            ["docs-mcp"],
+        )
+        compatibility = calculate_compatibility(
+            artifact,
+            build_runtime_surface(ConnectorRegistry()),
+        )
+        self.assertIn(
+            "advisory MCP 'docs-mcp' is not connected", compatibility["warnings"]
+        )
+
     def test_tool_mapper_matches_connector_and_mcp_runtime_tools(self):
         connectors = ConnectorRegistry()
         task = Connector("task", "Tasks", ["create", "list"])

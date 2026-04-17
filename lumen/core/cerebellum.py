@@ -130,6 +130,7 @@ def normalize_module_manifest(
     requires = normalize_requires(manifest)
     provides = _normalize_string_list(manifest.get("provides"))
     tool_refs = _extract_tool_refs(requires.get("tools", []))
+    x_lumen = _normalize_x_lumen(manifest.get("x-lumen"))
     return NormalizedArtifact(
         name=str(manifest.get("name", "unknown")),
         kind="module",
@@ -151,6 +152,7 @@ def normalize_module_manifest(
                     manifest.get("channels_supported")
                 ),
             },
+            "x_lumen": x_lumen,
         },
     )
 
@@ -330,6 +332,19 @@ def calculate_compatibility(
         if mcp["status"] != CapabilityStatus.READY.value:
             reasons.append(f"MCP '{mcp_name}' is {mcp['status']}")
 
+    advisory_mcps = (
+        artifact.metadata.get("x_lumen", {})
+        .get("advisory_requires", {})
+        .get("mcps", [])
+    )
+    for mcp_name in advisory_mcps:
+        mcp = runtime_surface["mcps"].get(mcp_name)
+        if not mcp:
+            warnings.append(f"advisory MCP '{mcp_name}' is not connected")
+            continue
+        if mcp["status"] != CapabilityStatus.READY.value:
+            warnings.append(f"advisory MCP '{mcp_name}' is {mcp['status']}")
+
     matched = match_declared_tools(artifact.tool_refs, runtime_surface)
     for match in matched:
         if match["status"] == COMPAT_BLOCKED:
@@ -410,6 +425,7 @@ def normalize_capability(capability: Capability) -> NormalizedArtifact | None:
             "channels_supported",
             capability.metadata.get("schema_aliases", {}).get("channels_supported", []),
         )
+        payload.setdefault("x-lumen", capability.metadata.get("x_lumen", {}))
         return normalize_module_manifest(
             payload,
             installed=True,
@@ -553,6 +569,27 @@ def _normalize_string_list(value: Any) -> list[str]:
     if isinstance(value, tuple):
         return [str(item) for item in value if str(item).strip()]
     return [str(value)]
+
+
+def _normalize_x_lumen(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    if "advisory_requires" in value:
+        advisory_requires = value.get("advisory_requires") or {}
+        mcps = _normalize_string_list(advisory_requires.get("mcps"))
+        return {"advisory_requires": {"mcps": mcps}} if mcps else {}
+
+    requires = value.get("requires")
+    if not isinstance(requires, dict):
+        requires = {}
+
+    advisory = requires.get("advisory")
+    if not isinstance(advisory, dict):
+        advisory = {}
+
+    mcps = _normalize_string_list(advisory.get("mcps"))
+    return {"advisory_requires": {"mcps": mcps}} if mcps else {}
 
 
 def _merge_unique(*values: list[str]) -> list[str]:

@@ -3,7 +3,7 @@
 On startup (and optionally on interval), discovery:
 1. Scans skills/ for SKILL.md files → parse frontmatter → register
 2. Scans connectors/ for YAML → parse → register (with handler status)
-3. Scans modules/ for manifest.yaml → parse → register
+3. Scans modules/ for module.yaml (fallback manifest.yaml) → parse → register
 4. Checks channels → register active ones
 5. Checks MCP servers from config → register (available or error)
 
@@ -15,14 +15,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from lumen.core.cerebellum import (
     annotate_registry,
     normalize_agent_skill,
     normalize_module_manifest,
 )
 from lumen.core.connectors import ConnectorRegistry
+from lumen.core.module_manifest import load_module_manifest
 from lumen.core.registry import (
     Capability,
     CapabilityKind,
@@ -190,7 +189,7 @@ def _discover_connectors(registry: Registry, connectors: ConnectorRegistry):
 
 
 def _discover_modules(registry: Registry, modules_dir: Path):
-    """Scan modules/ for manifest.yaml files."""
+    """Scan modules/ for module.yaml files, with manifest.yaml fallback."""
     if not modules_dir.exists():
         return
 
@@ -198,14 +197,10 @@ def _discover_modules(registry: Registry, modules_dir: Path):
         if not module_dir.is_dir() or module_dir.name.startswith("_"):
             continue
 
-        manifest_file = module_dir / "manifest.yaml"
-        if not manifest_file.exists():
-            continue
-
         try:
-            with open(manifest_file, encoding="utf-8") as f:
-                manifest = yaml.safe_load(f) or {}
-
+            manifest_file, manifest = load_module_manifest(module_dir)
+            if manifest_file is None:
+                continue
             normalized = normalize_module_manifest(manifest, installed=True)
             name = normalized.name or module_dir.name
 
@@ -226,7 +221,9 @@ def _discover_modules(registry: Registry, modules_dir: Path):
                         "version": manifest.get("version", "0.0.0"),
                         "author": manifest.get("author", ""),
                         "min_capability": manifest.get("min_capability", "tier-1"),
+                        "manifest_path": str(manifest_file),
                         "schema_aliases": normalized.metadata.get("schema_aliases", {}),
+                        "x_lumen": normalized.metadata.get("x_lumen", {}),
                     },
                 )
             )

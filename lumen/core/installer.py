@@ -19,6 +19,12 @@ from lumen.core.connectors import ConnectorRegistry
 from lumen.core.discovery import discover_all
 from lumen.core.handlers import register_builtin_handlers
 from lumen.core.memory import Memory
+from lumen.core.module_manifest import (
+    find_module_manifest_in_zip,
+    load_module_manifest,
+    resolve_module_manifest_path,
+    zip_manifest_root_prefix,
+)
 from lumen.core.registry import Registry
 
 
@@ -49,16 +55,12 @@ class Installer:
         for module_dir in self.installed_dir.iterdir():
             if not module_dir.is_dir() or module_dir.name.startswith("_"):
                 continue
-            manifest_path = module_dir / "manifest.yaml"
-            if manifest_path.exists():
-                with open(manifest_path, encoding="utf-8") as f:
-                    manifest = yaml.safe_load(f) or {}
+            manifest_path, manifest = load_module_manifest(module_dir)
+            if manifest_path is not None:
                 installed.append(
                     {
                         "name": manifest.get("name", module_dir.name),
-                        "display_name": manifest.get(
-                            "display_name", module_dir.name
-                        ),
+                        "display_name": manifest.get("display_name", module_dir.name),
                         "description": manifest.get("description", ""),
                         "version": manifest.get("version", "0.0.0"),
                         "path": str(module_dir),
@@ -69,7 +71,9 @@ class Installer:
     def is_installed(self, name: str) -> bool:
         """Check if a module is installed."""
         module_dir = self.installed_dir / name
-        return module_dir.exists() and (module_dir / "manifest.yaml").exists()
+        return (
+            module_dir.exists() and resolve_module_manifest_path(module_dir) is not None
+        )
 
     def install_from_catalog(self, name: str) -> dict:
         """Install a module from the catalog.
@@ -110,7 +114,7 @@ class Installer:
                 "provides": module_info.get("provides", []),
                 "tags": module_info.get("tags", []),
             }
-            with open(module_dir / "manifest.yaml", "w", encoding="utf-8") as f:
+            with open(module_dir / "module.yaml", "w", encoding="utf-8") as f:
                 yaml.dump(manifest, f, default_flow_style=False)
 
             skill_content = self._generate_skill_md(module_info)
@@ -128,16 +132,12 @@ class Installer:
         try:
             with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
                 # Find the manifest to get the module name
-                manifest_path = None
-                for name in zf.namelist():
-                    if name.endswith("manifest.yaml"):
-                        manifest_path = name
-                        break
+                manifest_path = find_module_manifest_in_zip(zf.namelist())
 
                 if not manifest_path:
                     return {
                         "status": "error",
-                        "error": "No manifest.yaml found in ZIP",
+                        "error": "No module.yaml or manifest.yaml found in ZIP",
                     }
 
                 # Read manifest
@@ -152,7 +152,7 @@ class Installer:
 
                 # Extract to modules directory
                 # Determine the root dir inside the zip
-                root_prefix = manifest_path.rsplit("manifest.yaml", 1)[0]
+                root_prefix = zip_manifest_root_prefix(manifest_path)
                 module_dir = self.installed_dir / module_name
                 module_dir.mkdir(parents=True, exist_ok=True)
 
@@ -172,9 +172,7 @@ class Installer:
                 return {
                     "status": "installed",
                     "name": module_name,
-                    "display_name": manifest.get(
-                        "display_name", module_name
-                    ),
+                    "display_name": manifest.get("display_name", module_name),
                     "description": manifest.get("description", ""),
                 }
 
@@ -215,9 +213,9 @@ class Installer:
 
         lines = [
             "---",
-            f'name: {name}',
+            f"name: {name}",
             f'description: "{description}"',
-            f'min_capability: {module_info.get("min_capability", "tier-2")}',
+            f"min_capability: {module_info.get('min_capability', 'tier-2')}",
         ]
         if module_info.get("requires"):
             lines.append("requires:")
@@ -238,8 +236,7 @@ class Installer:
         if fills:
             lines.append("## When to use")
             lines.append(
-                "Use this module when the user asks about: "
-                + ", ".join(fills[:5])
+                "Use this module when the user asks about: " + ", ".join(fills[:5])
             )
 
         return "\n".join(lines)
