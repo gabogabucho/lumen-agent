@@ -1,12 +1,12 @@
 name: x-lumen-peluqueria
-type: kit
 display_name: "Peluquería"
 description: "Asistente completo para peluquerías y salones. Turnos, precios y atención al cliente."
 version: 1.0.0
 author: "Lumen Team"
 price: free
 min_capability: tier-2
-tags: [kit, vertical, negocio]
+tags: [x-lumen, personality, vertical, negocio]
+personality: personality.yaml
 onboarding_flow: flows/onboarding.yaml
 x-lumen:
   mcps:

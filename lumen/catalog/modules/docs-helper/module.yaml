@@ -1,4 +1,4 @@
-name: docs-helper
+name: x-lumen-docs-helper
 display_name: "Docs Helper"
 description: "Answers documentation questions and can optionally lean on a docs MCP when one is connected."
 version: 1.0.0
@@ -13,4 +13,4 @@ x-lumen:
   requires:
     advisory:
       mcps: [docs-mcp]
-tags: [docs, example]
+tags: [x-lumen, docs, example]

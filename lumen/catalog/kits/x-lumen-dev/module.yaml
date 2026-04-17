@@ -1,12 +1,12 @@
 name: x-lumen-dev
-type: kit
 display_name: "Dev"
 description: "Tu pair programmer. Navega código, revisa PRs y depura con contexto real."
 version: 1.0.0
 author: "Lumen Team"
 price: free
 min_capability: tier-2
-tags: [kit, personal, developer]
+tags: [x-lumen, personality, personal, developer]
+personality: personality.yaml
 onboarding_flow: flows/onboarding.yaml
 x-lumen:
   mcps:

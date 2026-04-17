@@ -1,5 +1,5 @@
 # Native module template — copy this to create a new module
-name: my-module
+name: x-lumen-my-module
 version: 1.0.0
 display_name: "My Module"
 description: "Description of what this module does"
@@ -16,5 +16,5 @@ x-lumen:
   requires:
     advisory:
       mcps: []
-tags: []
+tags: [x-lumen]
 language: en

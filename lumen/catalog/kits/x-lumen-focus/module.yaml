@@ -1,12 +1,12 @@
 name: x-lumen-focus
-type: kit
 display_name: "Focus"
 description: "Productividad profunda. Pomodoro, planificación y gestión de energía."
 version: 1.0.0
 author: "Lumen Team"
 price: free
 min_capability: tier-1
-tags: [kit, personal, productivity]
+tags: [x-lumen, personality, personal, productivity]
+personality: personality.yaml
 onboarding_flow: flows/onboarding.yaml
 x-lumen:
   mcps:

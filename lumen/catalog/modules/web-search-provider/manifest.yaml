@@ -1,4 +1,4 @@
-name: web-search-provider
+name: x-lumen-web-search
 display_name: "Web Search"
 description: "Search the web and extract content from URLs. Powers the web connector with real search capabilities."
 version: 1.0.0
@@ -8,4 +8,4 @@ min_capability: tier-2
 provides:
   - web.search
   - web.extract
-tags: [web, search, internet]
+tags: [x-lumen, web, search, internet]

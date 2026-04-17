@@ -1,12 +1,12 @@
 name: x-lumen-personal
-type: kit
 display_name: "Lumen Personal"
 description: "Tu asistente personal de uso general. Ayuda con tareas, notas, búsquedas y lo que necesites."
 version: 1.0.0
 author: "Lumen Team"
 price: free
 min_capability: tier-1
-tags: [kit, personal]
+tags: [x-lumen, personality, personal]
+personality: personality.yaml
 onboarding_flow: flows/onboarding.yaml
 x-lumen:
   mcps:

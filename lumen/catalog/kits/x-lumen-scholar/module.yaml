@@ -1,12 +1,12 @@
 name: x-lumen-scholar
-type: kit
 display_name: "Scholar"
 description: "Tu compañero académico. Investiga, organiza y estudia más profundo."
 version: 1.0.0
 author: "Lumen Team"
 price: free
 min_capability: tier-1
-tags: [kit, personal, academic]
+tags: [x-lumen, personality, personal, academic]
+personality: personality.yaml
 onboarding_flow: flows/onboarding.yaml
 x-lumen:
   mcps:
