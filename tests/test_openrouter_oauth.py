@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from lumen.channels import web
+from lumen.core.runtime import bootstrap_runtime
 
 
 async def _noop_init_brain():
@@ -20,11 +22,13 @@ class OpenRouterOAuthTests(unittest.TestCase):
         self.tmp_path = Path(self.tmp.name)
         self.original_lumen_dir = web.LUMEN_DIR
         self.original_config_path = web.CONFIG_PATH
+        self.original_pkg_dir = web.PKG_DIR
         self.original_brain = web._brain
         self.original_locale = web._locale
         self.original_config = web._config
         web.LUMEN_DIR = self.tmp_path
         web.CONFIG_PATH = self.tmp_path / "config.yaml"
+        web.PKG_DIR = self.tmp_path / "pkg"
         web._brain = None
         web._locale = {}
         web._config = {}
@@ -34,6 +38,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
     def tearDown(self):
         web.LUMEN_DIR = self.original_lumen_dir
         web.CONFIG_PATH = self.original_config_path
+        web.PKG_DIR = self.original_pkg_dir
         web._brain = self.original_brain
         web._locale = self.original_locale
         web._config = self.original_config
@@ -191,6 +196,202 @@ class OpenRouterOAuthTests(unittest.TestCase):
             for directory in created_dirs:
                 if directory.exists():
                     directory.rmdir()
+
+    def test_uninstall_active_personality_clears_config_and_falls_back_runtime(self):
+        pkg_dir = self._make_runtime_pkg()
+        self._write_personality_module(
+            pkg_dir / "modules" / "demo-personality",
+            module_name="demo-personality",
+            persona_name="Module Persona",
+            flow_intent="module-onboarding",
+        )
+
+        config = {
+            "language": "en",
+            "model": "deepseek/deepseek-chat",
+            "api_key": "sk-test",
+            "api_key_env": "OPENROUTER_API_KEY",
+            "active_personality": "demo-personality",
+            "mcp": {"servers": {"demo": {"command": "node"}}},
+        }
+        web.CONFIG_PATH.write_text(yaml.dump(config, sort_keys=False), encoding="utf-8")
+
+        runtime = asyncio.run(
+            bootstrap_runtime(
+                dict(config),
+                pkg_dir=pkg_dir,
+                lumen_dir=self.tmp_path / "runtime",
+                active_channels=["web"],
+            )
+        )
+
+        try:
+            web.configure(runtime.brain, runtime.locale, dict(config))
+            original_memory = web._brain.memory
+            original_connectors = web._brain.connectors
+
+            response = self.client.delete("/api/modules/uninstall/demo-personality")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["status"], "uninstalled")
+
+            saved = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8"))
+            self.assertNotIn("active_personality", saved)
+            self.assertEqual(saved["model"], "deepseek/deepseek-chat")
+            self.assertEqual(saved["api_key"], "sk-test")
+            self.assertEqual(saved["api_key_env"], "OPENROUTER_API_KEY")
+            self.assertEqual(saved["mcp"], {"servers": {"demo": {"command": "node"}}})
+
+            self.assertNotIn("active_personality", web._config)
+            self.assertEqual(
+                web._brain.personality.current()["identity"]["name"],
+                "Locale Lumen",
+            )
+            self.assertEqual(
+                [flow["intent"] for flow in web._brain.flows],
+                ["locale-default"],
+            )
+            self.assertIs(web._brain.memory, original_memory)
+            self.assertIs(web._brain.connectors, original_connectors)
+        finally:
+            if runtime.brain.mcp_manager:
+                asyncio.run(runtime.brain.mcp_manager.close())
+            asyncio.run(runtime.brain.memory.close())
+
+    def test_uninstalling_non_active_modules_keeps_active_personality(self):
+        pkg_dir = self._make_runtime_pkg()
+        self._write_personality_module(
+            pkg_dir / "modules" / "demo-personality",
+            module_name="demo-personality",
+            persona_name="Module Persona",
+            flow_intent="module-onboarding",
+        )
+        self._write_personality_module(
+            pkg_dir / "modules" / "other-personality",
+            module_name="other-personality",
+            persona_name="Other Persona",
+            flow_intent="other-onboarding",
+        )
+        self._write_plain_module(pkg_dir / "modules" / "tool-module", "tool-module")
+
+        config = {
+            "language": "en",
+            "model": "deepseek/deepseek-chat",
+            "active_personality": "demo-personality",
+        }
+        web.CONFIG_PATH.write_text(yaml.dump(config, sort_keys=False), encoding="utf-8")
+
+        runtime = asyncio.run(
+            bootstrap_runtime(
+                dict(config),
+                pkg_dir=pkg_dir,
+                lumen_dir=self.tmp_path / "runtime",
+                active_channels=["web"],
+            )
+        )
+
+        try:
+            web.configure(runtime.brain, runtime.locale, dict(config))
+
+            inactive_response = self.client.delete(
+                "/api/modules/uninstall/other-personality"
+            )
+            normal_response = self.client.delete("/api/modules/uninstall/tool-module")
+
+            self.assertEqual(inactive_response.json()["status"], "uninstalled")
+            self.assertEqual(normal_response.json()["status"], "uninstalled")
+
+            saved = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8"))
+            self.assertEqual(saved["active_personality"], "demo-personality")
+            self.assertEqual(web._config["active_personality"], "demo-personality")
+            self.assertEqual(
+                web._brain.personality.current()["identity"]["name"],
+                "Module Persona",
+            )
+            self.assertEqual(
+                [flow["intent"] for flow in web._brain.flows],
+                ["locale-default", "module-onboarding"],
+            )
+        finally:
+            if runtime.brain.mcp_manager:
+                asyncio.run(runtime.brain.mcp_manager.close())
+            asyncio.run(runtime.brain.memory.close())
+
+    def _make_runtime_pkg(self) -> Path:
+        pkg_dir = web.PKG_DIR
+        (pkg_dir / "locales" / "en" / "flows").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "catalog").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "modules").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "locales" / "en" / "personality.yaml").write_text(
+            yaml.dump(
+                {"identity": {"name": "Locale Lumen", "role": "Assistant"}},
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (pkg_dir / "locales" / "en" / "flows" / "default.yaml").write_text(
+            yaml.dump(
+                {"intent": "locale-default", "triggers": ["hello"]},
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (pkg_dir / "catalog" / "index.yaml").write_text(
+            yaml.dump({"modules": []}, sort_keys=False),
+            encoding="utf-8",
+        )
+        return pkg_dir
+
+    def _write_personality_module(
+        self,
+        module_dir: Path,
+        *,
+        module_name: str,
+        persona_name: str,
+        flow_intent: str,
+    ):
+        (module_dir / "flows").mkdir(parents=True, exist_ok=True)
+        (module_dir / "module.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": module_name,
+                    "display_name": persona_name,
+                    "tags": ["x-lumen", "personality"],
+                    "personality": "personality.yaml",
+                    "onboarding_flow": "flows/onboarding.yaml",
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (module_dir / "personality.yaml").write_text(
+            yaml.dump(
+                {"identity": {"name": persona_name, "role": "Module Assistant"}},
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (module_dir / "flows" / "onboarding.yaml").write_text(
+            yaml.dump(
+                {"intent": flow_intent, "triggers": ["start"]},
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+    def _write_plain_module(self, module_dir: Path, module_name: str):
+        module_dir.mkdir(parents=True, exist_ok=True)
+        (module_dir / "module.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": module_name,
+                    "display_name": "Tool Module",
+                    "tags": ["tools"],
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
 
 
 if __name__ == "__main__":

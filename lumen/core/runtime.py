@@ -60,6 +60,31 @@ def refresh_runtime_registry(
     return registry
 
 
+def reload_runtime_personality_surface(
+    brain: Brain,
+    *,
+    config: dict,
+    pkg_dir: Path,
+) -> None:
+    """Reload only the personality + flows surface for the live runtime."""
+    lang = config.get("language", "en")
+    locale_personality_path = pkg_dir / "locales" / lang / "personality.yaml"
+    active_personality_module = _resolve_active_personality_module(config, pkg_dir)
+    personality_path = _resolve_personality_path(
+        active_personality_module, locale_personality_path
+    )
+
+    brain.personality = Personality(personality_path)
+    brain.flows = []
+
+    flows_dir = pkg_dir / "locales" / lang / "flows"
+    brain.load_flows(flows_dir)
+
+    onboarding_flow_path = _resolve_module_onboarding_flow(active_personality_module)
+    if onboarding_flow_path is not None:
+        brain.load_flows(onboarding_flow_path)
+
+
 async def bootstrap_runtime(
     config: dict,
     *,

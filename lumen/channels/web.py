@@ -24,7 +24,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from lumen.core.registry import CapabilityKind
-from lumen.core.runtime import bootstrap_runtime, refresh_runtime_registry
+from lumen.core.runtime import (
+    bootstrap_runtime,
+    refresh_runtime_registry,
+    reload_runtime_personality_surface,
+)
 from lumen.core.session import SessionManager
 from lumen.core.module_manifest import load_module_manifest
 
@@ -70,9 +74,11 @@ def _load_config() -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _merge_save_config(updates: dict) -> dict:
+def _merge_save_config(updates: dict, *, removals: set[str] | None = None) -> dict:
     merged = _load_config()
     merged.update(_sanitize_config_updates(updates))
+    for key in removals or set():
+        merged.pop(key, None)
     LUMEN_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(
         yaml.dump(merged, default_flow_style=False),
@@ -573,15 +579,22 @@ async def api_modules_install(name: str):
 @app.delete("/api/modules/uninstall/{name}")
 async def api_modules_uninstall(name: str):
     """Uninstall a module. Lumen forgets."""
+    global _config
+
     if not _brain:
         return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
     from lumen.core.installer import Installer
 
     installer = Installer(PKG_DIR, _brain.connectors, _brain.memory, _brain.catalog)
+    was_active_personality = _config.get("active_personality") == name
     result = installer.uninstall(name)
 
     if result["status"] == "uninstalled":
+        if was_active_personality:
+            _config = _merge_save_config({}, removals={"active_personality"})
         refresh_runtime_registry(_brain, pkg_dir=PKG_DIR, active_channels=["web"])
+        if was_active_personality:
+            reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
 
     return result
 
