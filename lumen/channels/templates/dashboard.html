@@ -325,6 +325,7 @@
 
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let ws = new WebSocket(`${wsProtocol}//${location.host}/ws/${sessionId}`);
+    let heartbeatTimer = null;
 
     const chatMessages = document.getElementById('chat-messages');
     const chatForm = document.getElementById('chat-form');
@@ -392,6 +393,8 @@
     ws.addEventListener('message', (event) => {
       const data = JSON.parse(event.data);
 
+      if (data.type === 'pong') return;
+
       if (data.type === 'typing') {
         typingIndicator.classList.toggle('hidden', !data.status);
         if (data.status) chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -404,7 +407,17 @@
     });
 
     ws.addEventListener('close', () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       addMessage('assistant', 'Connection lost. Please refresh the page.');
+    });
+
+    ws.addEventListener('open', () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 30000);
     });
 
     // Focus input on load

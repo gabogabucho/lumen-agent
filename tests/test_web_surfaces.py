@@ -1,5 +1,6 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from lumen.core.connectors import Connector, ConnectorRegistry
 from lumen.core.discovery import discover_all
 from lumen.core.marketplace import Marketplace
 from lumen.core.registry import Capability, CapabilityKind, CapabilityStatus, Registry
+from lumen.core.session import SessionManager
 
 
 async def _noop(**_kwargs):
@@ -38,8 +40,10 @@ class BrainStub:
         self.flows = list(flows or [])
         self.memory = memory or MemoryStub()
         self.last_think = None
+        self.think_calls = 0
 
     async def think(self, user_text, session):
+        self.think_calls += 1
         self.last_think = {
             "user_text": user_text,
             "session_id": session.session_id,
@@ -63,10 +67,12 @@ class WebSurfaceTests(unittest.TestCase):
         self.original_config = web._config
         self.original_locale = web._locale
         self.original_sessions = dict(web.session_manager._sessions)
+        self.original_idle_timeout = web.session_manager.idle_timeout_seconds
         web._brain = None
         web._config = {}
         web._locale = {}
         web.session_manager._sessions.clear()
+        web.session_manager.idle_timeout_seconds = 300
         self.client = TestClient(web.app)
 
     def tearDown(self):
@@ -75,6 +81,7 @@ class WebSurfaceTests(unittest.TestCase):
         web._locale = self.original_locale
         web.session_manager._sessions.clear()
         web.session_manager._sessions.update(self.original_sessions)
+        web.session_manager.idle_timeout_seconds = self.original_idle_timeout
 
     def test_api_status_reports_truthful_payload_shape_and_counts(self):
         connectors = ConnectorRegistry()
@@ -214,6 +221,51 @@ class WebSurfaceTests(unittest.TestCase):
 
         self.assertEqual(web._brain.memory.calls, [("session-abc", 50)])
         self.assertIsNone(web.session_manager.get("session-abc"))
+
+    def test_websocket_ping_updates_last_seen_and_skips_brain_and_history(self):
+        web._brain = BrainStub()
+
+        with self.client.websocket_connect("/ws/session-ping") as websocket:
+            session = web.session_manager.get("session-ping")
+            self.assertIsNotNone(session)
+            initial_last_seen = session.last_seen
+
+            time.sleep(0.02)
+            websocket.send_text(json.dumps({"type": "ping"}))
+
+            pong = json.loads(websocket.receive_text())
+            self.assertEqual(pong, {"type": "pong"})
+
+            updated_session = web.session_manager.get("session-ping")
+            self.assertGreater(updated_session.last_seen, initial_last_seen)
+            self.assertEqual(updated_session.history, [])
+            self.assertEqual(web._brain.think_calls, 0)
+            self.assertIsNone(web._brain.last_think)
+
+
+class SessionManagerTests(unittest.TestCase):
+    def test_get_or_create_sets_last_seen_and_reuses_session(self):
+        manager = SessionManager(idle_timeout_seconds=60)
+
+        session = manager.get_or_create("session-1")
+        first_seen = session.last_seen
+
+        time.sleep(0.02)
+        same_session = manager.get_or_create("session-1")
+
+        self.assertIs(session, same_session)
+        self.assertGreater(same_session.last_seen, first_seen)
+
+    def test_prune_stale_removes_idle_sessions_during_normal_activity(self):
+        manager = SessionManager(idle_timeout_seconds=0.01)
+        stale = manager.get_or_create("stale-session")
+
+        time.sleep(0.02)
+        active = manager.get_or_create("active-session")
+
+        self.assertIsNone(manager.get("stale-session"))
+        self.assertIs(manager.get("active-session"), active)
+        self.assertNotEqual(stale.session_id, active.session_id)
 
 
 class CapabilityPropagationTests(unittest.TestCase):

@@ -1,5 +1,6 @@
 """Session — per-conversation state management."""
 
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,6 +17,10 @@ class Session:
     history: list[dict] = field(default_factory=list)
     active_flow: dict | None = None
     slots: dict[str, Any] = field(default_factory=dict)
+    last_seen: float = field(default_factory=time.time)
+
+    def touch(self):
+        self.last_seen = time.time()
 
     def add_message(self, role: str, content: str):
         self.history.append({"role": role, "content": content})
@@ -46,18 +51,41 @@ class Session:
 class SessionManager:
     """Manages active sessions across all channels."""
 
-    def __init__(self):
+    def __init__(self, idle_timeout_seconds: float = 300):
         self._sessions: dict[str, Session] = {}
+        self.idle_timeout_seconds = idle_timeout_seconds
+
+    def prune_stale(self):
+        now = time.time()
+        stale_ids = [
+            session_id
+            for session_id, session in self._sessions.items()
+            if now - session.last_seen > self.idle_timeout_seconds
+        ]
+        for session_id in stale_ids:
+            self.remove(session_id)
 
     def get_or_create(self, session_id: str | None = None) -> Session:
+        self.prune_stale()
         if session_id and session_id in self._sessions:
-            return self._sessions[session_id]
+            session = self._sessions[session_id]
+            session.touch()
+            return session
         session = Session(session_id=session_id or str(uuid.uuid4()))
+        session.touch()
         self._sessions[session.session_id] = session
         return session
 
     def get(self, session_id: str) -> Session | None:
+        self.prune_stale()
         return self._sessions.get(session_id)
+
+    def touch(self, session_id: str) -> Session | None:
+        self.prune_stale()
+        session = self._sessions.get(session_id)
+        if session:
+            session.touch()
+        return session
 
     def remove(self, session_id: str):
         self._sessions.pop(session_id, None)

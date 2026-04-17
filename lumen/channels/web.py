@@ -649,7 +649,13 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     try:
         while True:
             data = await websocket.receive_text()
+            session_manager.touch(session_id)
             payload = json.loads(data)
+
+            if payload.get("type") == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
+                continue
+
             user_text = payload.get("content", "").strip()
 
             if not user_text or not _brain:
