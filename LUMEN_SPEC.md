@@ -347,18 +347,22 @@ Paquetes pre-armados que agrupan personalidad + skills + conectores + canales pa
 | **Integration** | Puente a otro sistema | CRM, ERP, e-commerce |
 
 ```yaml
-# modules/peluqueria/manifest.yaml
+# modules/peluqueria/module.yaml
 name: peluqueria
 version: 1.0.0
 display_name: "Neo Peluquería"
 description: "Asistente AI para peluquerías"
 price: free
 min_capability: tier-2
-skills_required:
-  - whatsapp-responder
-  - google-calendar
-  - mercadopago-checkout
-channels_supported: [whatsapp, telegram, web]
+provides:
+  - appointments.book
+requires:
+  skills: [whatsapp-responder, google-calendar, mercadopago-checkout]
+  channels: [whatsapp, telegram, web]
+x-lumen:
+  requires:
+    advisory:
+      mcps: [calendar-mcp]
 ```
 
 ---
@@ -406,7 +410,7 @@ discovery:
 ```
 modules/
 └── peluqueria/
-    ├── manifest.yaml           # Metadata, skills que necesita, precio
+    ├── module.yaml             # Manifest nativo (manifest.yaml sigue como fallback legacy)
     ├── personality.yaml        # Template de personalidad para este vertical
     ├── flows/                  # Flujos de conversación
     │   ├── booking.yaml
@@ -416,7 +420,11 @@ modules/
     └── README.md
 ```
 
-### manifest.yaml
+El contrato nativo del runtime usa `module.yaml` como manifest preferido. `manifest.yaml` sigue siendo válido solo como fallback para módulos legacy.
+
+`x-lumen` es un namespace opcional y advisory para metadata específica de Lumen (por ejemplo, MCPs recomendados), sin cambiar la carga base del módulo.
+
+### module.yaml
 ```yaml
 name: peluqueria
 version: 1.0.0
@@ -425,10 +433,19 @@ description: "Asistente AI para peluquerías y barberías"
 author: "Gabo Urrutia"
 price: free
 min_capability: tier-2
-skills_required: [whatsapp-responder, google-calendar, mercadopago-checkout]
-channels_supported: [whatsapp, telegram, web]
+provides:
+  - appointments.book
+requires:
+  skills: [whatsapp-responder, google-calendar, mercadopago-checkout]
+  channels: [whatsapp, telegram, web]
+x-lumen:
+  requires:
+    advisory:
+      mcps: [calendar-mcp]
 language: es-AR
 ```
+
+Ejemplo canónico del formato nativo: `lumen/catalog/modules/docs-helper/module.yaml`.
 
 ### flows/booking.yaml
 

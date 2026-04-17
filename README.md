@@ -146,6 +146,29 @@ lumen/
 └── cli/main.py           # CLI (lumen run, lumen install, lumen status)
 ```
 
+## Module manifests
+
+Lumen's native module manifest is `module.yaml`.
+
+- `module.yaml` is the preferred format for all new modules.
+- `manifest.yaml` is still supported as a legacy fallback for discovery and install.
+- `x-lumen` is an optional advisory namespace for Lumen-specific hints, especially recommended MCP requirements.
+
+Native example: `lumen/catalog/modules/docs-helper/module.yaml`
+
+```yaml
+name: docs-helper
+provides: [docs.answer]
+requires:
+  skills: [docs-helper]
+x-lumen:
+  requires:
+    advisory:
+      mcps: [docs-mcp]
+```
+
+If you're authoring a new module, start from `lumen/modules/_template/module.yaml`.
+
 ## Supported Models
 
 | Provider | Model | Tier |

@@ -1,0 +1,20 @@
+# Native module template — copy this to create a new module
+name: my-module
+version: 1.0.0
+display_name: "My Module"
+description: "Description of what this module does"
+author: "Your Name"
+price: free
+min_capability: tier-2
+provides: []
+requires:
+  skills: []
+  channels: [web]
+# Optional Lumen-specific advisory metadata.
+# Use this when a module works without an MCP but is better with one attached.
+x-lumen:
+  requires:
+    advisory:
+      mcps: []
+tags: []
+language: en
