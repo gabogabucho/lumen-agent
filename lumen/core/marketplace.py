@@ -1,7 +1,8 @@
 """Marketplace read model for dashboard/API consumption.
 
 Keeps marketplace logic on the server side by merging runtime truth from the
-registry, local Kits Lumen catalog entries, and optional remote read-only feeds.
+registry, the local installable module catalog, and optional remote read-only
+feeds.
 """
 
 from __future__ import annotations
@@ -88,13 +89,13 @@ class Marketplace:
             "generated_at": int(time.time()),
             "feeds": remote["feeds"],
             "tabs": [
-                {"key": "skills", "label": "Skills", "count": len(skills)},
-                {"key": "mcps", "label": "MCPs", "count": len(mcps)},
                 {
                     "key": "kits_lumen",
-                    "label": "Kits Lumen",
+                    "label": "Modules & Personalities",
                     "count": len(kits["items"]),
                 },
+                {"key": "skills", "label": "Skills", "count": len(skills)},
+                {"key": "mcps", "label": "MCPs", "count": len(mcps)},
             ],
             "skills": self._section_payload(
                 "skills",
@@ -115,11 +116,11 @@ class Marketplace:
             "kits_lumen": {
                 **self._section_payload(
                     "kits_lumen",
-                    "Kits Lumen",
+                    "Modules & Personalities",
                     kits["items"],
                     read_only=False,
-                    installed_label="Installed in Body",
-                    available_label="Available to install",
+                    installed_label="Installed modules",
+                    available_label="Ready to install",
                 ),
                 "installed": kits["installed"],
                 "available": kits["available"],
@@ -515,11 +516,22 @@ class Marketplace:
 
         return sorted(
             merged.values(),
-            key=lambda item: (
-                not item.get("installed", False),
-                item.get("display_name", item["name"]).lower(),
-            ),
+            key=self._sort_key,
         )
+
+    def _sort_key(self, item: dict[str, Any]) -> tuple[bool, bool, str]:
+        return (
+            not item.get("installed", False),
+            not self._is_personality_first(item),
+            item.get("display_name", item["name"]).lower(),
+        )
+
+    def _is_personality_first(self, item: dict[str, Any]) -> bool:
+        if item.get("category") != "kits_lumen":
+            return False
+        return "personality" in {
+            str(tag).strip().lower() for tag in item.get("tags", []) if str(tag).strip()
+        }
 
     def _merge_key(self, card: dict[str, Any]) -> str:
         return f"{card.get('category')}::{card.get('name', '').lower()}"

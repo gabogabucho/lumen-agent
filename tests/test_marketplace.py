@@ -191,6 +191,72 @@ class MarketplaceTests(unittest.TestCase):
         self.assertIn("kits_lumen", payload)
         self.assertEqual(payload["skills"]["items"][0]["name"], "notify")
 
+    def test_kits_lumen_personalities_sort_before_generic_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog_path = Path(tmp) / "index.yaml"
+            catalog_path.write_text(
+                yaml.dump(
+                    {
+                        "modules": [
+                            {
+                                "name": "zeta-generic",
+                                "display_name": "A Generic Module",
+                                "description": "Generic module.",
+                                "path": "kits/zeta-generic",
+                                "tags": ["productivity"],
+                            },
+                            {
+                                "name": "alpha-personality",
+                                "display_name": "Z Personality Pack",
+                                "description": "Personality module.",
+                                "path": "kits/alpha-personality",
+                                "tags": ["personality", "x-lumen"],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            catalog = Catalog(catalog_path)
+            marketplace = Marketplace(
+                catalog=catalog,
+                registry=self.registry,
+                connectors=self.connectors,
+                config={},
+            )
+
+            snapshot = marketplace.snapshot()
+
+        self.assertEqual(snapshot["tabs"][0]["key"], "kits_lumen")
+        self.assertEqual(snapshot["tabs"][0]["label"], "Modules & Personalities")
+        self.assertEqual(
+            [item["name"] for item in snapshot["kits_lumen"]["available"]],
+            ["alpha-personality", "zeta-generic"],
+        )
+        self.assertEqual(
+            [item["name"] for item in marketplace.kits_catalog()],
+            ["alpha-personality", "zeta-generic"],
+        )
+        self.assertIn("kits_lumen", snapshot)
+        self.assertIn("available", snapshot["kits_lumen"])
+        self.assertIn("installed", snapshot["kits_lumen"])
+
+    def test_dashboard_template_defaults_marketplace_to_modules_and_personalities(self):
+        template = (
+            Path(__file__).resolve().parents[1]
+            / "lumen"
+            / "channels"
+            / "templates"
+            / "dashboard.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("let currentMarketplaceTab = 'kits_lumen';", template)
+        self.assertIn("Modules &amp; Personalities", template)
+        self.assertLess(
+            template.index('id="tab-kits_lumen"'),
+            template.index('id="tab-skills"'),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

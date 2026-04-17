@@ -233,7 +233,7 @@
       <div class="flex items-center justify-between mb-6">
         <div>
           <h2 class="text-2xl font-bold text-white">{{ ui.marketplace | default('Marketplace') }}</h2>
-          <p class="text-sm text-gray-500 mt-1">What Lumen already is, what is in the Body, and what can still be connected or installed.</p>
+          <p class="text-sm text-gray-500 mt-1">What is already part of the agent, what is connected in the Body, and which modules or personalities can be added next.</p>
         </div>
         <label id="marketplace-upload-label" class="hidden bg-neo-accent/20 text-neo-accent px-4 py-2 rounded-lg text-sm font-medium hover:bg-neo-accent/30 transition-colors cursor-pointer">
           Upload ZIP
@@ -242,9 +242,9 @@
       </div>
 
       <div class="flex flex-wrap gap-2 mb-6" id="marketplace-tabs">
+        <button type="button" onclick="switchMarketplaceTab('kits_lumen')" id="tab-kits_lumen" class="marketplace-tab px-4 py-2 rounded-lg text-sm font-medium bg-white/5 text-gray-300 border border-neo-border">Modules &amp; Personalities</button>
         <button type="button" onclick="switchMarketplaceTab('skills')" id="tab-skills" class="marketplace-tab px-4 py-2 rounded-lg text-sm font-medium bg-white/5 text-gray-300 border border-neo-border">Skills</button>
         <button type="button" onclick="switchMarketplaceTab('mcps')" id="tab-mcps" class="marketplace-tab px-4 py-2 rounded-lg text-sm font-medium bg-white/5 text-gray-300 border border-neo-border">MCPs</button>
-        <button type="button" onclick="switchMarketplaceTab('kits_lumen')" id="tab-kits_lumen" class="marketplace-tab px-4 py-2 rounded-lg text-sm font-medium bg-white/5 text-gray-300 border border-neo-border">Kits Lumen</button>
       </div>
 
       <div class="bg-neo-card rounded-xl border border-neo-border p-4 mb-6">
@@ -518,7 +518,7 @@
       blocked: 'bg-red-500/10 text-red-300 border-red-500/20',
     };
     let marketplaceState = null;
-    let currentMarketplaceTab = 'skills';
+    let currentMarketplaceTab = 'kits_lumen';
 
     function switchMarketplaceTab(tab) {
       currentMarketplaceTab = tab;
@@ -624,21 +624,21 @@
       availableTitle.textContent = section.available_label || 'Available';
       noteEl.textContent = section.read_only
         ? 'Read-only discovery in this batch. Compatibility and feed data come from the server.'
-        : 'Only Kits Lumen can be installed or removed in this batch.';
+        : 'Modules and personalities from the local catalog can be installed or removed in this batch.';
       uploadLabel.classList.toggle('hidden', !isKits);
 
       renderMarketplaceList(
         installedEl,
         section.installed || [],
         isKits ? renderKitCard : item => renderReadOnlyCard(item, 'No description available.'),
-        isKits ? 'No Kits Lumen are installed yet.' : 'Nothing from this tab is currently in the Body.',
+        isKits ? 'No modules or personalities are installed yet.' : 'Nothing from this tab is currently in the Body.',
         false,
       );
       renderMarketplaceList(
         availableEl,
         section.available || [],
         isKits ? renderKitCard : item => renderReadOnlyCard(item, 'No description available.'),
-        isKits ? 'No more Kits Lumen available.' : 'No additional entries were discovered.',
+        isKits ? 'No more modules or personalities are available right now.' : 'No additional entries were discovered.',
         true,
       );
     }
