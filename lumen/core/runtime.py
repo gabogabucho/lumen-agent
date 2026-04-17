@@ -17,6 +17,7 @@ from lumen.core.handlers import register_builtin_handlers
 from lumen.core.mcp import MCPManager
 from lumen.core.memory import Memory
 from lumen.core.marketplace import Marketplace
+from lumen.core.module_manifest import load_module_manifest
 from lumen.core.personality import Personality
 from lumen.core.registry import Registry
 
@@ -74,7 +75,12 @@ async def bootstrap_runtime(
 
     consciousness = Consciousness()
     lang = config.get("language", "en")
-    personality = Personality(pkg_dir / "locales" / lang / "personality.yaml")
+    locale_personality_path = pkg_dir / "locales" / lang / "personality.yaml"
+    active_personality_module = _resolve_active_personality_module(config, pkg_dir)
+    personality_path = _resolve_personality_path(
+        active_personality_module, locale_personality_path
+    )
+    personality = Personality(personality_path)
     memory = Memory(lumen_dir / "memory.db")
 
     connectors = ConnectorRegistry()
@@ -116,6 +122,9 @@ async def bootstrap_runtime(
 
     flows_dir = pkg_dir / "locales" / lang / "flows"
     brain.load_flows(flows_dir)
+    onboarding_flow_path = _resolve_module_onboarding_flow(active_personality_module)
+    if onboarding_flow_path is not None:
+        brain.load_flows(onboarding_flow_path)
 
     ui_path = pkg_dir / "locales" / lang / "ui.yaml"
     locale = {}
@@ -123,3 +132,55 @@ async def bootstrap_runtime(
         locale = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
 
     return RuntimeBootstrap(brain=brain, locale=locale, config=config)
+
+
+def _resolve_active_personality_module(config: dict, pkg_dir: Path) -> dict | None:
+    module_name = config.get("active_personality")
+    if not module_name:
+        return None
+
+    module_dir = pkg_dir / "modules" / str(module_name)
+    manifest_path, manifest = load_module_manifest(module_dir)
+    if manifest_path is None:
+        return None
+
+    tags = manifest.get("tags") or []
+    if "personality" not in tags:
+        return None
+
+    return {"dir": module_dir, "manifest": manifest}
+
+
+def _resolve_personality_path(
+    active_module: dict | None, locale_personality_path: Path
+) -> Path:
+    if active_module is None:
+        return locale_personality_path
+
+    personality_path = _resolve_module_asset_path(
+        active_module["dir"], active_module["manifest"].get("personality")
+    )
+    return personality_path or locale_personality_path
+
+
+def _resolve_module_onboarding_flow(active_module: dict | None) -> Path | None:
+    if active_module is None:
+        return None
+
+    return _resolve_module_asset_path(
+        active_module["dir"], active_module["manifest"].get("onboarding_flow")
+    )
+
+
+def _resolve_module_asset_path(
+    module_dir: Path, relative_path: str | None
+) -> Path | None:
+    if not relative_path:
+        return None
+
+    candidate = (module_dir / relative_path).resolve()
+    module_root = module_dir.resolve()
+    if candidate != module_root and module_root not in candidate.parents:
+        return None
+
+    return candidate if candidate.exists() else None

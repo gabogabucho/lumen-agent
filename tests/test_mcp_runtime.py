@@ -18,6 +18,141 @@ FAKE_SERVER = Path(__file__).parent / "fixtures" / "fake_mcp_server.py"
 
 
 class MCPRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bootstrap_uses_locale_personality_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = await bootstrap_runtime(
+                {"language": "en", "model": "deepseek/deepseek-chat"},
+                pkg_dir=self._make_runtime_pkg(Path(tmp)),
+                lumen_dir=Path(tmp) / "runtime",
+                active_channels=["web"],
+            )
+
+            try:
+                self.assertEqual(
+                    runtime.brain.personality.current()["identity"]["name"],
+                    "Locale Lumen",
+                )
+                self.assertEqual(
+                    [flow["intent"] for flow in runtime.brain.flows],
+                    ["locale-default"],
+                )
+            finally:
+                await runtime.brain.memory.close()
+
+    async def test_bootstrap_uses_active_personality_module_when_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg_dir = self._make_runtime_pkg(Path(tmp))
+            module_dir = pkg_dir / "modules" / "demo-personality"
+            (module_dir / "flows").mkdir(parents=True)
+            (module_dir / "module.yaml").write_text(
+                yaml.dump(
+                    {
+                        "name": "demo-personality",
+                        "display_name": "Demo Personality",
+                        "description": "Overrides locale personality",
+                        "tags": ["x-lumen", "personality"],
+                        "personality": "personality.yaml",
+                        "onboarding_flow": "flows/onboarding.yaml",
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (module_dir / "personality.yaml").write_text(
+                yaml.dump(
+                    {
+                        "identity": {
+                            "name": "Module Persona",
+                            "role": "Module Assistant",
+                        }
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (module_dir / "flows" / "onboarding.yaml").write_text(
+                yaml.dump(
+                    {
+                        "intent": "module-onboarding",
+                        "triggers": ["start setup"],
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            runtime = await bootstrap_runtime(
+                {
+                    "language": "en",
+                    "model": "deepseek/deepseek-chat",
+                    "active_personality": "demo-personality",
+                },
+                pkg_dir=pkg_dir,
+                lumen_dir=Path(tmp) / "runtime",
+                active_channels=["web"],
+            )
+
+            try:
+                self.assertEqual(
+                    runtime.brain.personality.current()["identity"]["name"],
+                    "Module Persona",
+                )
+                self.assertEqual(
+                    [flow["intent"] for flow in runtime.brain.flows],
+                    ["locale-default", "module-onboarding"],
+                )
+            finally:
+                await runtime.brain.memory.close()
+
+    async def test_bootstrap_falls_back_when_active_personality_is_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg_dir = self._make_runtime_pkg(Path(tmp))
+            module_dir = pkg_dir / "modules" / "not-a-personality"
+            module_dir.mkdir(parents=True)
+            (module_dir / "module.yaml").write_text(
+                yaml.dump(
+                    {
+                        "name": "not-a-personality",
+                        "display_name": "Tool Module",
+                        "description": "Missing personality tag",
+                        "tags": ["tools"],
+                        "personality": "personality.yaml",
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (module_dir / "personality.yaml").write_text(
+                yaml.dump(
+                    {"identity": {"name": "Should Not Load", "role": "Ignored"}},
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            runtime = await bootstrap_runtime(
+                {
+                    "language": "en",
+                    "model": "deepseek/deepseek-chat",
+                    "active_personality": "not-a-personality",
+                },
+                pkg_dir=pkg_dir,
+                lumen_dir=Path(tmp) / "runtime",
+                active_channels=["web"],
+            )
+
+            try:
+                self.assertEqual(
+                    runtime.brain.personality.current()["identity"]["name"],
+                    "Locale Lumen",
+                )
+                self.assertEqual(
+                    [flow["intent"] for flow in runtime.brain.flows],
+                    ["locale-default"],
+                )
+            finally:
+                await runtime.brain.memory.close()
+
     async def test_catalog_install_uses_entry_path_and_preserves_catalog_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)
@@ -214,3 +349,26 @@ class MCPRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _write_yaml(path: Path, payload: dict):
+    path.write_text(yaml.dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _make_runtime_pkg(temp_root: Path) -> Path:
+    pkg_dir = temp_root / "pkg"
+    (pkg_dir / "locales" / "en" / "flows").mkdir(parents=True)
+    (pkg_dir / "catalog").mkdir(parents=True)
+    _write_yaml(
+        pkg_dir / "locales" / "en" / "personality.yaml",
+        {"identity": {"name": "Locale Lumen", "role": "Assistant"}},
+    )
+    _write_yaml(
+        pkg_dir / "locales" / "en" / "flows" / "default.yaml",
+        {"intent": "locale-default", "triggers": ["hello"]},
+    )
+    _write_yaml(pkg_dir / "catalog" / "index.yaml", {"modules": []})
+    return pkg_dir
+
+
+MCPRuntimeTests._make_runtime_pkg = staticmethod(_make_runtime_pkg)

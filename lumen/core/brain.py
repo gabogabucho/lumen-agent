@@ -489,12 +489,20 @@ class Brain:
         return {"message": final_msg, "tool_calls": all_tool_calls}
 
     def load_flows(self, flows_dir: str | Path):
-        """Load flow definitions from a directory of YAML files."""
+        """Load flow definitions from a YAML file or directory."""
         flows_path = Path(flows_dir)
         if not flows_path.exists():
             return
+
+        if flows_path.is_file():
+            self._load_flow_file(flows_path)
+            return
+
         for flow_file in flows_path.glob("*.yaml"):
-            with open(flow_file, encoding="utf-8") as f:
-                flow = yaml.safe_load(f)
-                if flow:
-                    self.flows.append(flow)
+            self._load_flow_file(flow_file)
+
+    def _load_flow_file(self, flow_file: Path):
+        with open(flow_file, encoding="utf-8") as f:
+            flow = yaml.safe_load(f)
+            if flow:
+                self.flows.append(flow)
