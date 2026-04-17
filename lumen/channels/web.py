@@ -331,6 +331,41 @@ def _pop_oauth_state(state: str) -> dict | None:
         return _oauth_state_store.pop(state, None)
 
 
+def _normalize_openrouter_oauth_error(
+    error: str | None = None, exc: Exception | None = None
+) -> str:
+    normalized = str(error or "").strip().lower()
+    if normalized in {
+        "access_denied",
+        "cancelled",
+        "canceled",
+        "cancel",
+        "user_cancelled",
+        "user_canceled",
+        "canceled_auth",
+    }:
+        return "canceled_auth"
+    if normalized in {
+        "invalid_or_expired_state",
+        "expired_state",
+        "invalid_state",
+    }:
+        return "invalid_or_expired_state"
+    if normalized in {
+        "missing_code_or_state",
+        "missing_code",
+        "missing_state",
+    }:
+        return "missing_code_or_state"
+
+    if exc is not None:
+        details = str(exc).strip().lower()
+        if "openrouter key exchange failed" in details:
+            return "exchange_failed"
+
+    return "oauth_failed"
+
+
 def _exchange_openrouter_code(code: str, code_verifier: str) -> str:
     payload = json.dumps(
         {
@@ -510,13 +545,16 @@ async def openrouter_oauth_callback(
 ):
     """Complete a local-only OpenRouter PKCE flow and save config."""
     if error:
-        return RedirectResponse(url=f"/setup?oauth_error={error}")
+        normalized = _normalize_openrouter_oauth_error(error=error)
+        return RedirectResponse(url=f"/setup?oauth_error={normalized}")
     if not code or not state:
-        return RedirectResponse(url="/setup?oauth_error=missing_code_or_state")
+        normalized = _normalize_openrouter_oauth_error(error="missing_code_or_state")
+        return RedirectResponse(url=f"/setup?oauth_error={normalized}")
 
     oauth_state = _pop_oauth_state(state)
     if not oauth_state:
-        return RedirectResponse(url="/setup?oauth_error=invalid_or_expired_state")
+        normalized = _normalize_openrouter_oauth_error(error="invalid_or_expired_state")
+        return RedirectResponse(url=f"/setup?oauth_error={normalized}")
 
     try:
         api_key = _exchange_openrouter_code(code, oauth_state["code_verifier"])
@@ -541,7 +579,8 @@ async def openrouter_oauth_callback(
         if _brain and _brain.memory._db is None:
             await _brain.memory.init()
     except Exception as exc:
-        return RedirectResponse(url=f"/setup?oauth_error={type(exc).__name__}")
+        normalized = _normalize_openrouter_oauth_error(exc=exc)
+        return RedirectResponse(url=f"/setup?oauth_error={normalized}")
 
     return RedirectResponse(url="/")
 

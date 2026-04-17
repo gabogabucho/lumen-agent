@@ -123,6 +123,68 @@ class OpenRouterOAuthTests(unittest.TestCase):
         self.assertEqual(config["mcp"], {"servers": {"x": {}}})
         self.assertNotIn("state-123", web._oauth_state_store)
 
+    def test_openrouter_callback_normalizes_canceled_auth_error(self):
+        response = self.client.get(
+            "/oauth/openrouter/callback",
+            params={"error": "access_denied"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(
+            response.headers["location"], "/setup?oauth_error=canceled_auth"
+        )
+
+    def test_openrouter_callback_normalizes_missing_code_or_state_error(self):
+        response = self.client.get(
+            "/oauth/openrouter/callback",
+            params={"state": "state-123"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(
+            response.headers["location"], "/setup?oauth_error=missing_code_or_state"
+        )
+
+    def test_openrouter_callback_normalizes_invalid_or_expired_state_error(self):
+        response = self.client.get(
+            "/oauth/openrouter/callback",
+            params={"code": "code-123", "state": "missing-state"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(
+            response.headers["location"],
+            "/setup?oauth_error=invalid_or_expired_state",
+        )
+
+    def test_openrouter_callback_normalizes_exchange_failure_error(self):
+        web._oauth_state_store["state-123"] = {
+            "code_verifier": "verifier-123",
+            "model": "deepseek/deepseek-chat:free",
+            "language": "en",
+            "port": 3000,
+            "expires_at": 9999999999,
+        }
+
+        with patch.object(
+            web,
+            "_exchange_openrouter_code",
+            side_effect=RuntimeError("OpenRouter key exchange failed: network error"),
+        ):
+            response = self.client.get(
+                "/oauth/openrouter/callback",
+                params={"code": "code-123", "state": "state-123"},
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(
+            response.headers["location"], "/setup?oauth_error=exchange_failed"
+        )
+
     def test_api_setup_merge_preserves_unrelated_config(self):
         web.CONFIG_PATH.write_text(
             yaml.dump(

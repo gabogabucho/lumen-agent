@@ -347,7 +347,7 @@
         <circle cx="110" cy="120" r="2.5" fill="#3b82f6" opacity="0.7"/>
       </svg>
       <h1>Welcome to <span>Lumen</span></h1>
-      <p>Let's set up your agent in 4 steps.</p>
+      <p>Get your local agent ready in 4 quick steps.</p>
     </div>
 
     <!-- Progress -->
@@ -361,7 +361,7 @@
     <!-- Step 1: Entry path -->
     <div class="step active" id="step-0">
       <div class="step-label">Step 1 of 4</div>
-      <div class="step-title">How are you starting?</div>
+      <div class="step-title">How would you like to start?</div>
 
       <div class="entry-grid">
         <div class="entry-card" data-entry-path="uso_personal" onclick="selectEntryPath(this)">
@@ -402,7 +402,7 @@
         <div class="lang-card" data-lang="es" onclick="selectLang(this)">
           <div class="flag">ES</div>
           <div class="name">Spanish</div>
-          <div class="native">Espanol</div>
+          <div class="native">Español</div>
         </div>
       </div>
 
@@ -415,30 +415,30 @@
     <!-- Step 3: Model -->
     <div class="step" id="step-2">
       <div class="step-label">Step 3 of 4</div>
-      <div class="step-title">Choose your model</div>
+      <div class="step-title">Choose your provider</div>
 
       <div class="provider-grid">
-        <div class="provider-card" data-provider="deepseek" data-model="deepseek/deepseek-chat" data-env="DEEPSEEK_API_KEY" onclick="selectProvider(this)">
+        <div class="provider-card" data-provider="deepseek" data-model="deepseek/deepseek-chat" data-env="DEEPSEEK_API_KEY" data-key-label="DeepSeek API key" onclick="selectProvider(this)">
           <div class="provider-name">DeepSeek</div>
           <div class="provider-model">deepseek-chat</div>
           <span class="provider-tag tag-recommended">Recommended</span>
         </div>
-        <div class="provider-card" data-provider="openrouter" data-model="" data-env="OPENROUTER_API_KEY" onclick="selectProvider(this)">
+        <div class="provider-card" data-provider="openrouter" data-model="" data-env="OPENROUTER_API_KEY" data-key-label="OpenRouter connection" onclick="selectProvider(this)">
           <div class="provider-name">OpenRouter</div>
-          <div class="provider-model">OAuth + free curated models</div>
-          <span class="provider-tag tag-recommended">One click</span>
+          <div class="provider-model">Browser sign-in + curated models</div>
+          <span class="provider-tag tag-recommended">Authorize in browser</span>
         </div>
-        <div class="provider-card" data-provider="openai" data-model="gpt-4o-mini" data-env="OPENAI_API_KEY" onclick="selectProvider(this)">
+        <div class="provider-card" data-provider="openai" data-model="gpt-4o-mini" data-env="OPENAI_API_KEY" data-key-label="OpenAI API key" onclick="selectProvider(this)">
           <div class="provider-name">OpenAI</div>
           <div class="provider-model">gpt-4o-mini</div>
           <span class="provider-tag tag-premium">Popular</span>
         </div>
-        <div class="provider-card" data-provider="anthropic" data-model="claude-sonnet-4-20250514" data-env="ANTHROPIC_API_KEY" onclick="selectProvider(this)">
+        <div class="provider-card" data-provider="anthropic" data-model="claude-sonnet-4-20250514" data-env="ANTHROPIC_API_KEY" data-key-label="Anthropic API key" onclick="selectProvider(this)">
           <div class="provider-name">Anthropic</div>
           <div class="provider-model">claude-sonnet-4</div>
           <span class="provider-tag tag-premium">Premium</span>
         </div>
-        <div class="provider-card" data-provider="ollama" data-model="ollama/llama3" data-env="" onclick="selectProvider(this)">
+        <div class="provider-card" data-provider="ollama" data-model="ollama/llama3" data-env="" data-key-label="" onclick="selectProvider(this)">
           <div class="provider-name">Ollama</div>
           <div class="provider-model">llama3 (local)</div>
           <span class="provider-tag tag-local">No API key</span>
@@ -454,11 +454,11 @@
     <!-- Step 4: API Key -->
     <div class="step" id="step-3">
       <div class="step-label">Step 4 of 4</div>
-      <div class="step-title" id="key-title">Enter your API key</div>
+      <div class="step-title" id="key-title">Add your API key</div>
 
       <div id="openrouter-model-section" style="display:none; margin-bottom:24px;">
         <div class="input-group" style="margin-bottom:12px;">
-          <label>Choose a free OpenRouter model</label>
+          <label>Choose an OpenRouter model</label>
         </div>
         <div class="provider-grid" style="margin-bottom:16px;">
           <div class="provider-card" data-openrouter-model="meta-llama/llama-3.3-70b-instruct:free" onclick="selectOpenRouterModel(this)">
@@ -479,7 +479,7 @@
           </div>
         </div>
         <p style="color:#9ca3af; font-size:14px; line-height:1.5;">
-          We'll send you to OpenRouter to authorize access. No manual API key paste needed.
+          We'll open OpenRouter in your browser so you can approve this local setup. No manual key paste is needed here.
         </p>
       </div>
 
@@ -508,7 +508,18 @@
 
   <script>
     let currentStep = 0;
-    let config = { entry_path: '', active_personality: '', language: '', provider: '', model: '', api_key_env: '', api_key: '' };
+    let config = { entry_path: '', active_personality: '', language: '', provider: '', model: '', api_key_env: '', api_key: '', key_label: '' };
+
+    function getOAuthErrorMessage(code) {
+      const messages = {
+        canceled_auth: 'OpenRouter authorization was canceled. You can try again when you\'re ready.',
+        invalid_or_expired_state: 'That OpenRouter sign-in link expired or is no longer valid. Please start again.',
+        missing_code_or_state: 'OpenRouter did not return the required sign-in details. Please try again.',
+        exchange_failed: 'Lumen could not finish the OpenRouter connection. Check your network and try again.',
+        oauth_failed: 'OpenRouter connection failed. Please try again.',
+      };
+      return messages[code] || messages.oauth_failed;
+    }
 
     async function selectEntryPath(el) {
       document.querySelectorAll('.entry-card').forEach(c => c.classList.remove('selected'));
@@ -581,6 +592,7 @@
       config.provider = el.dataset.provider || '';
       config.model = el.dataset.model;
       config.api_key_env = el.dataset.env;
+      config.key_label = el.dataset.keyLabel || 'API key';
       document.getElementById('btn-next-2').disabled = false;
     }
 
@@ -609,7 +621,7 @@
         if (isOpenRouter) {
           document.getElementById('key-section').style.display = 'none';
           document.getElementById('no-key-section').style.display = 'none';
-          document.getElementById('key-title').textContent = 'Pick your free OpenRouter model';
+          document.getElementById('key-title').textContent = 'Authorize OpenRouter';
         } else if (!config.api_key_env) {
           document.getElementById('key-section').style.display = 'none';
           document.getElementById('no-key-section').style.display = 'block';
@@ -617,8 +629,8 @@
         } else {
           document.getElementById('key-section').style.display = 'block';
           document.getElementById('no-key-section').style.display = 'none';
-          document.getElementById('key-title').textContent = 'Enter your API key';
-          document.getElementById('key-label').textContent = config.api_key_env;
+          document.getElementById('key-title').textContent = 'Add your API key';
+          document.getElementById('key-label').textContent = config.key_label || 'API key';
           document.getElementById('api-key-input').placeholder =
             config.api_key_env.includes('DEEPSEEK') ? 'sk-...' :
             config.api_key_env.includes('OPENAI') ? 'sk-...' :
@@ -714,7 +726,7 @@
     const oauthError = new URLSearchParams(window.location.search).get('oauth_error');
     if (oauthError) {
       const errEl = document.getElementById('error-msg');
-      errEl.textContent = 'OpenRouter connection failed. Please try again.';
+      errEl.textContent = getOAuthErrorMessage(oauthError);
       errEl.style.display = 'block';
     }
   </script>

@@ -59,17 +59,20 @@ def install():
     )
 
     model_map = {
-        "1": ("deepseek/deepseek-chat", "DEEPSEEK_API_KEY"),
-        "2": ("gpt-4o-mini", "OPENAI_API_KEY"),
-        "3": ("claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"),
+        "1": ("deepseek/deepseek-chat", "DEEPSEEK_API_KEY", "DeepSeek API key"),
+        "2": ("gpt-4o-mini", "OPENAI_API_KEY", "OpenAI API key"),
+        "3": ("claude-sonnet-4-20250514", "ANTHROPIC_API_KEY", "Anthropic API key"),
         "4": ("ollama/llama3", None),
     }
 
-    model, env_key = model_map[provider]
+    model_info = model_map[provider]
+    model = model_info[0]
+    env_key = model_info[1]
+    key_label = model_info[2] if len(model_info) > 2 else "API key"
 
     api_key = None
     if env_key:
-        api_key = Prompt.ask(f"\n{env_key}")
+        api_key = Prompt.ask(f"\n{key_label}")
 
     # Port
     port = int(Prompt.ask("\nDashboard port", default="3000"))
