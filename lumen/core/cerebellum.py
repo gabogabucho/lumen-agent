@@ -116,6 +116,7 @@ def normalize_openclaw_metadata(
         metadata={
             "path": path,
             "activation": metadata.get("activation"),
+            "min_capability": metadata.get("min_capability", "tier-1"),
             "metadata_keys": sorted(metadata.keys()),
         },
     )

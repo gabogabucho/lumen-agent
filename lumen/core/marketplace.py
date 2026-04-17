@@ -419,7 +419,10 @@ class Marketplace:
                 raw.get("tool_refs") or raw.get("required_tools") or raw.get("tools")
             ),
             installed=False,
-            metadata={"remote_source": source_name},
+            metadata={
+                "remote_source": source_name,
+                "min_capability": raw.get("min_capability", "tier-1"),
+            },
         )
         compatibility = self._remote_compatibility(artifact, runtime_surface)
         return self._artifact_card(
