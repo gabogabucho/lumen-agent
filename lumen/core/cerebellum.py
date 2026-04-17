@@ -1,4 +1,4 @@
-"""Cerebelo — read-only normalization and compatibility summaries.
+"""Cerebellum — read-only normalization and compatibility summaries.
 
 This layer stays outside the Brain execution loop. It only normalizes metadata,
 maps declared requirements against the concrete runtime surface, and produces

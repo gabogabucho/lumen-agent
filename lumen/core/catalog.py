@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from lumen.core.cerebelo import compatibility_for_catalog_entry
+from lumen.core.cerebellum import compatibility_for_catalog_entry
 
 
 class Catalog:

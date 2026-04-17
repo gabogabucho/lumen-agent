@@ -1,6 +1,6 @@
 import unittest
 
-from lumen.core.cerebelo import (
+from lumen.core.cerebellum import (
     COMPAT_BLOCKED,
     COMPAT_INSTALLABLE,
     COMPAT_PARTIAL,
@@ -20,7 +20,7 @@ async def _noop(**_kwargs):
     return {"ok": True}
 
 
-class CerebeloTests(unittest.TestCase):
+class CerebellumTests(unittest.TestCase):
     def test_normalize_module_manifest_handles_schema_drift(self):
         artifact = normalize_module_manifest(
             {

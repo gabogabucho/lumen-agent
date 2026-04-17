@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 
-from lumen.core.cerebelo import (
+from lumen.core.cerebellum import (
     annotate_registry,
     normalize_agent_skill,
     normalize_module_manifest,

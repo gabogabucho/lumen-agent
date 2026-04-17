@@ -14,7 +14,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from lumen.core.catalog import Catalog
-from lumen.core.cerebelo import (
+from lumen.core.cerebellum import (
     COMPAT_BLOCKED,
     COMPAT_INSTALLABLE,
     COMPAT_PARTIAL,
