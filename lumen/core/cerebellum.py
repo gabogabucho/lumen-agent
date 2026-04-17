@@ -11,6 +11,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lumen.core.connectors import ConnectorRegistry
+from lumen.core.model_tiers import (
+    MODEL_TIER_UNKNOWN,
+    is_model_tier_below_minimum,
+    normalize_capability_tier,
+    resolve_configured_model_tier,
+)
 from lumen.core.registry import Capability, CapabilityKind, CapabilityStatus, Registry
 
 
@@ -197,8 +203,12 @@ def normalize_requires(payload: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def build_runtime_surface(
-    connectors: ConnectorRegistry, registry: Registry | None = None
+    connectors: ConnectorRegistry,
+    registry: Registry | None = None,
+    *,
+    model: str | None = None,
 ) -> dict[str, Any]:
+    resolved_model_tier = resolve_configured_model_tier(model)
     surface: dict[str, Any] = {
         "tools": {},
         "connectors": {},
@@ -206,6 +216,11 @@ def build_runtime_surface(
         "channels": {},
         "skills": {},
         "modules": {},
+        "model": {
+            "name": model,
+            "tier": resolved_model_tier,
+            "resolved": resolved_model_tier != MODEL_TIER_UNKNOWN,
+        },
     }
 
     for conn_info in connectors.list():
@@ -365,10 +380,21 @@ def calculate_compatibility(
             "normalized legacy field 'channels_supported' into requires.channels"
         )
 
+    runtime_model = runtime_surface.get("model") or {}
+    runtime_model_tier = runtime_model.get("tier", MODEL_TIER_UNKNOWN)
+    min_capability = normalize_capability_tier(
+        artifact.metadata.get("min_capability", "tier-1")
+    )
+    if is_model_tier_below_minimum(runtime_model_tier, min_capability):
+        model_name = runtime_model.get("name") or "configured model"
+        warnings.append(
+            f"configured model '{model_name}' resolves to {runtime_model_tier} but '{artifact.name}' recommends {min_capability}"
+        )
+
     status = COMPAT_READY
     if reasons:
         status = COMPAT_BLOCKED
-    elif degraded or warnings:
+    elif degraded:
         status = COMPAT_PARTIAL
     elif artifact.kind == "module" and not artifact.installed:
         status = COMPAT_INSTALLABLE
@@ -382,8 +408,13 @@ def calculate_compatibility(
     }
 
 
-def annotate_registry(registry: Registry, connectors: ConnectorRegistry) -> None:
-    runtime_surface = build_runtime_surface(connectors, registry)
+def annotate_registry(
+    registry: Registry,
+    connectors: ConnectorRegistry,
+    *,
+    model: str | None = None,
+) -> None:
+    runtime_surface = build_runtime_surface(connectors, registry, model=model)
     for capability in registry.all():
         artifact = normalize_capability(capability)
         if artifact is None:
@@ -394,10 +425,14 @@ def annotate_registry(registry: Registry, connectors: ConnectorRegistry) -> None
 
 
 def compatibility_for_catalog_entry(
-    entry: dict[str, Any], registry: Registry, connectors: ConnectorRegistry
+    entry: dict[str, Any],
+    registry: Registry,
+    connectors: ConnectorRegistry,
+    *,
+    model: str | None = None,
 ) -> dict[str, Any]:
     artifact = normalize_catalog_entry(entry)
-    runtime_surface = build_runtime_surface(connectors, registry)
+    runtime_surface = build_runtime_surface(connectors, registry, model=model)
     return calculate_compatibility(artifact, runtime_surface)
 
 

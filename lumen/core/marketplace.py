@@ -62,7 +62,11 @@ class Marketplace:
         self._remote_cache_at = 0.0
 
     def snapshot(self) -> dict[str, Any]:
-        runtime_surface = build_runtime_surface(self.connectors, self.registry)
+        runtime_surface = build_runtime_surface(
+            self.connectors,
+            self.registry,
+            model=self.config.get("model"),
+        )
         remote = self._load_remote(runtime_surface)
 
         skills = self._merge_cards(
@@ -176,6 +180,7 @@ class Marketplace:
             for entry in self.catalog.list_all(
                 registry=self.registry,
                 connectors=self.connectors,
+                model=self.config.get("model"),
             )
         ]
         runtime_cards = [
@@ -228,10 +233,9 @@ class Marketplace:
         runtime_surface: dict[str, Any],
     ) -> dict[str, Any]:
         compatibility = capability.metadata.get("cerebelo") or {}
-        if not compatibility:
-            artifact = normalize_capability(capability)
-            if artifact is not None:
-                compatibility = calculate_compatibility(artifact, runtime_surface)
+        artifact = normalize_capability(capability)
+        if artifact is not None:
+            compatibility = calculate_compatibility(artifact, runtime_surface)
         compatibility = self._with_badge(compatibility)
 
         kind = (

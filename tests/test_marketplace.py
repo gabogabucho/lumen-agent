@@ -191,6 +191,42 @@ class MarketplaceTests(unittest.TestCase):
         self.assertIn("kits_lumen", payload)
         self.assertEqual(payload["skills"]["items"][0]["name"], "notify")
 
+    def test_marketplace_surfaces_advisory_model_tier_warnings_without_blocking(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog_path = Path(tmp) / "index.yaml"
+            catalog_path.write_text(
+                yaml.dump(
+                    {
+                        "modules": [
+                            {
+                                "name": "deep-research",
+                                "display_name": "Deep Research",
+                                "description": "Tiered module.",
+                                "min_capability": "tier-3",
+                                "path": "kits/deep-research",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            catalog = Catalog(catalog_path)
+            marketplace = StubMarketplace(
+                catalog=catalog,
+                registry=self.registry,
+                connectors=self.connectors,
+                config={"model": "deepseek/deepseek-chat"},
+            )
+
+            snapshot = marketplace.snapshot()
+
+        module_card = snapshot["kits_lumen"]["available"][0]
+        self.assertEqual(module_card["compatibility"]["status"], "installable")
+        self.assertIn(
+            "recommends tier-3",
+            module_card["compatibility"]["warnings"][0],
+        )
+
     def test_kits_lumen_personalities_sort_before_generic_modules(self):
         with tempfile.TemporaryDirectory() as tmp:
             catalog_path = Path(tmp) / "index.yaml"

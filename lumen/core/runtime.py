@@ -46,6 +46,7 @@ def refresh_runtime_registry(
         pkg_dir=pkg_dir,
         connectors=brain.connectors,
         active_channels=active_channels or ["web"],
+        model=getattr(brain, "model", None),
         mcp_config=(
             brain.mcp_manager.discovery_payload()
             if getattr(brain, "mcp_manager", None)
@@ -123,6 +124,7 @@ async def bootstrap_runtime(
         pkg_dir=pkg_dir,
         connectors=connectors,
         active_channels=active_channels,
+        model=config.get("model"),
         mcp_config=mcp_manager.discovery_payload(),
     )
 

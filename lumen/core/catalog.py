@@ -30,7 +30,9 @@ class Catalog:
     def modules(self) -> list[dict]:
         return self._modules
 
-    def search(self, query: str, *, registry=None, connectors=None) -> list[dict]:
+    def search(
+        self, query: str, *, registry=None, connectors=None, model=None
+    ) -> list[dict]:
         """Search catalog by name, description, tags, or fills_gaps."""
         query_lower = query.lower()
         results = []
@@ -53,30 +55,47 @@ class Catalog:
                 results.append(
                     (
                         score,
-                        self._decorate(mod, registry=registry, connectors=connectors),
+                        self._decorate(
+                            mod,
+                            registry=registry,
+                            connectors=connectors,
+                            model=model,
+                        ),
                     )
                 )
         results.sort(key=lambda x: x[0], reverse=True)
         return [mod for _, mod in results]
 
     def find_for_gap(
-        self, gap_description: str, *, registry=None, connectors=None
+        self, gap_description: str, *, registry=None, connectors=None, model=None
     ) -> list[dict]:
         """Find modules that could fill a specific capability gap.
 
         This is the key method: Lumen detects it can't do something,
         describes the gap, and this method finds relevant modules.
         """
-        return self.search(gap_description, registry=registry, connectors=connectors)
+        return self.search(
+            gap_description,
+            registry=registry,
+            connectors=connectors,
+            model=model,
+        )
 
-    def get(self, name: str, *, registry=None, connectors=None) -> dict | None:
+    def get(
+        self, name: str, *, registry=None, connectors=None, model=None
+    ) -> dict | None:
         """Get a module by name."""
         for mod in self._modules:
             if mod["name"] == name:
-                return self._decorate(mod, registry=registry, connectors=connectors)
+                return self._decorate(
+                    mod,
+                    registry=registry,
+                    connectors=connectors,
+                    model=model,
+                )
         return None
 
-    def list_all(self, *, registry=None, connectors=None) -> list[dict]:
+    def list_all(self, *, registry=None, connectors=None, model=None) -> list[dict]:
         """List all available modules."""
         return [
             self._decorate(
@@ -95,12 +114,18 @@ class Catalog:
                 },
                 registry=registry,
                 connectors=connectors,
+                model=model,
             )
             for m in self._modules
         ]
 
     def as_context(
-        self, installed_names: set[str] | None = None, *, registry=None, connectors=None
+        self,
+        installed_names: set[str] | None = None,
+        *,
+        registry=None,
+        connectors=None,
+        model=None,
     ) -> str:
         """Format catalog for the LLM prompt.
 
@@ -109,7 +134,7 @@ class Catalog:
         """
         installed = installed_names or set()
         available = [
-            self._decorate(m, registry=registry, connectors=connectors)
+            self._decorate(m, registry=registry, connectors=connectors, model=model)
             for m in self._modules
             if m["name"] not in installed
         ]
@@ -135,12 +160,15 @@ class Catalog:
             )
         return "\n".join(lines)
 
-    def _decorate(self, module: dict, *, registry=None, connectors=None) -> dict:
+    def _decorate(
+        self, module: dict, *, registry=None, connectors=None, model=None
+    ) -> dict:
         item = dict(module)
         if registry is not None and connectors is not None:
             item["compatibility"] = compatibility_for_catalog_entry(
                 item,
                 registry,
                 connectors,
+                model=model,
             )
         return item

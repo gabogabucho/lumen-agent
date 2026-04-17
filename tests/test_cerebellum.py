@@ -13,6 +13,10 @@ from lumen.core.cerebellum import (
     normalize_openclaw_metadata,
 )
 from lumen.core.connectors import Connector, ConnectorRegistry
+from lumen.core.model_tiers import (
+    MODEL_TIER_UNKNOWN,
+    resolve_configured_model_tier,
+)
 from lumen.core.registry import Capability, CapabilityKind, CapabilityStatus, Registry
 
 
@@ -164,6 +168,60 @@ class CerebellumTests(unittest.TestCase):
 
         self.assertIsNotNone(annotated)
         self.assertEqual(annotated.metadata["cerebelo"]["status"], COMPAT_READY)
+
+    def test_model_tier_resolver_fails_safe_for_unknown_models(self):
+        self.assertEqual(
+            resolve_configured_model_tier("claude-sonnet-4-20250514"), "tier-3"
+        )
+        self.assertEqual(
+            resolve_configured_model_tier("meta-llama/llama-3.3-70b-instruct:free"),
+            "tier-2",
+        )
+        self.assertEqual(
+            resolve_configured_model_tier("custom/my-own-model"), MODEL_TIER_UNKNOWN
+        )
+
+    def test_compatibility_warns_when_configured_model_tier_is_below_min_capability(
+        self,
+    ):
+        artifact = normalize_module_manifest(
+            {
+                "name": "deep-research",
+                "description": "Research helper",
+                "min_capability": "tier-3",
+            },
+            installed=False,
+            source_type="catalog_entry",
+        )
+
+        compatibility = calculate_compatibility(
+            artifact,
+            build_runtime_surface(
+                ConnectorRegistry(),
+                model="deepseek/deepseek-chat",
+            ),
+        )
+
+        self.assertEqual(compatibility["status"], COMPAT_INSTALLABLE)
+        self.assertIn("recommends tier-3", compatibility["warnings"][0])
+
+    def test_unknown_model_tier_does_not_emit_advisory_warning(self):
+        artifact = normalize_module_manifest(
+            {
+                "name": "deep-research",
+                "description": "Research helper",
+                "min_capability": "tier-3",
+            },
+            installed=False,
+            source_type="catalog_entry",
+        )
+
+        compatibility = calculate_compatibility(
+            artifact,
+            build_runtime_surface(ConnectorRegistry(), model="custom/my-own-model"),
+        )
+
+        self.assertEqual(compatibility["warnings"], [])
 
 
 if __name__ == "__main__":

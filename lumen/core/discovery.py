@@ -36,6 +36,7 @@ def discover_all(
     connectors: ConnectorRegistry,
     active_channels: list[str] | None = None,
     mcp_config: dict | None = None,
+    model: str | None = None,
 ) -> Registry:
     """Run full discovery and populate the registry."""
     # Built-in skills
@@ -60,7 +61,7 @@ def discover_all(
     # Second pass: validate skill dependencies
     # If a skill requires a connector that has no handler, mark it as MISSING_DEPS
     _validate_skill_deps(registry)
-    annotate_registry(registry, connectors)
+    annotate_registry(registry, connectors, model=model)
 
     return registry
 
