@@ -1,294 +1,855 @@
 <!DOCTYPE html>
-<html lang="{{ language }}">
+<html lang="{{ language }}" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ ui.title | default('Lumen — Dashboard') }}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            neo: {
-              bg: '#080d1a',
-              sidebar: '#0c1228',
-              card: '#111827',
-              accent: '#3b82f6',
-              'accent-hover': '#2563eb',
-              border: '#1e293b',
-            }
-          }
-        }
-      }
-    }
-  </script>
+  <link rel="icon" href="/static/logo.png" type="image/png">
+  {% include "_partials/tokens.html" %}
+  {% from "_partials/animated_eye.html" import animated_eye, eye_styles %}
+  {{ eye_styles() }}
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    body { font-family: 'Inter', sans-serif; }
-    .chat-messages { scrollbar-width: thin; scrollbar-color: #1e293b transparent; }
-    .chat-messages::-webkit-scrollbar { width: 6px; }
-    .chat-messages::-webkit-scrollbar-track { background: transparent; }
-    .chat-messages::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
-    .typing-dot { animation: typing 1.4s infinite; }
-    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
-    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes typing {
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      overflow: hidden;
+      font-family: var(--lumen-font);
+      color: var(--lumen-ink);
+      background: var(--lumen-paper);
+      font-size: 14px;
+    }
+
+    /* === Sidebar === */
+    aside.sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      background: var(--lumen-paper-2);
+      border-right: 1px solid var(--lumen-line);
+      display: flex;
+      flex-direction: column;
+      transition: width 0.25s ease;
+    }
+    aside.sidebar.collapsed { width: 64px; }
+    aside.sidebar.collapsed .sidebar-text { display: none; }
+
+    .sidebar-head {
+      padding: var(--lumen-s-4);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--lumen-s-3);
+      border-bottom: 1px solid var(--lumen-line);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: var(--lumen-s-3);
+      overflow: hidden;
+    }
+    .brand img {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--lumen-r-sm);
+      flex-shrink: 0;
+    }
+    .brand-text h1 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--lumen-ink);
+    }
+    .brand-text p {
+      font-size: 11px;
+      color: var(--lumen-mute);
+      margin-top: 2px;
+    }
+    .icon-btn {
+      background: transparent;
+      border: none;
+      color: var(--lumen-ink-soft);
+      padding: 6px;
+      border-radius: var(--lumen-r-sm);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .icon-btn:hover { background: var(--lumen-lavender); color: var(--lumen-ink); }
+    .icon-btn svg { width: 18px; height: 18px; }
+
+    nav.sidebar-nav {
+      flex: 1;
+      padding: var(--lumen-s-3);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: var(--lumen-s-3);
+      padding: 10px 12px;
+      border-radius: var(--lumen-r-sm);
+      background: transparent;
+      border: none;
+      color: var(--lumen-ink-soft);
+      font: inherit;
+      font-weight: 500;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .nav-btn:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .nav-btn.active {
+      background: var(--lumen-lavender);
+      color: var(--lumen-blue);
+    }
+    .nav-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+    .sidebar-foot {
+      padding: var(--lumen-s-3);
+      border-top: 1px solid var(--lumen-line);
+      display: flex;
+      flex-direction: column;
+      gap: var(--lumen-s-2);
+    }
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: var(--lumen-s-2);
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--lumen-mute);
+    }
+    .status-pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--lumen-success);
+      box-shadow: 0 0 8px rgba(47,158,110,0.4);
+    }
+
+    .theme-toggle {
+      display: flex;
+      align-items: center;
+      gap: var(--lumen-s-2);
+      padding: 8px 10px;
+      border-radius: var(--lumen-r-sm);
+      background: transparent;
+      border: 1px solid var(--lumen-line);
+      color: var(--lumen-ink-soft);
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .theme-toggle:hover { background: var(--lumen-surface); }
+    .theme-toggle svg { width: 16px; height: 16px; }
+
+    /* === Main === */
+    main.main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--lumen-paper);
+    }
+
+    .topbar {
+      padding: var(--lumen-s-4) var(--lumen-s-5);
+      border-bottom: 1px solid var(--lumen-line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--lumen-s-4);
+      background: var(--lumen-paper);
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--lumen-s-3);
+    }
+    .topbar-avatar {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--lumen-s-2);
+      padding: 8px 12px;
+      border-radius: var(--lumen-r-pill);
+      background: var(--lumen-surface);
+      border: 1px solid var(--lumen-line);
+      box-shadow: var(--lumen-shadow-sm);
+      color: var(--lumen-ink-soft);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .topbar-avatar .lumen-eye { flex-shrink: 0; }
+    .topbar h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--lumen-ink);
+    }
+    .topbar .sub {
+      font-size: 12px;
+      color: var(--lumen-mute);
+      margin-top: 2px;
+    }
+
+    .panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--lumen-s-5) var(--lumen-s-6);
+    }
+    .panel.hidden { display: none; }
+    .panel.no-pad { padding: 0; }
+
+    /* === Cards === */
+    .l-card {
+      background: var(--lumen-surface);
+      border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md);
+      padding: var(--lumen-s-5);
+      box-shadow: var(--lumen-shadow-sm);
+    }
+    .l-card h3 {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--lumen-mute);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: var(--lumen-s-3);
+    }
+    .l-card p { color: var(--lumen-ink-soft); line-height: 1.6; }
+    .l-card-grid { display: grid; gap: var(--lumen-s-4); }
+    .l-card-grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+    /* === Chat === */
+    .chat-panel { display: flex; flex-direction: column; height: 100%; }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--lumen-s-5) var(--lumen-s-6);
+      display: flex;
+      flex-direction: column;
+      gap: var(--lumen-s-4);
+    }
+    .chat-empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: var(--lumen-s-4);
+      color: var(--lumen-mute);
+      padding: var(--lumen-s-7);
+    }
+    .chat-empty .hello {
+      font-size: clamp(36px, 6vw, 56px);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--lumen-ink);
+      line-height: 1.05;
+    }
+    .chat-empty .sub {
+      font-size: 18px;
+      max-width: 460px;
+      line-height: 1.6;
+      color: var(--lumen-ink-soft);
+    }
+
+    .msg {
+      display: flex;
+      gap: var(--lumen-s-3);
+      animation: msgIn 0.3s ease-out;
+    }
+    .msg.user { justify-content: flex-end; }
+    .msg .avatar {
+      width: 32px; height: 20px;
+      flex-shrink: 0;
+      margin-top: 6px;
+    }
+    .bubble {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: var(--lumen-r-md);
+      font-size: 14px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .msg.assistant .bubble {
+      background: var(--lumen-surface);
+      border: 1px solid var(--lumen-line);
+      color: var(--lumen-ink);
+      border-top-left-radius: 4px;
+    }
+    .msg.user .bubble {
+      background: var(--lumen-ink);
+      color: var(--lumen-paper);
+      border-top-right-radius: 4px;
+    }
+    @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    .typing {
+      padding: 0 var(--lumen-s-6) var(--lumen-s-2);
+      display: flex;
+      gap: var(--lumen-s-3);
+    }
+    .typing.hidden { display: none; }
+    .typing .avatar { width: 32px; height: 20px; margin-top: 4px; }
+    .typing .bubble {
+      background: var(--lumen-surface);
+      border: 1px solid var(--lumen-line);
+      padding: 12px 14px;
+      border-radius: var(--lumen-r-md);
+      display: inline-flex;
+      gap: 5px;
+    }
+    .typing .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--lumen-mute);
+      animation: bounce 1.4s infinite;
+    }
+    .typing .dot:nth-child(2) { animation-delay: 0.15s; }
+    .typing .dot:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes bounce {
       0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
       30% { opacity: 1; transform: translateY(-4px); }
     }
-    .fade-in { animation: fadeIn 0.3s ease-in; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    .composer {
+      border-top: 1px solid var(--lumen-line);
+      padding: var(--lumen-s-4) var(--lumen-s-5);
+      background: var(--lumen-paper);
+    }
+    .composer form {
+      display: flex;
+      gap: var(--lumen-s-3);
+      align-items: stretch;
+    }
+    .l-input {
+      flex: 1;
+      background: var(--lumen-surface);
+      border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md);
+      padding: 12px 14px;
+      font: inherit;
+      font-size: 14px;
+      color: var(--lumen-ink);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .l-input:focus {
+      outline: none;
+      border-color: var(--lumen-blue);
+      box-shadow: 0 0 0 4px var(--lumen-lavender);
+    }
+    .l-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--lumen-s-2);
+      padding: 12px 18px;
+      border-radius: var(--lumen-r-md);
+      border: 1px solid transparent;
+      background: var(--lumen-ink);
+      color: var(--lumen-paper);
+      font: inherit;
+      font-weight: 500;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .l-btn:hover { box-shadow: var(--lumen-shadow); transform: translateY(-1px); }
+    .l-btn.ghost {
+      background: transparent;
+      color: var(--lumen-ink-soft);
+      border: 1px solid var(--lumen-line);
+    }
+    .l-btn.ghost:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .l-btn.small { padding: 6px 12px; font-size: 12px; }
+    .l-btn svg { width: 16px; height: 16px; }
+
+    /* === Marketplace === */
+    .market-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--lumen-s-4);
+      margin-bottom: var(--lumen-s-5);
+    }
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--lumen-s-2);
+      margin-bottom: var(--lumen-s-4);
+    }
+    .l-pill {
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: var(--lumen-r-pill);
+      border: 1px solid var(--lumen-line);
+      background: var(--lumen-surface);
+      color: var(--lumen-ink-soft);
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .l-pill:hover { background: var(--lumen-paper-2); }
+    .l-pill.active {
+      background: var(--lumen-lavender);
+      color: var(--lumen-blue);
+      border-color: transparent;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--lumen-s-4);
+      padding: var(--lumen-s-3) var(--lumen-s-4);
+      background: var(--lumen-paper-2);
+      border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md);
+      font-size: 12px;
+      color: var(--lumen-mute);
+      margin-bottom: var(--lumen-s-4);
+    }
+    .legend strong {
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--lumen-ink-soft);
+      font-weight: 600;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--lumen-mute);
+      margin: var(--lumen-s-5) 0 var(--lumen-s-3);
+    }
+    .section-title:first-child { margin-top: 0; }
+
+    .mod-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: var(--lumen-s-3);
+    }
+    .mod-list { display: flex; flex-direction: column; gap: var(--lumen-s-3); }
+
+    .mod-card {
+      background: var(--lumen-surface);
+      border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md);
+      padding: var(--lumen-s-4);
+      box-shadow: var(--lumen-shadow-sm);
+      display: flex;
+      flex-direction: column;
+      gap: var(--lumen-s-3);
+    }
+    .mod-card.is-personality { border-color: var(--lumen-blue-soft); }
+    .mod-card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--lumen-s-3);
+    }
+    .mod-card h4 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--lumen-ink);
+      display: flex;
+      align-items: center;
+      gap: var(--lumen-s-2);
+      flex-wrap: wrap;
+    }
+    .mod-meta {
+      font-size: 11px;
+      color: var(--lumen-mute);
+      margin-top: 4px;
+    }
+    .mod-desc {
+      font-size: 13px;
+      color: var(--lumen-ink-soft);
+      line-height: 1.5;
+    }
+    .mod-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: var(--lumen-r-pill);
+      font-size: 11px;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+    .badge-personality {
+      background: var(--lumen-coral-soft);
+      color: var(--lumen-coral);
+      border-color: rgba(255,138,122,0.22);
+    }
+    .badge-status-ready    { background: rgba(47,158,110,0.10); color: var(--lumen-success); border-color: rgba(47,158,110,0.20); }
+    .badge-status-installable { background: rgba(217,146,37,0.10); color: var(--lumen-warn); border-color: rgba(217,146,37,0.20); }
+    .badge-status-partial  { background: rgba(255,138,122,0.12); color: var(--lumen-coral); border-color: rgba(255,138,122,0.25); }
+    .badge-status-blocked  { background: rgba(217,76,76,0.10); color: var(--lumen-danger); border-color: rgba(217,76,76,0.20); }
+
+    .tag-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+    .tag-pills .tag {
+      font-size: 10.5px;
+      padding: 2px 8px;
+      border-radius: var(--lumen-r-pill);
+      background: var(--lumen-paper-2);
+      color: var(--lumen-mute);
+    }
+
+    .reason-warn { font-size: 11px; color: var(--lumen-coral); }
+    .reason-error { font-size: 11px; color: var(--lumen-danger); }
+
+    .empty-block {
+      background: var(--lumen-paper-2);
+      border: 1px dashed var(--lumen-line);
+      border-radius: var(--lumen-r-md);
+      padding: var(--lumen-s-5);
+      color: var(--lumen-mute);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .upload-label {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--lumen-s-2);
+      padding: 8px 14px;
+      background: var(--lumen-lavender);
+      color: var(--lumen-blue);
+      border-radius: var(--lumen-r-md);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .upload-label:hover { background: var(--lumen-blue-soft); color: var(--lumen-paper); }
+    .upload-label.hidden { display: none; }
+
+    .settings-stack {
+      display: grid;
+      gap: var(--lumen-s-4);
+    }
+    .theme-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--lumen-s-3);
+    }
+    .theme-row p {
+      margin-top: 6px;
+    }
+
+    @media (max-width: 720px) {
+      aside.sidebar { width: 64px; }
+      aside.sidebar .sidebar-text { display: none; }
+      .topbar-avatar span:last-child { display: none; }
+      .panel { padding: var(--lumen-s-4); }
+    }
   </style>
 </head>
-<body class="bg-neo-bg text-gray-200 h-screen flex overflow-hidden">
+<body>
 
   <!-- Sidebar -->
-  <aside id="sidebar" class="w-64 bg-neo-sidebar border-r border-neo-border flex flex-col shrink-0 transition-all duration-300">
-    <!-- Logo -->
-    <div class="p-4 border-b border-neo-border flex items-center justify-between gap-2">
-      <div class="flex items-center gap-3 overflow-hidden">
-        <div class="w-10 h-10 rounded-xl bg-neo-accent/10 flex items-center justify-center shrink-0">
-          <svg viewBox="0 0 220 130" class="w-8 h-5">
-            <path d="M10,65 Q45,15 110,10 Q175,15 210,65 Q175,115 110,120 Q45,115 10,65 Z"
-                  fill="none" stroke="#3b82f6" stroke-width="6" stroke-linecap="round" opacity="0.7"/>
-            <circle cx="110" cy="65" r="28" fill="#3b82f6" opacity="0.2"/>
-            <circle cx="110" cy="65" r="18" fill="#3b82f6" opacity="0.35"/>
-            <circle cx="110" cy="65" r="9" fill="#020408"/>
-            <circle cx="102" cy="58" r="4" fill="white" opacity="0.8"/>
-          </svg>
-        </div>
-        <div class="sidebar-text whitespace-nowrap transition-opacity duration-200">
-          <h1 class="text-lg font-bold text-white">Lumen</h1>
-          <p class="text-xs text-gray-500">v{{ version }}</p>
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <img src="/static/logo.png" alt="Lumen" />
+        <div class="brand-text sidebar-text">
+          <h1>Lumen</h1>
+          <p>v{{ version }}</p>
         </div>
       </div>
-      <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white shrink-0 p-1 rounded-md hover:bg-white/5 transition-colors" title="{{ ui.toggle_sidebar | default('Toggle sidebar') }}">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <button class="icon-btn" onclick="toggleSidebar()" title="{{ ui.toggle_sidebar | default('Toggle sidebar') }}">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
         </svg>
       </button>
     </div>
 
-    <!-- Navigation -->
-    <nav class="flex-1 p-4 space-y-1 overflow-x-hidden">
-      <button onclick="showPanel('status')"
-              id="nav-status"
-              class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-        </svg>
-        <span class="sidebar-text whitespace-nowrap transition-opacity duration-200">{{ ui.status | default('Memoria') }}</span>
-      </button>
-
-      <button onclick="showPanel('chat')"
-              id="nav-chat"
-              class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-neo-accent bg-neo-accent/10">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <nav class="sidebar-nav">
+      <button class="nav-btn" id="nav-chat" onclick="showPanel('chat')">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
         </svg>
-        <span class="sidebar-text whitespace-nowrap transition-opacity duration-200">{{ ui.chat | default('Charlas') }}</span>
+        <span class="sidebar-text">{{ ui.chat | default('Charlas') }}</span>
       </button>
 
-      <button onclick="showPanel('marketplace')"
-              id="nav-marketplace"
-              class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <button class="nav-btn" id="nav-status" onclick="showPanel('status')">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+        <span class="sidebar-text">{{ ui.status | default('Memoria') }}</span>
+      </button>
+
+      <button class="nav-btn" id="nav-marketplace" onclick="showPanel('marketplace')">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
         </svg>
-        <span class="sidebar-text whitespace-nowrap transition-opacity duration-200">{{ ui.marketplace | default('Módulos') }}</span>
+        <span class="sidebar-text">{{ ui.marketplace | default('Módulos') }}</span>
       </button>
 
-      <button onclick="showPanel('config')"
-              id="nav-config"
-              class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <button class="nav-btn" id="nav-config" onclick="showPanel('config')">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
         </svg>
-        <span class="sidebar-text whitespace-nowrap transition-opacity duration-200">{{ ui.config | default('Ajustes') }}</span>
+        <span class="sidebar-text">{{ ui.config | default('Ajustes') }}</span>
       </button>
     </nav>
 
-    <!-- Footer -->
-    <div class="p-4 border-t border-neo-border">
-      <div class="flex items-center gap-2 px-3 py-2">
-        <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></div>
-        <span class="sidebar-text text-xs text-gray-500 whitespace-nowrap transition-opacity duration-200">{{ ui.active | default('Lumen is active') }}</span>
+    <div class="sidebar-foot">
+      <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">
+        <svg id="theme-icon-light" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.364-6.364l-1.414 1.414M6.05 17.95l-1.414 1.414m0-13.728l1.414 1.414M17.95 17.95l1.414 1.414M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+        </svg>
+        <svg id="theme-icon-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:none;">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+        </svg>
+        <span class="sidebar-text" id="theme-label">{{ ui.theme_dark | default('Modo oscuro') }}</span>
+      </button>
+      <div class="status-pill">
+        <span class="dot"></span>
+        <span class="sidebar-text">{{ ui.active | default('Lumen está activa') }}</span>
       </div>
     </div>
   </aside>
 
-  <!-- Main Content -->
-  <main class="flex-1 flex flex-col overflow-hidden">
-
-    <!-- Status Panel -->
-    <div id="panel-status" class="hidden flex-1 overflow-y-auto p-8">
-      <h2 class="text-2xl font-bold text-white mb-6">{{ ui.status | default('Memoria') }}</h2>
-
-      <!-- Dev-speak cards and lists have been hidden as requested -->
-
-      <!-- Personality -->
-      <div class="bg-neo-card rounded-xl border border-neo-border p-5 mt-6">
-        <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">{{ ui.personality | default('Personality') }}</h3>
-        <p class="text-gray-600">{{ ui.welcome | default("Hi, I'm Lumen — your personal assistant.") }}</p>
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar" id="topbar">
+      <div>
+        <h2 id="topbar-title">{{ ui.chat | default('Charlas') }}</h2>
+        <p class="sub" id="topbar-sub">{{ ui.chat_sub | default('Conversa con Lumen') }}</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="topbar-avatar">
+          {{ animated_eye(size="mini") }}
+          <span>{{ current_personality }}</span>
+        </div>
       </div>
     </div>
 
     <!-- Chat Panel (default) -->
-    <div id="panel-chat" class="flex-1 flex flex-col overflow-hidden">
-      <!-- Chat Messages -->
-      <div id="chat-messages" class="chat-messages flex-1 overflow-y-auto p-6 space-y-4">
-        <!-- Welcome message -->
-        <div class="flex gap-3 fade-in">
-          <div class="w-8 h-8 rounded-lg bg-neo-accent/20 flex items-center justify-center shrink-0 mt-1">
-            <svg class="w-4 h-4 text-neo-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-            </svg>
-          </div>
-          <div class="bg-neo-card border border-neo-border rounded-2xl rounded-tl-sm px-4 py-3 max-w-[75%]">
-            <p class="text-gray-300 text-sm leading-relaxed">{{ ui.welcome | default("Hi, I'm Lumen — your personal assistant. I can help you with tasks, notes, and searches. What can I do for you?") }}</p>
-          </div>
+    <div id="panel-chat" class="panel no-pad chat-panel">
+      <div id="chat-messages" class="chat-messages">
+        <div id="chat-empty" class="chat-empty">
+          {{ animated_eye(size="boot") }}
+          <div class="hello">{{ ui.greeting | default('Hola, soy Lumen.') }}</div>
+          <div class="sub">{{ ui.welcome | default('Soy tu asistente personal. Puedo ayudarte con tareas, notas y búsquedas. ¿En qué empezamos?') }}</div>
         </div>
       </div>
 
-      <!-- Typing Indicator -->
-      <div id="typing-indicator" class="hidden px-6 pb-2">
-        <div class="flex gap-3">
-          <div class="w-8 h-8 rounded-lg bg-neo-accent/20 flex items-center justify-center shrink-0">
-            <svg class="w-4 h-4 text-neo-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-            </svg>
-          </div>
-          <div class="bg-neo-card border border-neo-border rounded-2xl rounded-tl-sm px-4 py-3">
-            <div class="flex gap-1.5">
-              <div class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></div>
-              <div class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></div>
-              <div class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></div>
-            </div>
-          </div>
+      <div id="typing-indicator" class="typing hidden">
+        <span class="avatar">{% from "_partials/animated_eye.html" import animated_eye %}{{ animated_eye(size="mini") }}</span>
+        <div class="bubble">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
         </div>
       </div>
 
-      <!-- Chat Input -->
-      <div class="p-4 border-t border-neo-border bg-neo-sidebar/50">
-        <form id="chat-form" class="flex gap-3">
+      <div class="composer">
+        <form id="chat-form">
           <input
             id="chat-input"
+            class="l-input"
             type="text"
-            placeholder="{{ ui.chat_placeholder | default('Type a message...') }}"
+            placeholder="{{ ui.chat_placeholder | default('Escribe un mensaje...') }}"
             autocomplete="off"
-            class="flex-1 bg-neo-card border border-neo-border rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-neo-accent focus:ring-1 focus:ring-neo-accent transition-colors"
           />
-          <button
-            type="submit"
-            class="bg-neo-accent hover:bg-neo-accent-hover text-white px-5 py-3 rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <button type="submit" class="l-btn">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
             </svg>
-            {{ ui.send | default('Send') }}
+            {{ ui.send | default('Enviar') }}
           </button>
         </form>
       </div>
     </div>
 
-    <!-- Marketplace Panel -->
-    <div id="panel-marketplace" class="hidden flex-1 overflow-y-auto p-8">
-      <div class="flex items-center justify-between mb-6">
-        <div>
-          <h2 class="text-2xl font-bold text-white">{{ ui.marketplace | default('Módulos') }}</h2>
-          <p class="text-sm text-gray-500 mt-1">Explora e instala nuevas capacidades y personalidades para Lumen.</p>
+    <!-- Status Panel -->
+    <div id="panel-status" class="panel hidden">
+      <div class="l-card-grid cols-2">
+        <div class="l-card">
+          <h3>{{ ui.personality | default('Personalidad') }}</h3>
+          <p>{{ current_personality }}</p>
         </div>
-        <label id="marketplace-upload-label" class="hidden bg-neo-accent/20 text-neo-accent px-4 py-2 rounded-lg text-sm font-medium hover:bg-neo-accent/30 transition-colors cursor-pointer">
-          Upload ZIP
-          <input type="file" accept=".zip" id="zip-upload" class="hidden" onchange="uploadZip(this)" />
+        <div class="l-card">
+          <h3>{{ ui.memory_summary | default('Memoria') }}</h3>
+          <p>{{ ui.status_sub | default('Lo que Lumen sabe sobre ti y lo que tiene disponible ahora.') }}</p>
+        </div>
+        <div class="l-card">
+          <h3>{{ ui.model | default('Modelo') }}</h3>
+          <p>{{ model }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Marketplace Panel -->
+    <div id="panel-marketplace" class="panel hidden">
+      <div class="market-head">
+        <div>
+          <p style="font-size:13px;color:var(--lumen-ink-soft);max-width:560px;line-height:1.55;">
+            {{ ui.marketplace_sub | default('Explora e instala nuevas capacidades y personalidades para Lumen.') }}
+          </p>
+        </div>
+        <label id="marketplace-upload-label" class="upload-label hidden">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:14px;height:14px;">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 12V4m0 0L8 8m4-4l4 4"/>
+          </svg>
+          {{ ui.upload_zip | default('Subir ZIP') }}
+          <input type="file" accept=".zip" id="zip-upload" style="display:none;" onchange="uploadZip(this)" />
         </label>
       </div>
 
-      <div class="flex flex-wrap gap-2 mb-6" id="marketplace-tabs">
-        <button type="button" onclick="switchMarketplaceTab('kits_lumen')" id="tab-kits_lumen" class="marketplace-tab px-4 py-2 rounded-lg text-sm font-medium bg-white/5 text-gray-300 border border-neo-border">Modules &amp; Personalities</button>
-        <button type="button" onclick="switchMarketplaceTab('skills')" id="tab-skills" class="hidden marketplace-tab px-4 py-2 rounded-lg text-sm font-medium bg-white/5 text-gray-300 border border-neo-border">Skills</button>
-        <button type="button" onclick="switchMarketplaceTab('mcps')" id="tab-mcps" class="hidden marketplace-tab px-4 py-2 rounded-lg text-sm font-medium bg-white/5 text-gray-300 border border-neo-border">MCPs</button>
+      <div class="pill-row" id="marketplace-tabs">
+        <button type="button" onclick="switchMarketplaceTab('kits_lumen')" id="tab-kits_lumen" class="l-pill marketplace-tab active">{{ ui.tab_modules | default('Módulos y personalidades') }}</button>
+        <button type="button" onclick="switchMarketplaceTab('skills')" id="tab-skills" class="l-pill marketplace-tab" style="display:none;">Skills</button>
+        <button type="button" onclick="switchMarketplaceTab('mcps')" id="tab-mcps" class="l-pill marketplace-tab" style="display:none;">MCPs</button>
       </div>
 
-      <!-- Personality-first filter bar -->
-      <div id="marketplace-filter-bar" class="flex flex-wrap gap-2 mb-4">
-        <button type="button" onclick="setMarketplaceFilter('all')" id="filter-all" class="marketplace-filter-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-neo-accent/10 text-neo-accent border border-neo-accent/30">All</button>
-        <button type="button" onclick="setMarketplaceFilter('personality')" id="filter-personality" class="marketplace-filter-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-gray-400 border border-neo-border">Personality</button>
-        <button type="button" onclick="setMarketplaceFilter('tools')" id="filter-tools" class="marketplace-filter-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-gray-400 border border-neo-border">Tools &amp; Utilities</button>
+      <div class="pill-row" id="marketplace-filter-bar">
+        <button type="button" onclick="setMarketplaceFilter('all')" id="filter-all" class="l-pill marketplace-filter-btn active">{{ ui.filter_all | default('Todo') }}</button>
+        <button type="button" onclick="setMarketplaceFilter('personality')" id="filter-personality" class="l-pill marketplace-filter-btn">{{ ui.filter_personality | default('Personalidad') }}</button>
+        <button type="button" onclick="setMarketplaceFilter('tools')" id="filter-tools" class="l-pill marketplace-filter-btn">{{ ui.filter_tools | default('Herramientas y utilidades') }}</button>
       </div>
 
-      <div class="bg-neo-card rounded-xl border border-neo-border p-4 mb-6">
-        <div class="flex flex-wrap items-center gap-3 text-xs text-gray-400">
-          <span class="font-semibold uppercase tracking-wider text-gray-500">Cerebelo</span>
-          <span>🟢 ready</span>
-          <span>🟡 installable</span>
-          <span>🟠 partial</span>
-          <span>🔴 blocked</span>
-        </div>
+      <div class="legend">
+        <strong>Compatibilidad</strong>
+        <span>🟢 lista</span>
+        <span>🟡 instalable</span>
+        <span>🟠 parcial</span>
+        <span>🔴 bloqueada</span>
       </div>
 
-      <div id="marketplace-note" class="mb-6 text-sm text-gray-500"></div>
+      <div id="marketplace-note" style="font-size:12px;color:var(--lumen-mute);margin-bottom:var(--lumen-s-4);"></div>
 
-      <div class="mb-8">
-        <h3 id="marketplace-installed-title" class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Installed</h3>
-        <div id="marketplace-installed" class="space-y-3">
-          <p class="text-gray-500 text-sm">Loading...</p>
-        </div>
-      </div>
+      <h3 id="marketplace-installed-title" class="section-title">{{ ui.installed | default('Instalados') }}</h3>
+      <div id="marketplace-installed" class="mod-list"><p class="empty-block">Cargando…</p></div>
 
-      <div>
-        <h3 id="marketplace-available-title" class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Available</h3>
-        <div id="marketplace-available" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <p class="text-gray-500 text-sm">Loading...</p>
-        </div>
-      </div>
+      <h3 id="marketplace-available-title" class="section-title">{{ ui.available | default('Disponibles') }}</h3>
+      <div id="marketplace-available" class="mod-grid"><p class="empty-block">Cargando…</p></div>
     </div>
 
     <!-- Config Panel -->
-    <div id="panel-config" class="hidden flex-1 overflow-y-auto p-8">
-      <h2 class="text-2xl font-bold text-white mb-6">{{ ui.config | default('Config') }}</h2>
-      <div class="space-y-4">
-        <div class="bg-neo-card rounded-xl border border-neo-border p-5">
-          <label class="text-sm text-gray-400 block mb-1">{{ ui.model | default('Model') }}</label>
-          <p class="text-white font-medium">{{ model }}</p>
+    <div id="panel-config" class="panel hidden">
+      <div class="settings-stack">
+        <div class="l-card theme-row">
+          <div>
+            <h3>{{ ui.theme | default('Tema') }}</h3>
+            <p>{{ ui.theme_sub | default('Lumen nace en luz. Podés pasar a oscuro cuando quieras.') }}</p>
+          </div>
+          <button class="theme-toggle" onclick="toggleTheme()">
+            <svg id="theme-panel-icon-light" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.364-6.364l-1.414 1.414M6.05 17.95l-1.414 1.414m0-13.728l1.414 1.414M17.95 17.95l1.414 1.414M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+            </svg>
+            <svg id="theme-panel-icon-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:none;">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+            <span id="theme-panel-label">{{ ui.theme_dark | default('Tema oscuro') }}</span>
+          </button>
         </div>
-        <div class="bg-neo-card rounded-xl border border-neo-border p-5">
-          <label class="text-sm text-gray-400 block mb-1">{{ ui.language_label | default('Language') }}</label>
-          <p class="text-white font-medium">{{ language }}</p>
-        </div>
-        <div class="bg-neo-card rounded-xl border border-neo-border p-5">
-          <label class="text-sm text-gray-400 block mb-1">{{ ui.personality | default('Personality') }}</label>
-          <p class="text-white font-medium">{{ current_personality }}</p>
+        <div class="l-card-grid cols-2">
+          <div class="l-card">
+            <h3>{{ ui.model | default('Modelo') }}</h3>
+            <p>{{ model }}</p>
+          </div>
+          <div class="l-card">
+            <h3>{{ ui.language_label | default('Idioma') }}</h3>
+            <p>{{ language }}</p>
+          </div>
+          <div class="l-card">
+            <h3>{{ ui.personality | default('Personalidad') }}</h3>
+            <p>{{ current_personality }}</p>
+          </div>
         </div>
       </div>
     </div>
-
   </main>
 
   <script>
-    // --- Panel Navigation ---
-    function showPanel(name) {
-      document.querySelectorAll('[id^="panel-"]').forEach(p => p.classList.add('hidden'));
-      document.querySelectorAll('[id^="panel-"]').forEach(p => p.classList.remove('flex', 'flex-col'));
-      document.querySelectorAll('.nav-btn').forEach(b => {
-        b.classList.remove('text-neo-accent', 'bg-neo-accent/10');
-        b.classList.add('text-gray-400');
-      });
-
-      const panel = document.getElementById(`panel-${name}`);
-      panel.classList.remove('hidden');
-      if (name === 'chat') panel.classList.add('flex', 'flex-col');
-
-      const btn = document.getElementById(`nav-${name}`);
-      btn.classList.remove('text-gray-400');
-      btn.classList.add('text-neo-accent', 'bg-neo-accent/10');
+    // === Theme toggle ===
+    const THEME_KEY = 'lumen-theme';
+    function applyTheme(theme) {
+      const html = document.documentElement;
+      html.setAttribute('data-theme', theme);
+      const lightIcon = document.getElementById('theme-icon-light');
+      const darkIcon = document.getElementById('theme-icon-dark');
+      const label = document.getElementById('theme-label');
+      const panelLightIcon = document.getElementById('theme-panel-icon-light');
+      const panelDarkIcon = document.getElementById('theme-panel-icon-dark');
+      const panelLabel = document.getElementById('theme-panel-label');
+      if (theme === 'dark') {
+        lightIcon.style.display = 'none';
+        darkIcon.style.display = '';
+        if (panelLightIcon) panelLightIcon.style.display = 'none';
+        if (panelDarkIcon) panelDarkIcon.style.display = '';
+        if (label) label.textContent = '{{ ui.theme_light | default("Modo claro") }}';
+        if (panelLabel) panelLabel.textContent = '{{ ui.theme_light | default("Modo claro") }}';
+      } else {
+        lightIcon.style.display = '';
+        darkIcon.style.display = 'none';
+        if (panelLightIcon) panelLightIcon.style.display = '';
+        if (panelDarkIcon) panelDarkIcon.style.display = 'none';
+        if (label) label.textContent = '{{ ui.theme_dark | default("Modo oscuro") }}';
+        if (panelLabel) panelLabel.textContent = '{{ ui.theme_dark | default("Modo oscuro") }}';
+      }
     }
+    function toggleTheme() {
+      const cur = document.documentElement.getAttribute('data-theme') || 'light';
+      const next = cur === 'light' ? 'dark' : 'light';
+      localStorage.setItem(THEME_KEY, next);
+      applyTheme(next);
+    }
+    applyTheme(localStorage.getItem(THEME_KEY) || 'light');
 
-    // --- WebSocket Chat ---
-    // Persistent session ID — survives page refresh
+    // === Sidebar collapse ===
+    function applySidebarState(collapsed) {
+      const sidebar = document.getElementById('sidebar');
+      if (!sidebar) return;
+      sidebar.classList.toggle('collapsed', collapsed);
+    }
+    function toggleSidebar() {
+      const collapsed = localStorage.getItem('lumen-sidebar-collapsed') === '1';
+      const next = !collapsed;
+      localStorage.setItem('lumen-sidebar-collapsed', next ? '1' : '0');
+      applySidebarState(next);
+    }
+    applySidebarState(localStorage.getItem('lumen-sidebar-collapsed') === '1');
+
+    // === Panel navigation ===
+    const PANEL_TITLES = {
+      chat:        ['{{ ui.chat | default("Charlas") }}',         '{{ ui.chat_sub | default("Conversa con Lumen") }}'],
+      status:      ['{{ ui.status | default("Memoria") }}',       '{{ ui.status_sub | default("Lo que Lumen sabe sobre ti") }}'],
+      marketplace: ['{{ ui.marketplace | default("Módulos") }}',  '{{ ui.marketplace_sub_top | default("Capacidades disponibles para sumar") }}'],
+      config:      ['{{ ui.config | default("Ajustes") }}',       '{{ ui.config_sub | default("Modelo, idioma y personalidad") }}'],
+    };
+    function showPanel(name) {
+      document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      const panel = document.getElementById(`panel-${name}`);
+      if (panel) panel.classList.remove('hidden');
+      const btn = document.getElementById(`nav-${name}`);
+      if (btn) btn.classList.add('active');
+      const [t, s] = PANEL_TITLES[name] || [name, ''];
+      document.getElementById('topbar-title').textContent = t;
+      document.getElementById('topbar-sub').textContent = s;
+      if (name === 'marketplace') loadMarketplace();
+    }
+    showPanel('chat');
+
+    // === WebSocket Chat ===
     const STORAGE_KEY = 'lumen_session_id';
     let sessionId = localStorage.getItem(STORAGE_KEY);
     if (!sessionId) {
@@ -301,19 +862,23 @@
     let heartbeatTimer = null;
 
     const chatMessages = document.getElementById('chat-messages');
+    const chatEmpty = document.getElementById('chat-empty');
     const chatForm = document.getElementById('chat-form');
     const chatInput = document.getElementById('chat-input');
     const typingIndicator = document.getElementById('typing-indicator');
 
-    // Load conversation history on connect
+    const MINI_EYE_HTML = {{ animated_eye(size="mini") | tojson }};
+
+    function miniEyeAvatar() {
+      return MINI_EYE_HTML;
+    }
+
     async function loadHistory() {
       try {
         const res = await fetch(`/api/history/${sessionId}`);
         const data = await res.json();
         if (data.messages && data.messages.length > 0) {
-          // Remove the default welcome message if we have history
-          const welcome = chatMessages.querySelector('.fade-in');
-          if (welcome) welcome.remove();
+          if (chatEmpty) chatEmpty.remove();
           data.messages.forEach(m => addMessage(m.role, m.content));
         }
       } catch (e) {}
@@ -321,27 +886,14 @@
     loadHistory();
 
     function addMessage(role, content) {
+      if (chatEmpty && chatEmpty.parentNode) chatEmpty.remove();
       const wrapper = document.createElement('div');
-      wrapper.className = 'flex gap-3 fade-in' + (role === 'user' ? ' justify-end' : '');
-
+      wrapper.className = `msg ${role}`;
       if (role === 'assistant') {
-        wrapper.innerHTML = `
-          <div class="w-8 h-8 rounded-lg bg-neo-accent/20 flex items-center justify-center shrink-0 mt-1">
-            <svg class="w-4 h-4 text-neo-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-            </svg>
-          </div>
-          <div class="bg-neo-card border border-neo-border rounded-2xl rounded-tl-sm px-4 py-3 max-w-[75%]">
-            <p class="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(content)}</p>
-          </div>`;
+        wrapper.innerHTML = `${miniEyeAvatar()}<div class="bubble">${escapeHtml(content)}</div>`;
       } else {
-        wrapper.innerHTML = `
-          <div class="bg-neo-accent/20 border border-neo-accent/30 rounded-2xl rounded-tr-sm px-4 py-3 max-w-[75%]">
-            <p class="text-gray-200 text-sm leading-relaxed">${escapeHtml(content)}</p>
-          </div>`;
+        wrapper.innerHTML = `<div class="bubble">${escapeHtml(content)}</div>`;
       }
-
       chatMessages.appendChild(wrapper);
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -356,7 +908,6 @@
       e.preventDefault();
       const text = chatInput.value.trim();
       if (!text) return;
-
       addMessage('user', text);
       ws.send(JSON.stringify({ content: text }));
       chatInput.value = '';
@@ -365,14 +916,11 @@
 
     ws.addEventListener('message', (event) => {
       const data = JSON.parse(event.data);
-
       if (data.type === 'pong') return;
-
       if (data.type === 'typing') {
         typingIndicator.classList.toggle('hidden', !data.status);
         if (data.status) chatMessages.scrollTop = chatMessages.scrollHeight;
       }
-
       if (data.type === 'message' && data.role === 'assistant') {
         typingIndicator.classList.add('hidden');
         addMessage('assistant', data.content);
@@ -381,7 +929,7 @@
 
     ws.addEventListener('close', () => {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
-      addMessage('assistant', 'Connection lost. Please refresh the page.');
+      addMessage('assistant', '{{ ui.connection_lost | default("Se perdió la conexión. Recarga la página.") }}');
     });
 
     ws.addEventListener('open', () => {
@@ -393,38 +941,9 @@
       }, 30000);
     });
 
-    // Focus input on load
     chatInput.focus();
 
-    // --- Load live status data from registry ---
-    const statusColors = {
-      ready: 'bg-green-400',
-      available: 'bg-yellow-400',
-      no_handler: 'bg-orange-400',
-      missing_deps: 'bg-red-400',
-      error: 'bg-red-500',
-    };
-
-    async function loadStatus() {
-      try {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-
-        // Stat cards and connector details have been hidden per redesign.
-        // Keeping only essential status logic if needed.
-      } catch (e) {
-        console.error('Failed to load status:', e);
-      }
-    }
-    loadStatus();
-
-    // --- Marketplace ---
-    const compatBadgeClasses = {
-      ready: 'bg-green-500/10 text-green-300 border-green-500/20',
-      installable: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/20',
-      partial: 'bg-orange-500/10 text-orange-300 border-orange-500/20',
-      blocked: 'bg-red-500/10 text-red-300 border-red-500/20',
-    };
+    // === Marketplace ===
     let marketplaceState = null;
     let currentMarketplaceTab = 'kits_lumen';
     let currentMarketplaceFilter = 'all';
@@ -436,69 +955,53 @@
 
     function setMarketplaceFilter(filter) {
       currentMarketplaceFilter = filter;
-      document.querySelectorAll('.marketplace-filter-btn').forEach(btn => {
-        btn.classList.remove('bg-neo-accent/10', 'text-neo-accent', 'border-neo-accent/30');
-        btn.classList.add('bg-white/5', 'text-gray-400', 'border-neo-border');
-      });
+      document.querySelectorAll('.marketplace-filter-btn').forEach(btn => btn.classList.remove('active'));
       const active = document.getElementById(`filter-${filter}`);
-      if (active) {
-        active.classList.remove('bg-white/5', 'text-gray-400', 'border-neo-border');
-        active.classList.add('bg-neo-accent/10', 'text-neo-accent', 'border-neo-accent/30');
-      }
+      if (active) active.classList.add('active');
       renderMarketplaceTab();
     }
 
     function switchMarketplaceTab(tab) {
       currentMarketplaceTab = tab;
-      document.querySelectorAll('.marketplace-tab').forEach(btn => {
-        btn.classList.remove('bg-neo-accent/10', 'text-neo-accent', 'border-neo-accent/40');
-        btn.classList.add('bg-white/5', 'text-gray-300', 'border-neo-border');
-      });
+      document.querySelectorAll('.marketplace-tab').forEach(btn => btn.classList.remove('active'));
       const active = document.getElementById(`tab-${tab}`);
-      if (active) {
-        active.classList.remove('bg-white/5', 'text-gray-300', 'border-neo-border');
-        active.classList.add('bg-neo-accent/10', 'text-neo-accent', 'border-neo-accent/40');
-      }
+      if (active) active.classList.add('active');
       renderMarketplaceTab();
     }
 
     function renderCompatBadge(item) {
       const badge = item.compatibility?.badge;
       if (!badge) return '';
-      return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs ${compatBadgeClasses[badge.status] || compatBadgeClasses.blocked}">${badge.emoji} ${badge.label}</span>`;
+      return `<span class="badge badge-status-${badge.status || 'blocked'}">${badge.emoji || ''} ${escapeHtml(badge.label || '')}</span>`;
+    }
+
+    function renderTagPills(item) {
+      const tags = (item.tags || []).filter(t => t && t !== 'x-lumen');
+      if (!tags.length) return '';
+      return `<div class="tag-pills">${tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div>`;
     }
 
     function renderSourcePills(item) {
       const sources = item.sources || [];
       if (!sources.length) return '';
-      return `<div class="flex flex-wrap gap-1 mt-3">${sources.map(source =>
-        `<span class="text-[11px] px-2 py-0.5 rounded bg-white/5 text-gray-400">${escapeHtml(source.label)}</span>`
-      ).join('')}</div>`;
-    }
-
-    function renderTagPills(item) {
-      const tags = item.tags || [];
-      if (!tags.length) return '';
-      return `<div class="flex flex-wrap gap-1 mt-3">${tags.map(tag =>
-        `<span class="text-[11px] px-2 py-0.5 rounded bg-white/5 text-gray-500">${escapeHtml(tag)}</span>`
-      ).join('')}</div>`;
+      return `<div class="tag-pills">${sources.map(s => `<span class="tag">${escapeHtml(s.label)}</span>`).join('')}</div>`;
     }
 
     function renderReadOnlyCard(item, emptyLabel) {
       const reasons = item.compatibility?.reasons || [];
       return `
-        <div class="bg-neo-card rounded-xl border border-neo-border p-5">
-          <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="mod-card">
+          <div class="mod-card-top">
             <div>
-              <h4 class="text-white font-semibold">${escapeHtml(item.display_name || item.name)}</h4>
-              <p class="text-xs text-gray-500 mt-1">${escapeHtml(item.min_capability || 'tier-1')} &bull; ${item.installed ? 'in Body' : 'read-only discovery'}</p>
+              <h4>${escapeHtml(item.display_name || item.name)}</h4>
+              <div class="mod-meta">${escapeHtml(item.min_capability || 'tier-1')} · ${item.installed ? 'instalado' : 'descubierto'}</div>
             </div>
             ${renderCompatBadge(item)}
           </div>
-          <p class="text-gray-400 text-sm">${escapeHtml(item.description || emptyLabel)}</p>
+          <div class="mod-desc">${escapeHtml(item.description || emptyLabel)}</div>
           ${renderSourcePills(item)}
           ${renderTagPills(item)}
-          ${reasons.length ? `<div class="mt-3 text-xs text-red-300">${reasons.map(r => escapeHtml(r)).join(' • ')}</div>` : ''}
+          ${reasons.length ? `<div class="reason-error">${reasons.map(r => escapeHtml(r)).join(' • ')}</div>` : ''}
         </div>`;
     }
 
@@ -507,36 +1010,37 @@
       const warnings = item.compatibility?.warnings || [];
       const personality = isPersonalityModule(item);
       const personalityBadge = personality
-        ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-500/15 text-purple-300 border border-purple-500/25">Personality</span>'
+        ? '<span class="badge badge-personality">Personalidad</span>'
         : '';
+      const installBtn = item.actions?.can_install
+        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small">Instalar</button>` : '';
+      const uninstallBtn = item.actions?.can_uninstall
+        ? `<button onclick="uninstallModule('${item.name}')" class="l-btn small ghost">Quitar</button>` : '';
       return `
-        <div class="bg-neo-card rounded-xl border ${personality ? 'border-purple-500/30' : 'border-neo-border'} p-5">
-          <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="mod-card ${personality ? 'is-personality' : ''}">
+          <div class="mod-card-top">
             <div>
-              <div class="flex items-center gap-2">
-                <h4 class="text-white font-semibold">${escapeHtml(item.display_name || item.name)}</h4>
-                ${personalityBadge}
-              </div>
-              <p class="text-xs text-gray-500 mt-1">v${escapeHtml(item.version || '0.0.0')} &bull; ${escapeHtml(item.min_capability || 'tier-1')} &bull; ${escapeHtml(item.price || 'free')}</p>
+              <h4>${escapeHtml(item.display_name || item.name)}${personalityBadge}</h4>
+              <div class="mod-meta">v${escapeHtml(item.version || '0.0.0')} · ${escapeHtml(item.min_capability || 'tier-1')} · ${escapeHtml(item.price || 'free')}</div>
             </div>
-            <div class="flex items-center gap-2">${renderCompatBadge(item)}
-              ${item.actions?.can_install ? `<button onclick="installModule('${item.name}', this)" class="text-xs px-3 py-1.5 rounded-lg bg-neo-accent/20 text-neo-accent hover:bg-neo-accent/30 transition-colors">Install</button>` : ''}
-              ${item.actions?.can_uninstall ? `<button onclick="uninstallModule('${item.name}')" class="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">Uninstall</button>` : ''}
+            <div class="mod-actions">
+              ${renderCompatBadge(item)}
+              ${installBtn}${uninstallBtn}
             </div>
           </div>
-          <p class="text-gray-400 text-sm">${escapeHtml(item.description || 'No description available.')}</p>
+          <div class="mod-desc">${escapeHtml(item.description || 'Sin descripción.')}</div>
           ${renderSourcePills(item)}
           ${renderTagPills(item)}
-          ${warnings.length ? `<div class="mt-3 text-xs text-orange-300">${warnings.map(w => escapeHtml(w)).join(' • ')}</div>` : ''}
-          ${reasons.length ? `<div class="mt-2 text-xs text-red-300">${reasons.map(r => escapeHtml(r)).join(' • ')}</div>` : ''}
+          ${warnings.length ? `<div class="reason-warn">${warnings.map(w => escapeHtml(w)).join(' • ')}</div>` : ''}
+          ${reasons.length ? `<div class="reason-error">${reasons.map(r => escapeHtml(r)).join(' • ')}</div>` : ''}
         </div>`;
     }
 
     function renderMarketplaceList(container, items, renderer, emptyMessage, grid = false) {
       if (!container) return;
-      container.className = grid ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : 'space-y-3';
+      container.className = grid ? 'mod-grid' : 'mod-list';
       if (!items || items.length === 0) {
-        container.innerHTML = `<div class="bg-neo-card rounded-xl border border-neo-border p-6 ${grid ? 'col-span-2' : ''}"><p class="text-gray-500 text-sm">${emptyMessage}</p></div>`;
+        container.innerHTML = `<div class="empty-block">${emptyMessage}</div>`;
         return;
       }
       container.innerHTML = items.map(renderer).join('');
@@ -549,12 +1053,7 @@
       } else if (currentMarketplaceFilter === 'tools') {
         filtered = filtered.filter(item => !isPersonalityModule(item));
       }
-      // Sort: personalities first
-      filtered.sort((a, b) => {
-        const ap = isPersonalityModule(a) ? 0 : 1;
-        const bp = isPersonalityModule(b) ? 0 : 1;
-        return ap - bp;
-      });
+      filtered.sort((a, b) => (isPersonalityModule(a) ? 0 : 1) - (isPersonalityModule(b) ? 0 : 1));
       return filtered;
     }
 
@@ -562,7 +1061,6 @@
       if (!marketplaceState) return;
       const section = marketplaceState[currentMarketplaceTab];
       if (!section) return;
-
       const installedTitle = document.getElementById('marketplace-installed-title');
       const availableTitle = document.getElementById('marketplace-available-title');
       const installedEl = document.getElementById('marketplace-installed');
@@ -572,32 +1070,27 @@
       const filterBar = document.getElementById('marketplace-filter-bar');
       const isKits = currentMarketplaceTab === 'kits_lumen';
 
-      // Show filter bar only on kits_lumen tab
       filterBar.style.display = isKits ? 'flex' : 'none';
-
-      installedTitle.textContent = section.installed_label || 'Installed';
-      availableTitle.textContent = section.available_label || 'Available';
+      installedTitle.textContent = section.installed_label || 'Instalados';
+      availableTitle.textContent = section.available_label || 'Disponibles';
       noteEl.textContent = section.read_only
-        ? 'Read-only discovery in this batch. Compatibility and feed data come from the server.'
-        : 'Modules and personalities from the local catalog can be installed or removed in this batch.';
+        ? 'Descubrimiento de solo lectura. La compatibilidad se calcula en el servidor.'
+        : 'Módulos y personalidades del catálogo local.';
       uploadLabel.classList.toggle('hidden', !isKits);
 
-      const renderer = isKits ? renderKitCard : item => renderReadOnlyCard(item, 'No description available.');
+      const renderer = isKits ? renderKitCard : item => renderReadOnlyCard(item, 'Sin descripción.');
 
-      renderMarketplaceList(
-        installedEl,
+      renderMarketplaceList(installedEl,
         isKits ? filterAndSortItems(section.installed) : (section.installed || []),
         renderer,
-        isKits ? 'No modules or personalities are installed yet.' : 'Nothing from this tab is currently in the Body.',
-        false,
-      );
-      renderMarketplaceList(
-        availableEl,
+        isKits ? 'Aún no hay módulos ni personalidades instalados.' : 'Nada de esta pestaña está activo.',
+        false);
+
+      renderMarketplaceList(availableEl,
         isKits ? filterAndSortItems(section.available) : (section.available || []),
         renderer,
-        isKits ? 'No more modules or personalities are available right now.' : 'No additional entries were discovered.',
-        true,
-      );
+        isKits ? 'No hay más módulos ni personalidades disponibles.' : 'No se encontraron entradas.',
+        true);
     }
 
     async function loadMarketplace() {
@@ -611,32 +1104,28 @@
     }
 
     async function installModule(name, btn) {
-      if (btn) { btn.disabled = true; btn.textContent = 'Installing...'; }
+      if (btn) { btn.disabled = true; btn.textContent = 'Instalando…'; }
       try {
         const res = await fetch(`/api/modules/install/${name}`, { method: 'POST' });
         const data = await res.json();
         if (data.status === 'installed') {
           loadMarketplace();
-          loadStatus(); // Refresh status panel too
         } else {
-          alert('No pudimos instalar este módulo. Revisa que el archivo sea correcto.');
+          alert('No pudimos instalar este módulo.');
           if (btn) { btn.disabled = false; btn.textContent = 'Instalar'; }
         }
       } catch (e) {
-        alert('Este módulo no se pudo instalar');
+        alert('No se pudo instalar el módulo.');
         if (btn) { btn.disabled = false; btn.textContent = 'Instalar'; }
       }
     }
 
     async function uninstallModule(name) {
-      if (!confirm(`¿Seguro que quieres desinstalar ${name}?`)) return;
+      if (!confirm(`¿Seguro que quieres quitar ${name}?`)) return;
       try {
         const res = await fetch(`/api/modules/uninstall/${name}`, { method: 'DELETE' });
         const data = await res.json();
-        if (data.status === 'uninstalled') {
-          loadMarketplace();
-          loadStatus();
-        }
+        if (data.status === 'uninstalled') loadMarketplace();
       } catch (e) {
         alert('No se pudo desinstalar el módulo.');
       }
@@ -647,54 +1136,18 @@
       if (!file) return;
       try {
         const data = await file.arrayBuffer();
-        const res = await fetch('/api/modules/upload', {
-          method: 'POST',
-          body: data,
-        });
+        const res = await fetch('/api/modules/upload', { method: 'POST', body: data });
         const result = await res.json();
         if (result.status === 'installed') {
           loadMarketplace();
-          loadStatus();
         } else {
-          alert('Este módulo no se pudo instalar');
+          alert('Este módulo no se pudo instalar.');
         }
       } catch (e) {
-        alert('Este módulo no se pudo instalar');
+        alert('Este módulo no se pudo instalar.');
       }
       input.value = '';
     }
-
-    // Load marketplace when panel is shown
-    const origShowPanel = showPanel;
-    showPanel = function(name) {
-      origShowPanel(name);
-      if (name === 'marketplace') loadMarketplace();
-    };
-
-    // --- Sidebar collapse ---
-    function applySidebarState(collapsed) {
-      const sidebar = document.getElementById('sidebar');
-      if (!sidebar) return;
-      const labels = sidebar.querySelectorAll('.sidebar-text');
-      if (collapsed) {
-        sidebar.classList.remove('w-64');
-        sidebar.classList.add('w-16');
-        labels.forEach(el => { el.classList.add('opacity-0', 'hidden'); });
-      } else {
-        sidebar.classList.remove('w-16');
-        sidebar.classList.add('w-64');
-        labels.forEach(el => { el.classList.remove('opacity-0', 'hidden'); });
-      }
-    }
-    function toggleSidebar() {
-      const collapsed = localStorage.getItem('lumen-sidebar-collapsed') === '1';
-      const next = !collapsed;
-      localStorage.setItem('lumen-sidebar-collapsed', next ? '1' : '0');
-      applySidebarState(next);
-    }
-    document.addEventListener('DOMContentLoaded', () => {
-      applySidebarState(localStorage.getItem('lumen-sidebar-collapsed') === '1');
-    });
   </script>
 </body>
 </html>

@@ -52,7 +52,7 @@ def humanize_module_name(name: str, display_name: str | None = None) -> str:
         return name
     cleaned = name
     if cleaned.startswith("x-lumen-"):
-        cleaned = cleaned[len("x-lumen-"):]
+        cleaned = cleaned[len("x-lumen-") :]
     return cleaned.replace("-", " ").replace("_", " ").strip().title() or name
 
 
@@ -216,12 +216,18 @@ class Marketplace:
     def _catalog_kit_card(self, entry: dict[str, Any]) -> dict[str, Any]:
         compatibility = self._with_badge(entry.get("compatibility") or {})
         installed = self.registry.get(CapabilityKind.MODULE, entry["name"]) is not None
+        path = str(entry.get("path") or "")
+        is_personality_kit = path.startswith("kits/")
+        source_label = "Kits Lumen" if is_personality_kit else "Lumen Modules"
+        kind = "kit" if is_personality_kit else "module"
         return {
-            "id": f"kit:{entry['name']}",
+            "id": f"{kind}:{entry['name']}",
             "name": entry["name"],
-            "display_name": humanize_module_name(entry["name"], entry.get("display_name")),
+            "display_name": humanize_module_name(
+                entry["name"], entry.get("display_name")
+            ),
             "description": entry.get("description", ""),
-            "kind": "kit",
+            "kind": kind,
             "category": "kits_lumen",
             "installed": installed,
             "runtime": False,
@@ -234,7 +240,7 @@ class Marketplace:
             "provides": entry.get("provides", []),
             "requires": entry.get("requires", {}),
             "compatibility": compatibility,
-            "sources": [{"type": "kits_lumen", "label": "Kits Lumen"}],
+            "sources": [{"type": "kits_lumen", "label": source_label}],
             "actions": {
                 "read_only": False,
                 "can_install": not installed,

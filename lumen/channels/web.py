@@ -32,6 +32,7 @@ from lumen.core.runtime import (
     sync_runtime_modules,
 )
 from lumen.core.module_runtime import ModuleRuntimeManager
+from lumen.core.marketplace import humanize_module_name
 from lumen.core.session import SessionManager
 from lumen.core.module_manifest import load_module_manifest
 
@@ -320,13 +321,13 @@ def _mark_awakened():
 def _current_dashboard_personality() -> str:
     active_personality = _config.get("active_personality")
     if active_personality:
-        return str(active_personality)
+        return humanize_module_name(str(active_personality))
 
     if _brain is not None:
         identity = (_brain.personality.current() or {}).get("identity") or {}
         personality_name = identity.get("name")
         if personality_name:
-            return str(personality_name)
+            return humanize_module_name(str(personality_name))
 
     return "default"
 
