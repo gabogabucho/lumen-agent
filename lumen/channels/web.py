@@ -331,6 +331,19 @@ def _installed_personality_manifest(module_name: str) -> dict | None:
     return manifest
 
 
+def _find_marketplace_item(name: str) -> dict | None:
+    if not _brain or not getattr(_brain, "marketplace", None):
+        return None
+    snapshot = _brain.marketplace.snapshot()
+    for section_key in ("modules", "kits", "skills"):
+        section = snapshot.get(section_key) or {}
+        for bucket in ("installed", "available", "items"):
+            for item in section.get(bucket, []) or []:
+                if item.get("name") == name:
+                    return item
+    return None
+
+
 def _module_matches_setup_personality_tags(
     module_info: dict, entry_path: str | None
 ) -> bool:
@@ -1072,10 +1085,14 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                     try:
                         announcement = await _brain.think_proactive()
                         if announcement:
-                            await websocket.send_text(json.dumps({
-                                "type": "awareness",
-                                "content": announcement,
-                            }))
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "awareness",
+                                        "content": announcement,
+                                    }
+                                )
+                            )
                     except Exception:
                         pass
                 await websocket.send_text(json.dumps({"type": "pong"}))
@@ -1125,10 +1142,12 @@ async def broadcast_awareness():
         if not announcement:
             return
 
-        message = json.dumps({
-            "type": "awareness",
-            "content": announcement,
-        })
+        message = json.dumps(
+            {
+                "type": "awareness",
+                "content": announcement,
+            }
+        )
         # Send to all active connections, remove failed ones
         stale = []
         for ws in _active_websockets:
@@ -1275,19 +1294,24 @@ async def api_modules_install(request: Request, name: str):
         lumen_dir=LUMEN_DIR,
     )
     result = installer.install_from_catalog(name)
+    if result.get("status") == "not_found":
+        remote_item = _find_marketplace_item(name)
+        if remote_item and remote_item.get("actions", {}).get("can_install"):
+            result = installer.install_marketplace_item(remote_item)
 
     if result["status"] == "installed":
         global _config
+        installed_name = result.get("name", name)
         await sync_runtime_modules(
             _brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR
         )
         is_personality = False
-        manifest = _installed_personality_manifest(name)
+        manifest = _installed_personality_manifest(installed_name)
         if manifest:
             tags = _normalize_module_tags(manifest.get("tags"))
             if "personality" in tags:
                 is_personality = True
-                _config = _merge_save_config({"active_personality": name})
+                _config = _merge_save_config({"active_personality": installed_name})
 
         refresh_runtime_registry(_brain, pkg_dir=PKG_DIR, active_channels=["web"])
 
@@ -1419,6 +1443,16 @@ async def api_status(request: Request):
         "language": _config.get("language", "en"),
         "capabilities": capabilities,
         "summary": registry.summary() if registry else {},
+        "awareness": (
+            getattr(getattr(_brain, "capability_awareness", None), "peek_summary", lambda: {
+                "pending": 0,
+                "counts": {},
+                "effects": {},
+                "events": [],
+            })()
+            if _brain
+            else {"pending": 0, "counts": {}, "effects": {}, "events": []}
+        ),
         "flows": flows_info,
         "ready": len(registry.ready()) if registry else 0,
         "gaps": len(registry.gaps()) if registry else 0,
@@ -1463,7 +1497,9 @@ async def api_capability_hook(request: Request):
     except ValueError:
         return JSONResponse(
             status_code=400,
-            content={"error": f"Invalid kind. Must be one of: {[k.value for k in CapabilityKind]}"},
+            content={
+                "error": f"Invalid kind. Must be one of: {[k.value for k in CapabilityKind]}"
+            },
         )
 
     status_str = body.get("status", "available")

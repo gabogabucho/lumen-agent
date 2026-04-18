@@ -983,6 +983,8 @@
 
     function renderReadOnlyCard(item, emptyLabel) {
       const reasons = item.compatibility?.reasons || [];
+      const installBtn = item.actions?.can_install
+        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small">Instalar</button>` : '';
       return `
         <div class="mod-card">
           <div class="mod-card-top">
@@ -990,7 +992,7 @@
               <h4>${escapeHtml(item.display_name || item.name)}<span class="badge">Skill</span></h4>
               <div class="mod-meta">${escapeHtml(item.min_capability || 'tier-1')} · ${item.installed ? 'instalado' : 'descubierto'}</div>
             </div>
-            ${renderCompatBadge(item)}
+            <div class="mod-actions">${renderCompatBadge(item)}${installBtn}</div>
           </div>
           <div class="mod-desc">${escapeHtml(item.description || emptyLabel)}</div>
           ${renderSourcePills(item)}

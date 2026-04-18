@@ -8,6 +8,7 @@ Uninstall → gone from consciousness, as if it never existed.
 from __future__ import annotations
 
 import io
+import subprocess
 import shutil
 import zipfile
 from pathlib import Path
@@ -140,6 +141,27 @@ class Installer:
             "name": name,
             "display_name": module_info.get("display_name", name),
             "description": module_info.get("description", ""),
+        }
+
+    def install_marketplace_item(self, item: dict) -> dict:
+        """Install a marketplace card from a remote source."""
+        if not isinstance(item, dict) or not item.get("name"):
+            return {"status": "error", "error": "Invalid marketplace item"}
+
+        source_type = str(
+            item.get("source_type")
+            or ((item.get("sources") or [{}])[0].get("type") or "")
+        ).strip()
+
+        if source_type == "clawhub":
+            return self._install_from_clawhub(item)
+
+        if source_type == "mcp-registry":
+            return self._install_from_mcp_registry(item)
+
+        return {
+            "status": "error",
+            "error": f"Unsupported install source: {source_type or 'unknown'}",
         }
 
     def install_from_zip(self, zip_data: bytes) -> dict:
@@ -281,3 +303,99 @@ class Installer:
                 "External module does not follow the recommended 'x-lumen-*' naming convention"
             )
         return warnings
+
+    def _install_from_clawhub(self, item: dict) -> dict:
+        slug = str(item.get("name") or "").strip()
+        if not slug:
+            return {"status": "error", "error": "Missing ClawHub slug"}
+
+        npx = shutil.which("npx")
+        if not npx:
+            return {
+                "status": "error",
+                "error": "Install Node.js to use ClawHub skills: https://nodejs.org",
+            }
+
+        before = {
+            path.name
+            for path in self.installed_dir.iterdir()
+            if path.is_dir() and not path.name.startswith("_")
+        }
+        result = subprocess.run(
+            [npx, "clawhub@latest", "install", slug, "--dir", str(self.installed_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            return {
+                "status": "error",
+                "error": detail or f"ClawHub install failed for {slug}",
+            }
+
+        module_dir = self._detect_new_module_dir(before, slug)
+        if module_dir is None:
+            return {
+                "status": "error",
+                "error": "ClawHub install completed but no valid module was added to Lumen.",
+            }
+
+        manifest_path, manifest = load_module_manifest(module_dir)
+        if manifest_path is None:
+            return {
+                "status": "error",
+                "error": "ClawHub install completed but no module manifest was found.",
+            }
+
+        module_name = manifest.get("name", module_dir.name)
+        run_module_install_hook(
+            name=module_name,
+            module_dir=module_dir,
+            runtime_root=self.lumen_dir / "modules",
+            lumen_dir=self.lumen_dir,
+        )
+        return {
+            "status": "installed",
+            "name": module_name,
+            "display_name": humanize_module_name(
+                module_name, manifest.get("display_name")
+            ),
+            "description": manifest.get("description", item.get("description", "")),
+        }
+
+    def _install_from_mcp_registry(self, item: dict) -> dict:
+        remote_transport = item.get("remote_transport") or {}
+        transport_type = str(remote_transport.get("type") or "stdio").strip().lower()
+        if transport_type and transport_type != "stdio":
+            return {
+                "status": "error",
+                "error": f"Remote MCP transports ({transport_type}) are not installable yet.",
+            }
+
+        name = str(item.get("name") or "").strip()
+        module_info = self.catalog.get(name)
+        if module_info:
+            return self.install_from_catalog(name)
+
+        return {
+            "status": "error",
+            "error": "This MCP Registry entry has no local stdio install path yet.",
+        }
+
+    def _detect_new_module_dir(self, before: set[str], slug: str) -> Path | None:
+        direct = self.installed_dir / slug
+        if direct.exists() and resolve_module_manifest_path(direct) is not None:
+            return direct
+
+        candidates = [
+            path
+            for path in self.installed_dir.iterdir()
+            if path.is_dir()
+            and not path.name.startswith("_")
+            and path.name not in before
+            and resolve_module_manifest_path(path) is not None
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        return None

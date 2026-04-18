@@ -442,7 +442,9 @@ class Marketplace:
         # - ClawHub API v1:     {results: [{slug, displayName, summary, ...}]}
         # - MCP Registry v0:    {servers: [{server: {name, description, remotes, ...}}]}
         if "results" in payload and "skills" not in payload and "mcps" not in payload:
-            return self._parse_clawhub_payload(payload, source_name, source_type, runtime_surface)
+            return self._parse_clawhub_payload(
+                payload, source_name, source_type, runtime_surface
+            )
         if "servers" in payload and "skills" not in payload and "mcps" not in payload:
             return self._parse_mcp_registry_payload(
                 payload, source_name, source_type, runtime_surface
@@ -521,9 +523,7 @@ class Marketplace:
             raw = _mcp_registry_item_to_mcp_raw(item)
             if not raw:
                 continue
-            card = self._remote_mcp_card(
-                raw, runtime_surface, source_name, source_type
-            )
+            card = self._remote_mcp_card(raw, runtime_surface, source_name, source_type)
             if card:
                 entries.append(("mcps", card))
         return entries
@@ -549,6 +549,13 @@ class Marketplace:
             display_name=raw.get("display_name") or raw.get("title"),
             tags=raw.get("tags", []),
             version=raw.get("version", "remote"),
+            can_install=True,
+            read_only=False,
+            extra={
+                "install_spec": raw.get("install"),
+                "source_url": raw.get("source_url"),
+                "source_type": source_type,
+            },
         )
 
     def _remote_mcp_card(
@@ -581,6 +588,19 @@ class Marketplace:
             },
         )
         compatibility = self._remote_compatibility(artifact, runtime_surface)
+        remote_transport = raw.get("remote_transport") or {}
+        transport_type = str(remote_transport.get("type") or "stdio").strip().lower()
+        can_install = source_type == "mcp-registry" and transport_type in {"", "stdio"}
+        if transport_type and transport_type != "stdio":
+            compatibility = self._with_badge(
+                {
+                    **compatibility,
+                    "status": COMPAT_BLOCKED,
+                    "reasons": list(compatibility.get("reasons", []))
+                    + [f"requires remote MCP transport support ({transport_type})"],
+                    "warnings": compatibility.get("warnings", []),
+                }
+            )
         return self._artifact_card(
             artifact,
             compatibility=compatibility,
@@ -589,6 +609,13 @@ class Marketplace:
             display_name=raw.get("display_name") or raw.get("title"),
             tags=raw.get("tags", []),
             version=raw.get("version", "remote"),
+            can_install=can_install,
+            read_only=not can_install,
+            extra={
+                "remote_transport": raw.get("remote_transport"),
+                "source_url": raw.get("source_url"),
+                "source_type": source_type,
+            },
         )
 
     def _artifact_card(
@@ -601,9 +628,12 @@ class Marketplace:
         display_name: str | None = None,
         tags: list[str] | None = None,
         version: str | None = None,
+        can_install: bool = False,
+        read_only: bool = True,
+        extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         kind = "module" if artifact.kind == "mcp" else artifact.kind
-        return {
+        card = {
             "id": f"{kind}:{artifact.name}",
             "name": artifact.name,
             "display_name": display_name
@@ -624,11 +654,14 @@ class Marketplace:
             "compatibility": compatibility,
             "sources": [{"type": artifact.source_type, "label": source_name}],
             "actions": {
-                "read_only": True,
-                "can_install": False,
+                "read_only": read_only,
+                "can_install": can_install,
                 "can_uninstall": False,
             },
         }
+        if extra:
+            card.update(extra)
+        return card
 
     def _merge_cards(
         self,
