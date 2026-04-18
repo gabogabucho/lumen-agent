@@ -44,11 +44,11 @@
 <body class="bg-neo-bg text-gray-200 h-screen flex overflow-hidden">
 
   <!-- Sidebar -->
-  <aside class="w-64 bg-neo-sidebar border-r border-neo-border flex flex-col shrink-0">
+  <aside id="sidebar" class="w-64 bg-neo-sidebar border-r border-neo-border flex flex-col shrink-0 transition-all duration-300">
     <!-- Logo -->
-    <div class="p-6 border-b border-neo-border">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-neo-accent/10 flex items-center justify-center">
+    <div class="p-4 border-b border-neo-border flex items-center justify-between gap-2">
+      <div class="flex items-center gap-3 overflow-hidden">
+        <div class="w-10 h-10 rounded-xl bg-neo-accent/10 flex items-center justify-center shrink-0">
           <svg viewBox="0 0 220 130" class="w-8 h-5">
             <path d="M10,65 Q45,15 110,10 Q175,15 210,65 Q175,115 110,120 Q45,115 10,65 Z"
                   fill="none" stroke="#3b82f6" stroke-width="6" stroke-linecap="round" opacity="0.7"/>
@@ -58,58 +58,63 @@
             <circle cx="102" cy="58" r="4" fill="white" opacity="0.8"/>
           </svg>
         </div>
-        <div>
+        <div class="sidebar-text whitespace-nowrap transition-opacity duration-200">
           <h1 class="text-lg font-bold text-white">Lumen</h1>
           <p class="text-xs text-gray-500">v{{ version }}</p>
         </div>
       </div>
+      <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white shrink-0 p-1 rounded-md hover:bg-white/5 transition-colors" title="{{ ui.toggle_sidebar | default('Toggle sidebar') }}">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 p-4 space-y-1">
+    <nav class="flex-1 p-4 space-y-1 overflow-x-hidden">
       <button onclick="showPanel('status')"
               id="nav-status"
               class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
         </svg>
-        {{ ui.status | default('Memoria') }}
+        <span class="sidebar-text whitespace-nowrap transition-opacity duration-200">{{ ui.status | default('Memoria') }}</span>
       </button>
 
       <button onclick="showPanel('chat')"
               id="nav-chat"
               class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-neo-accent bg-neo-accent/10">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
         </svg>
-        {{ ui.chat | default('Charlas') }}
+        <span class="sidebar-text whitespace-nowrap transition-opacity duration-200">{{ ui.chat | default('Charlas') }}</span>
       </button>
 
       <button onclick="showPanel('marketplace')"
               id="nav-marketplace"
               class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
         </svg>
-        {{ ui.marketplace | default('Módulos') }}
+        <span class="sidebar-text whitespace-nowrap transition-opacity duration-200">{{ ui.marketplace | default('Módulos') }}</span>
       </button>
 
       <button onclick="showPanel('config')"
               id="nav-config"
               class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
         </svg>
-        {{ ui.config | default('Ajustes') }}
+        <span class="sidebar-text whitespace-nowrap transition-opacity duration-200">{{ ui.config | default('Ajustes') }}</span>
       </button>
     </nav>
 
     <!-- Footer -->
     <div class="p-4 border-t border-neo-border">
       <div class="flex items-center gap-2 px-3 py-2">
-        <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-        <span class="text-xs text-gray-500">{{ ui.active | default('Lumen is active') }}</span>
+        <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></div>
+        <span class="sidebar-text text-xs text-gray-500 whitespace-nowrap transition-opacity duration-200">{{ ui.active | default('Lumen is active') }}</span>
       </div>
     </div>
   </aside>
@@ -665,6 +670,31 @@
       origShowPanel(name);
       if (name === 'marketplace') loadMarketplace();
     };
+
+    // --- Sidebar collapse ---
+    function applySidebarState(collapsed) {
+      const sidebar = document.getElementById('sidebar');
+      if (!sidebar) return;
+      const labels = sidebar.querySelectorAll('.sidebar-text');
+      if (collapsed) {
+        sidebar.classList.remove('w-64');
+        sidebar.classList.add('w-16');
+        labels.forEach(el => { el.classList.add('opacity-0', 'hidden'); });
+      } else {
+        sidebar.classList.remove('w-16');
+        sidebar.classList.add('w-64');
+        labels.forEach(el => { el.classList.remove('opacity-0', 'hidden'); });
+      }
+    }
+    function toggleSidebar() {
+      const collapsed = localStorage.getItem('lumen-sidebar-collapsed') === '1';
+      const next = !collapsed;
+      localStorage.setItem('lumen-sidebar-collapsed', next ? '1' : '0');
+      applySidebarState(next);
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      applySidebarState(localStorage.getItem('lumen-sidebar-collapsed') === '1');
+    });
   </script>
 </body>
 </html>
