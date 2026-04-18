@@ -21,6 +21,7 @@ from urllib.request import Request as UrlRequest, urlopen
 import yaml
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from lumen.core.registry import CapabilityKind
@@ -464,7 +465,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Lumen", version="0.1.0", lifespan=lifespan)
 templates_dir = Path(__file__).parent / "templates"
+static_dir = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(templates_dir))
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 session_manager = SessionManager()
 
 

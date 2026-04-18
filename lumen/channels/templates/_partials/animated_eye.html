@@ -1,0 +1,166 @@
+{# Lumen animated eye — reusable in awakening, chat avatar, anywhere.
+
+   Usage:
+     {% from "_partials/animated_eye.html" import animated_eye, eye_styles %}
+     {{ eye_styles() }}              {# include once per page, in <head> or before first call #}
+     {{ animated_eye(size="full") }} {# 220x130 with full birth animation #}
+     {{ animated_eye(size="mini") }} {# 32x20, gentle pulse, used as chat avatar #}
+     {{ animated_eye(size="boot") }} {# 120x70, faster birth, for setup hero etc. #}
+
+   Colors come from tokens.html — uses var(--lumen-blue) etc. Drops in any page
+   that already includes tokens.html.
+#}
+
+{% macro eye_styles() -%}
+<style>
+  .lumen-eye { display: inline-block; line-height: 0; }
+  .lumen-eye svg { display: block; width: 100%; height: 100%; }
+
+  .lumen-eye--full { width: 220px; height: 130px; }
+  .lumen-eye--boot { width: 120px; height: 70px; }
+  .lumen-eye--mini { width: 32px; height: 20px; }
+
+  .lumen-eye .e-outline {
+    fill: none;
+    stroke: var(--lumen-ink-soft);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.55;
+  }
+  .lumen-eye .e-facet {
+    fill: none;
+    stroke: var(--lumen-mute);
+    stroke-width: 1;
+    opacity: 0.4;
+  }
+  .lumen-eye .e-iris-glow { fill: var(--lumen-blue); opacity: 0.18; filter: blur(8px); }
+  .lumen-eye .e-iris-outer { fill: none; stroke: var(--lumen-blue); stroke-width: 2; opacity: 0.85; }
+  .lumen-eye .e-iris-inner { fill: var(--lumen-blue); opacity: 0.42; }
+  .lumen-eye .e-pupil { fill: var(--lumen-ink); }
+  .lumen-eye .e-refl { fill: #ffffff; opacity: 0.85; }
+  .lumen-eye .e-node { fill: var(--lumen-blue); opacity: 0.7; r: 3; }
+
+  /* Mini mode: gentle iris pulse only */
+  .lumen-eye--mini .e-iris-glow { animation: lumenIrisPulse 2.6s ease-in-out infinite; }
+  @keyframes lumenIrisPulse {
+    0%, 100% { opacity: 0.14; }
+    50%      { opacity: 0.36; }
+  }
+
+  /* Full and boot modes: birth choreography */
+  .lumen-eye--full .e-outline,
+  .lumen-eye--boot .e-outline {
+    stroke-dasharray: 600;
+    stroke-dashoffset: 600;
+    animation: lumenDrawEye 2s ease-out 0.2s forwards;
+  }
+  .lumen-eye--full .e-facet,
+  .lumen-eye--boot .e-facet {
+    stroke-dasharray: 400;
+    stroke-dashoffset: 400;
+    animation: lumenDrawEye 1.5s ease-out 1.0s forwards;
+  }
+  @keyframes lumenDrawEye { to { stroke-dashoffset: 0; } }
+
+  .lumen-eye--full .e-iris-glow,
+  .lumen-eye--boot .e-iris-glow { animation: lumenIrisGlow 2s ease-in-out 1.5s infinite; opacity: 0; }
+  @keyframes lumenIrisGlow {
+    0%, 100% { opacity: 0.18; }
+    50%      { opacity: 0.42; }
+  }
+
+  .lumen-eye--full .e-iris-outer,
+  .lumen-eye--full .e-iris-inner,
+  .lumen-eye--boot .e-iris-outer,
+  .lumen-eye--boot .e-iris-inner {
+    transform-origin: 110px 65px;
+    transform: scale(0);
+    opacity: 0;
+    animation: lumenIrisReveal 1s ease-out 1.6s forwards;
+  }
+  .lumen-eye--full .e-iris-inner,
+  .lumen-eye--boot .e-iris-inner { animation-delay: 1.9s; }
+  @keyframes lumenIrisReveal { to { opacity: 0.85; transform: scale(1); } }
+
+  .lumen-eye--full .e-pupil,
+  .lumen-eye--boot .e-pupil {
+    transform-origin: 110px 65px;
+    transform: scale(0);
+    opacity: 0;
+    animation: lumenPupil 0.6s ease-out 2.2s forwards;
+  }
+  @keyframes lumenPupil { to { opacity: 1; transform: scale(1); } }
+
+  .lumen-eye--full .e-refl,
+  .lumen-eye--boot .e-refl { opacity: 0; animation: lumenReflIn 0.4s ease-out 2.5s forwards; }
+  @keyframes lumenReflIn { to { opacity: 0.85; } }
+
+  .lumen-eye--full .e-node,
+  .lumen-eye--boot .e-node { opacity: 0; animation: lumenNodeLit 0.5s ease-out forwards; }
+  .lumen-eye--full .e-node-1, .lumen-eye--boot .e-node-1 { animation-delay: 2.7s; }
+  .lumen-eye--full .e-node-2, .lumen-eye--boot .e-node-2 { animation-delay: 2.9s; }
+  .lumen-eye--full .e-node-3, .lumen-eye--boot .e-node-3 { animation-delay: 3.1s; }
+  .lumen-eye--full .e-node-4, .lumen-eye--boot .e-node-4 { animation-delay: 3.3s; }
+  @keyframes lumenNodeLit {
+    0%   { opacity: 0; }
+    50%  { opacity: 1; }
+    100% { opacity: 0.7; }
+  }
+
+  /* Boot mode: same birth but faster (compress all delays) */
+  .lumen-eye--boot .e-outline { animation-duration: 1.2s; }
+  .lumen-eye--boot .e-facet   { animation-delay: 0.6s; animation-duration: 0.9s; }
+  .lumen-eye--boot .e-iris-glow   { animation-delay: 1.0s; }
+  .lumen-eye--boot .e-iris-outer  { animation-delay: 1.0s; }
+  .lumen-eye--boot .e-iris-inner  { animation-delay: 1.2s; }
+  .lumen-eye--boot .e-pupil       { animation-delay: 1.5s; }
+  .lumen-eye--boot .e-refl        { animation-delay: 1.7s; }
+  .lumen-eye--boot .e-node-1 { animation-delay: 1.8s; }
+  .lumen-eye--boot .e-node-2 { animation-delay: 1.95s; }
+  .lumen-eye--boot .e-node-3 { animation-delay: 2.1s; }
+  .lumen-eye--boot .e-node-4 { animation-delay: 2.25s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lumen-eye *, .lumen-eye--full *, .lumen-eye--boot * {
+      animation: none !important;
+      opacity: 0.85 !important;
+      stroke-dashoffset: 0 !important;
+      transform: none !important;
+    }
+  }
+</style>
+{%- endmacro %}
+
+{% macro animated_eye(size="full") -%}
+<span class="lumen-eye lumen-eye--{{ size }}" aria-hidden="true">
+  <svg viewBox="0 0 220 130" xmlns="http://www.w3.org/2000/svg">
+    <!-- outline -->
+    <path class="e-outline"
+      d="M10,65 Q45,15 110,10 Q175,15 210,65 Q175,115 110,120 Q45,115 10,65 Z" />
+    <!-- inner facets (only meaningful at larger sizes) -->
+    {% if size != "mini" %}
+    <path class="e-facet" d="M35,65 Q65,30 110,24 Q155,30 185,65" />
+    <path class="e-facet" d="M35,65 Q65,100 110,106 Q155,100 185,65" />
+    {% endif %}
+    <!-- iris -->
+    <circle class="e-iris-glow"  cx="110" cy="65" r="30" />
+    <circle class="e-iris-outer" cx="110" cy="65" r="30" />
+    <circle class="e-iris-inner" cx="110" cy="65" r="22" />
+    <!-- pupil -->
+    <circle class="e-pupil" cx="110" cy="65" r="10" />
+    <!-- reflections -->
+    {% if size != "mini" %}
+    <circle class="e-refl" cx="100" cy="56" r="4" />
+    <circle class="e-refl" cx="118" cy="52" r="2" />
+    {% endif %}
+    <!-- nodes -->
+    {% if size == "full" %}
+    <circle class="e-node e-node-1" cx="60"  cy="32"  />
+    <circle class="e-node e-node-2" cx="160" cy="32"  />
+    <circle class="e-node e-node-3" cx="110" cy="10"  />
+    <circle class="e-node e-node-4" cx="110" cy="120" />
+    {% endif %}
+  </svg>
+</span>
+{%- endmacro %}

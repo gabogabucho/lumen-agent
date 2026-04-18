@@ -14,6 +14,8 @@ from pathlib import Path
 
 import yaml
 
+from lumen.core.marketplace import humanize_module_name
+
 from lumen.core.catalog import Catalog
 from lumen.core.connectors import ConnectorRegistry
 from lumen.core.memory import Memory
@@ -63,7 +65,10 @@ class Installer:
                 installed.append(
                     {
                         "name": manifest.get("name", module_dir.name),
-                        "display_name": manifest.get("display_name", module_dir.name),
+                        "display_name": humanize_module_name(
+                            manifest.get("name", module_dir.name),
+                            manifest.get("display_name"),
+                        ),
                         "description": manifest.get("description", ""),
                         "version": manifest.get("version", "0.0.0"),
                         "tags": manifest.get("tags", []),
@@ -191,7 +196,9 @@ class Installer:
                 return {
                     "status": "installed",
                     "name": module_name,
-                    "display_name": manifest.get("display_name", module_name),
+                    "display_name": humanize_module_name(
+                        module_name, manifest.get("display_name")
+                    ),
                     "description": manifest.get("description", ""),
                     "warnings": warnings,
                 }

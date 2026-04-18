@@ -1,0 +1,98 @@
+{# Lumen brand design tokens — light + dark.
+   Light is the default. Dark activates with <html data-theme="dark">.
+   Colors derived from logo.png (no inventing). #}
+<style>
+  :root {
+    /* Ink — texts and primary buttons (navy del logo) */
+    --lumen-ink: #0f1545;
+    --lumen-ink-soft: #3a3f6e;
+    --lumen-mute: #8b8fa8;
+
+    /* Brand blues (faceta media + soft) */
+    --lumen-blue: #3d3dd6;
+    --lumen-blue-soft: #a4a4f5;
+    --lumen-lavender: #e8e8ff;
+
+    /* Único acento cálido — la chispa rosa del iris */
+    --lumen-coral: #ff8a7a;
+    --lumen-coral-soft: #ffe0db;
+
+    /* Surfaces (light = paper) */
+    --lumen-paper: #fafaf7;
+    --lumen-paper-2: #f2f2ec;
+    --lumen-surface: #ffffff;
+    --lumen-line: #e6e6df;
+
+    /* Status pills */
+    --lumen-success: #2f9e6e;
+    --lumen-warn: #d99225;
+    --lumen-danger: #d94c4c;
+
+    /* Shadow — single calibrated for paper bg */
+    --lumen-shadow-sm: 0 1px 2px rgba(15,21,69,0.04);
+    --lumen-shadow:    0 1px 2px rgba(15,21,69,0.04), 0 8px 24px rgba(15,21,69,0.06);
+    --lumen-shadow-lg: 0 1px 2px rgba(15,21,69,0.04), 0 24px 48px rgba(15,21,69,0.10);
+
+    /* Radii */
+    --lumen-r-sm: 8px;
+    --lumen-r-md: 14px;
+    --lumen-r-lg: 28px;
+    --lumen-r-pill: 999px;
+
+    /* Spacing base */
+    --lumen-s-1: 4px;
+    --lumen-s-2: 8px;
+    --lumen-s-3: 12px;
+    --lumen-s-4: 16px;
+    --lumen-s-5: 24px;
+    --lumen-s-6: 32px;
+    --lumen-s-7: 48px;
+    --lumen-s-8: 64px;
+
+    /* Type */
+    --lumen-font: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+
+  [data-theme="dark"] {
+    --lumen-ink: #f4f4ff;
+    --lumen-ink-soft: #c4c5e0;
+    --lumen-mute: #6f739c;
+
+    --lumen-blue: #7d7dff;
+    --lumen-blue-soft: #3d3dd6;
+    --lumen-lavender: #1c2350;
+
+    --lumen-coral: #ff9c8e;
+    --lumen-coral-soft: #4a2a26;
+
+    --lumen-paper: #0a0d1f;
+    --lumen-paper-2: #141832;
+    --lumen-surface: #181d3a;
+    --lumen-line: #1f2347;
+
+    --lumen-shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --lumen-shadow:    0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    --lumen-shadow-lg: 0 1px 2px rgba(0,0,0,0.3), 0 24px 48px rgba(0,0,0,0.45);
+  }
+
+  html, body {
+    background: var(--lumen-paper);
+    color: var(--lumen-ink);
+    font-family: var(--lumen-font);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection { background: var(--lumen-lavender); color: var(--lumen-ink); }
+
+  /* Scrollbar — minimal, matches paper */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--lumen-line); border-radius: 999px; border: 2px solid var(--lumen-paper); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--lumen-blue-soft); }
+
+  /* Smooth theme transitions on the elements that change */
+  body, aside, nav, .l-card, .l-input, .l-btn, .l-pill {
+    transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+  }
+</style>

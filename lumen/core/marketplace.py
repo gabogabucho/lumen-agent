@@ -39,6 +39,23 @@ COMPAT_BADGES = {
 }
 
 
+def humanize_module_name(name: str, display_name: str | None = None) -> str:
+    """Return a human-friendly label for a module name.
+
+    Strips the conventional `x-lumen-` namespace prefix when no explicit
+    `display_name` is provided, so UIs never surface raw machine names like
+    `x-lumen-comunicacion-telegram`.
+    """
+    if display_name:
+        return display_name
+    if not name:
+        return name
+    cleaned = name
+    if cleaned.startswith("x-lumen-"):
+        cleaned = cleaned[len("x-lumen-"):]
+    return cleaned.replace("-", " ").replace("_", " ").strip().title() or name
+
+
 class Marketplace:
     """Aggregates marketplace data for the web dashboard."""
 
@@ -202,7 +219,7 @@ class Marketplace:
         return {
             "id": f"kit:{entry['name']}",
             "name": entry["name"],
-            "display_name": entry.get("display_name", entry["name"]),
+            "display_name": humanize_module_name(entry["name"], entry.get("display_name")),
             "description": entry.get("description", ""),
             "kind": "kit",
             "category": "kits_lumen",
@@ -241,7 +258,9 @@ class Marketplace:
         kind = (
             "kit" if capability.kind == CapabilityKind.MODULE else capability.kind.value
         )
-        display_name = capability.metadata.get("display_name") or capability.name
+        display_name = humanize_module_name(
+            capability.name, capability.metadata.get("display_name")
+        )
         return {
             "id": f"{kind}:{capability.name}",
             "name": capability.name,
