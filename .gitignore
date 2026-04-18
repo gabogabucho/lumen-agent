@@ -33,3 +33,6 @@ Thumbs.db
 # ~/.neo/ is the user config dir, not in the repo
 .claude/
 neo/
+
+# Agent scratch directories
+.codex_clone/
