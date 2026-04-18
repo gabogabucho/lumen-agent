@@ -154,9 +154,11 @@ class WebSurfaceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["channel"]["ready"], 1)
         self.assertEqual(payload["summary"]["skill"]["ready"], 1)
         self.assertEqual(payload["summary"]["mcp"]["error"], 1)
+        self.assertEqual(payload["awareness"], {"pending": 0, "counts": {}, "effects": {}, "events": []})
         self.assertEqual(payload["flows"][0]["intent"], "book_demo")
         self.assertEqual(payload["flows"][0]["slots"], ["email", "date"])
         self.assertEqual(payload["capabilities"][2]["min_capability"], "tier-2")
+        self.assertIn("consciousness", payload["capabilities"][0])
 
     def test_api_status_defaults_to_not_configured_when_brain_missing(self):
         response = self.client.get("/api/status")
@@ -171,6 +173,7 @@ class WebSurfaceTests(unittest.TestCase):
                 "language": "en",
                 "capabilities": [],
                 "summary": {},
+                "awareness": {"pending": 0, "counts": {}, "effects": {}, "events": []},
                 "flows": [],
                 "ready": 0,
                 "gaps": 0,

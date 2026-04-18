@@ -30,6 +30,7 @@ class RuntimeBootstrap:
     locale: dict
     config: dict
     awareness: CapabilityAwareness | None = None
+    integration_summary: dict | None = None
 
 
 def refresh_runtime_registry(
@@ -46,6 +47,7 @@ def refresh_runtime_registry(
     Re-subscribes CapabilityAwareness to the new registry so events keep flowing.
     """
     old_registry = brain.registry
+    previous_snapshot = old_registry.snapshot() if old_registry is not None else {}
     registry = Registry()
     discover_all(
         registry=registry,
@@ -64,6 +66,7 @@ def refresh_runtime_registry(
     # Re-attach awareness subscription to the new registry
     if brain.capability_awareness:
         registry.subscribe(brain.capability_awareness._on_registry_event)
+        brain.capability_awareness.ingest_snapshot_diff(previous_snapshot, registry.snapshot())
 
     if getattr(brain, "marketplace", None) is not None:
         brain.marketplace.sync_registry(registry)
@@ -175,6 +178,7 @@ async def bootstrap_runtime(
     )
 
     awareness = CapabilityAwareness(registry)
+    awareness.ingest_snapshot_diff({}, registry.snapshot())
 
     catalog = Catalog()
     marketplace = Marketplace(
@@ -209,7 +213,13 @@ async def bootstrap_runtime(
     if ui_path.exists():
         locale = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
 
-    return RuntimeBootstrap(brain=brain, locale=locale, config=config, awareness=awareness)
+    return RuntimeBootstrap(
+        brain=brain,
+        locale=locale,
+        config=config,
+        awareness=awareness,
+        integration_summary=awareness.peek_summary(),
+    )
 
 
 def _resolve_active_personality_module(

@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 
 from lumen.core.events import CapabilityEvent
-from lumen.core.registry import Registry
+from lumen.core.registry import Registry, diff_capability_snapshots
 
 logger = logging.getLogger(__name__)
 
@@ -42,29 +42,46 @@ class CapabilityAwareness:
         self._proactive_done: bool = False  # Track if proactive was already sent
         registry.subscribe(self._on_registry_event)
 
-    def _on_registry_event(self, event: CapabilityEvent):
-        """Callback: Registry emits, Awareness receives and translates."""
+    def ingest_event(self, event: CapabilityEvent):
+        """Record a lifecycle event from a registry or snapshot diff."""
         self._pending_events.append(event)
         thought = self._generate_internal_thought(event)
         if thought:
             self._pending_thoughts.append(thought)
-        self._proactive_done = False  # New events reset proactive state
+        self._proactive_done = False
         logger.debug(
             "Awareness received: %s %s",
             event.kind,
             event.capability.name,
         )
 
+    def ingest_snapshot_diff(
+        self,
+        previous: dict[str, dict] | None,
+        current: dict[str, dict] | None,
+    ) -> list[CapabilityEvent]:
+        """Diff two registry states and queue the resulting awareness events."""
+        events = diff_capability_snapshots(previous, current)
+        for event in events:
+            self.ingest_event(event)
+        return events
+
+    def _on_registry_event(self, event: CapabilityEvent):
+        """Callback: Registry emits, Awareness receives and translates."""
+        self.ingest_event(event)
+
     def _generate_internal_thought(self, event: CapabilityEvent) -> str | None:
         """Translate a capability event into an internal impression."""
         cap = event.capability
-        if event.is_addition():
-            return f"I gained a new {cap.kind.value}: {cap.name}"
+        if event.kind == "capability_discovered":
+            return f"I discovered {cap.name}, a possible new part of me."
+        if event.kind in {"capability_connected", "capability_integrated"}:
+            return event.announce_text()
         if event.is_removal():
-            return f"I lost a {cap.kind.value}: {cap.name}"
-        if event.is_status_change():
+            return f"I lost {cap.name}, which used to be part of me."
+        if event.kind == "capability_degraded":
             to_status = event.details.get("to", "unknown")
-            return f"My {cap.kind.value} '{cap.name}' is now {to_status}"
+            return f"My connection to {cap.name} weakened and is now {to_status}."
         return None
 
     # --- Read interface ---
@@ -129,3 +146,20 @@ class CapabilityAwareness:
             "Use your own words — not technical jargon."
         )
         return "\n".join(lines)
+
+    def peek_summary(self) -> dict:
+        """Structured awareness payload for runtime surfaces and UI."""
+        items = [event.to_dict() for event in self._pending_events]
+        counts: dict[str, int] = {}
+        effects: dict[str, int] = {}
+        for item in items:
+            counts[item["type"]] = counts.get(item["type"], 0) + 1
+            label = item["classification"]["kind_label"]
+            effects[label] = effects.get(label, 0) + 1
+
+        return {
+            "pending": len(items),
+            "counts": counts,
+            "effects": effects,
+            "events": items,
+        }

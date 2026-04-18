@@ -337,13 +337,35 @@ class MCPRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(mcp_cap)
                 self.assertEqual(mcp_cap.status.value, "ready")
 
-                installed_kits = runtime.brain.marketplace.kits_installed()
-                self.assertEqual(
-                    [item["name"] for item in installed_kits], ["demo-kit"]
-                )
+                installed_names = {
+                    item["name"] for item in runtime.brain.marketplace.kits_installed()
+                } | {
+                    item["name"] for item in runtime.brain.marketplace.modules_installed()
+                }
+                self.assertIn("demo-kit", installed_names)
+                refresh_summary = runtime.brain.capability_awareness.peek_summary()
+                self.assertGreaterEqual(refresh_summary["pending"], 2)
+                self.assertIn("capability_discovered", refresh_summary["counts"])
+                self.assertIn("capability_connected", refresh_summary["counts"])
             finally:
                 if runtime.brain.mcp_manager:
                     await runtime.brain.mcp_manager.close()
+                await runtime.brain.memory.close()
+
+    async def test_bootstrap_returns_initial_integration_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = await bootstrap_runtime(
+                {"language": "en", "model": "deepseek/deepseek-chat"},
+                pkg_dir=self._make_runtime_pkg(Path(tmp)),
+                lumen_dir=Path(tmp) / "runtime",
+                active_channels=["web"],
+            )
+
+            try:
+                self.assertIsNotNone(runtime.integration_summary)
+                self.assertGreaterEqual(runtime.integration_summary["pending"], 1)
+                self.assertIn("capability_discovered", runtime.integration_summary["counts"])
+            finally:
                 await runtime.brain.memory.close()
 
 
