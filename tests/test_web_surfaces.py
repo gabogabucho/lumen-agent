@@ -63,11 +63,18 @@ class StubMarketplace(Marketplace):
 
 class WebSurfaceTests(unittest.TestCase):
     def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_lumen_dir = web.LUMEN_DIR
+        self.original_config_path = web.CONFIG_PATH
+        self.original_access_mode = web._access_mode
         self.original_brain = web._brain
         self.original_config = web._config
         self.original_locale = web._locale
         self.original_sessions = dict(web.session_manager._sessions)
         self.original_idle_timeout = web.session_manager.idle_timeout_seconds
+        web.LUMEN_DIR = Path(self.temp_dir.name)
+        web.CONFIG_PATH = web.LUMEN_DIR / "config.yaml"
+        web.configure_access_mode("run")
         web._brain = None
         web._config = {}
         web._locale = {}
@@ -76,6 +83,10 @@ class WebSurfaceTests(unittest.TestCase):
         self.client = TestClient(web.app)
 
     def tearDown(self):
+        self.temp_dir.cleanup()
+        web.LUMEN_DIR = self.original_lumen_dir
+        web.CONFIG_PATH = self.original_config_path
+        web._access_mode = self.original_access_mode
         web._brain = self.original_brain
         web._config = self.original_config
         web._locale = self.original_locale
@@ -242,6 +253,66 @@ class WebSurfaceTests(unittest.TestCase):
             self.assertEqual(web._brain.think_calls, 0)
             self.assertIsNone(web._brain.last_think)
 
+    def test_serve_mode_requires_setup_token_before_showing_setup(self):
+        web.configure_access_mode("serve")
+        token = web.ensure_server_bootstrap(host="0.0.0.0", port=3000)
+
+        gated = self.client.get("/setup")
+        self.assertEqual(gated.status_code, 200)
+        self.assertIn("One-time setup token", gated.text)
+
+        invalid = self.client.post("/api/setup/token", json={"token": "wrong-token"})
+        self.assertEqual(invalid.status_code, 401)
+
+        unlocked = self.client.post("/api/setup/token", json={"token": token})
+        self.assertEqual(unlocked.status_code, 200)
+        self.assertEqual(unlocked.json()["status"], "ok")
+
+        setup_page = self.client.get("/setup")
+        self.assertEqual(setup_page.status_code, 200)
+        self.assertIn("Contraseña o PIN del owner", setup_page.text)
+
+    def test_serve_mode_requires_owner_login_for_api_and_websocket(self):
+        web.configure_access_mode("serve")
+        config = {
+            "model": "demo-model",
+            "language": "en",
+            "server_mode": True,
+            "server_secret": "test-server-secret",
+            "owner_secret_hash": web._hash_secret("2468"),
+        }
+        web.CONFIG_PATH.write_text(yaml.dump(config), encoding="utf-8")
+        web._config = dict(config)
+        web._brain = BrainStub()
+
+        denied = self.client.get("/api/status")
+        self.assertEqual(denied.status_code, 401)
+
+        with self.assertRaises(Exception):
+            with self.client.websocket_connect("/ws/protected-session"):
+                pass
+
+        bad_login = self.client.post("/api/login", json={"secret": "wrong"})
+        self.assertEqual(bad_login.status_code, 401)
+
+        login = self.client.post("/api/login", json={"secret": "2468"})
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["status"], "ok")
+
+        allowed = self.client.get("/api/status")
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.json()["status"], "active")
+
+        with self.client.websocket_connect("/ws/protected-session") as websocket:
+            websocket.send_text(json.dumps({"type": "ping"}))
+            pong = json.loads(websocket.receive_text())
+            self.assertEqual(pong, {"type": "pong"})
+
+        logout = self.client.post("/api/logout")
+        self.assertEqual(logout.status_code, 200)
+        denied_again = self.client.get("/api/status")
+        self.assertEqual(denied_again.status_code, 401)
+
 
 class SessionManagerTests(unittest.TestCase):
     def test_get_or_create_sets_last_seen_and_reuses_session(self):
@@ -363,9 +434,11 @@ class CapabilityPropagationTests(unittest.TestCase):
         )
         self.assertEqual(catalog_items[0]["min_capability"], "tier-2")
         self.assertEqual(snapshot["skills"]["available"][0]["min_capability"], "tier-3")
-        self.assertEqual(snapshot["mcps"]["available"][0]["min_capability"], "tier-2")
         self.assertEqual(
-            snapshot["kits_lumen"]["installed"][0]["min_capability"],
+            snapshot["modules"]["available"][0]["min_capability"], "tier-2"
+        )
+        self.assertEqual(
+            snapshot["kits"]["installed"][0]["min_capability"],
             "tier-2",
         )
 

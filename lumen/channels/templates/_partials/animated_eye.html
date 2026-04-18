@@ -2,10 +2,10 @@
 
    Usage:
      {% from "_partials/animated_eye.html" import animated_eye, eye_styles %}
-     {{ eye_styles() }}              {# include once per page, in <head> or before first call #}
-     {{ animated_eye(size="full") }} {# 220x130 with full birth animation #}
-     {{ animated_eye(size="mini") }} {# 32x20, gentle pulse, used as chat avatar #}
-     {{ animated_eye(size="boot") }} {# 120x70, faster birth, for setup hero etc. #}
+     {{ eye_styles() }}
+     {{ animated_eye(size="full") }}
+     {{ animated_eye(size="mini") }}
+     {{ animated_eye(size="boot") }}
 
    Colors come from tokens.html — uses var(--lumen-blue) etc. Drops in any page
    that already includes tokens.html.
@@ -23,16 +23,16 @@
   .lumen-eye .e-outline {
     fill: none;
     stroke: var(--lumen-ink-soft);
-    stroke-width: 2;
+    stroke-width: 2.4;
     stroke-linecap: round;
     stroke-linejoin: round;
-    opacity: 0.55;
+    opacity: 0.82;
   }
   .lumen-eye .e-facet {
     fill: none;
     stroke: var(--lumen-mute);
-    stroke-width: 1;
-    opacity: 0.4;
+    stroke-width: 1.25;
+    opacity: 0.6;
   }
   .lumen-eye .e-iris-glow { fill: var(--lumen-blue); opacity: 0.18; filter: blur(8px); }
   .lumen-eye .e-iris-outer { fill: none; stroke: var(--lumen-blue); stroke-width: 2; opacity: 0.85; }
@@ -40,6 +40,36 @@
   .lumen-eye .e-pupil { fill: var(--lumen-ink); }
   .lumen-eye .e-refl { fill: #ffffff; opacity: 0.85; }
   .lumen-eye .e-node { fill: var(--lumen-blue); opacity: 0.7; r: 3; }
+  .lumen-eye .e-shell {
+    fill: rgba(61,61,214,0.05);
+    stroke: rgba(15,21,69,0.08);
+    stroke-width: 1;
+    opacity: 0;
+  }
+  .lumen-eye .e-logo-glow {
+    fill: var(--lumen-blue);
+    opacity: 0;
+    filter: blur(16px);
+  }
+  .lumen-eye .e-logo-core {
+    fill: url(#lumenEyeCore);
+    opacity: 0;
+    transform-origin: 110px 65px;
+  }
+  .lumen-eye .e-logo-facet {
+    fill: rgba(255,255,255,0.24);
+    opacity: 0;
+    transform-origin: 110px 65px;
+  }
+  .lumen-eye .e-logo-coral {
+    fill: var(--lumen-coral);
+    opacity: 0;
+    filter: drop-shadow(0 0 6px rgba(255,138,122,0.18));
+  }
+  .lumen-eye .e-logo-cut {
+    fill: rgba(244,244,255,0.82);
+    opacity: 0;
+  }
 
   /* Mini mode: gentle iris pulse only */
   .lumen-eye--mini .e-iris-glow { animation: lumenIrisPulse 2.6s ease-in-out infinite; }
@@ -53,21 +83,76 @@
   .lumen-eye--boot .e-outline {
     stroke-dasharray: 600;
     stroke-dashoffset: 600;
-    animation: lumenDrawEye 2s ease-out 0.2s forwards;
+    animation: lumenDrawEye 1.3s ease-out 0.15s forwards;
   }
   .lumen-eye--full .e-facet,
   .lumen-eye--boot .e-facet {
     stroke-dasharray: 400;
     stroke-dashoffset: 400;
-    animation: lumenDrawEye 1.5s ease-out 1.0s forwards;
+    animation: lumenDrawEye 1s ease-out 0.8s forwards;
   }
   @keyframes lumenDrawEye { to { stroke-dashoffset: 0; } }
+
+  .lumen-eye--full .e-shell,
+  .lumen-eye--boot .e-shell {
+    animation: lumenShellIn 0.7s ease-out 0.6s forwards;
+  }
+  @keyframes lumenShellIn {
+    from { opacity: 0; transform: scale(0.94); }
+    to { opacity: 1; transform: scale(1); }
+  }
 
   .lumen-eye--full .e-iris-glow,
   .lumen-eye--boot .e-iris-glow { animation: lumenIrisGlow 2s ease-in-out 1.5s infinite; opacity: 0; }
   @keyframes lumenIrisGlow {
     0%, 100% { opacity: 0.18; }
     50%      { opacity: 0.42; }
+  }
+
+  .lumen-eye--full .e-logo-glow,
+  .lumen-eye--boot .e-logo-glow {
+    animation: lumenLogoGlow 1.6s ease-in-out 1.1s infinite;
+  }
+  @keyframes lumenLogoGlow {
+    0%, 100% { opacity: 0.14; transform: scale(0.96); }
+    50%      { opacity: 0.32; transform: scale(1.04); }
+  }
+
+  .lumen-eye--full .e-logo-core,
+  .lumen-eye--boot .e-logo-core {
+    animation: lumenLogoCoreIn 0.9s cubic-bezier(.2,.8,.2,1) 1.0s forwards;
+  }
+  .lumen-eye--full .e-logo-facet,
+  .lumen-eye--boot .e-logo-facet {
+    animation: lumenLogoFacetIn 0.6s ease-out forwards;
+  }
+  .lumen-eye--full .e-logo-facet-1,
+  .lumen-eye--boot .e-logo-facet-1 { animation-delay: 1.22s; }
+  .lumen-eye--full .e-logo-facet-2,
+  .lumen-eye--boot .e-logo-facet-2 { animation-delay: 1.35s; }
+  .lumen-eye--full .e-logo-facet-3,
+  .lumen-eye--boot .e-logo-facet-3 { animation-delay: 1.48s; }
+  .lumen-eye--full .e-logo-coral,
+  .lumen-eye--boot .e-logo-coral { animation: lumenCoralSpark 0.55s ease-out 1.62s forwards; }
+  .lumen-eye--full .e-logo-cut,
+  .lumen-eye--boot .e-logo-cut { animation: lumenCutIn 0.35s ease-out 1.55s forwards; }
+
+  @keyframes lumenLogoCoreIn {
+    from { opacity: 0; transform: scale(0.3) rotate(-16deg); }
+    to { opacity: 1; transform: scale(1) rotate(0deg); }
+  }
+  @keyframes lumenLogoFacetIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.7); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes lumenCoralSpark {
+    0% { opacity: 0; transform: translate(-2px, 2px) scale(0.72); }
+    70% { opacity: 0.7; transform: translate(0, 0) scale(1.03); }
+    100% { opacity: 0.58; transform: translate(0, 0) scale(1); }
+  }
+  @keyframes lumenCutIn {
+    from { opacity: 0; transform: translateX(4px); }
+    to { opacity: 0.88; transform: translateX(0); }
   }
 
   .lumen-eye--full .e-iris-outer,
@@ -98,10 +183,10 @@
 
   .lumen-eye--full .e-node,
   .lumen-eye--boot .e-node { opacity: 0; animation: lumenNodeLit 0.5s ease-out forwards; }
-  .lumen-eye--full .e-node-1, .lumen-eye--boot .e-node-1 { animation-delay: 2.7s; }
-  .lumen-eye--full .e-node-2, .lumen-eye--boot .e-node-2 { animation-delay: 2.9s; }
-  .lumen-eye--full .e-node-3, .lumen-eye--boot .e-node-3 { animation-delay: 3.1s; }
-  .lumen-eye--full .e-node-4, .lumen-eye--boot .e-node-4 { animation-delay: 3.3s; }
+  .lumen-eye--full .e-node-1, .lumen-eye--boot .e-node-1 { animation-delay: 2.15s; }
+  .lumen-eye--full .e-node-2, .lumen-eye--boot .e-node-2 { animation-delay: 2.3s; }
+  .lumen-eye--full .e-node-3, .lumen-eye--boot .e-node-3 { animation-delay: 2.45s; }
+  .lumen-eye--full .e-node-4, .lumen-eye--boot .e-node-4 { animation-delay: 2.6s; }
   @keyframes lumenNodeLit {
     0%   { opacity: 0; }
     50%  { opacity: 1; }
@@ -111,6 +196,13 @@
   /* Boot mode: same birth but faster (compress all delays) */
   .lumen-eye--boot .e-outline { animation-duration: 1.2s; }
   .lumen-eye--boot .e-facet   { animation-delay: 0.6s; animation-duration: 0.9s; }
+  .lumen-eye--boot .e-shell   { animation-delay: 0.5s; animation-duration: 0.45s; }
+  .lumen-eye--boot .e-logo-core { animation-delay: 0.82s; animation-duration: 0.6s; }
+  .lumen-eye--boot .e-logo-facet-1 { animation-delay: 1.0s; }
+  .lumen-eye--boot .e-logo-facet-2 { animation-delay: 1.1s; }
+  .lumen-eye--boot .e-logo-facet-3 { animation-delay: 1.2s; }
+  .lumen-eye--boot .e-logo-coral { animation-delay: 1.28s; }
+  .lumen-eye--boot .e-logo-cut { animation-delay: 1.22s; }
   .lumen-eye--boot .e-iris-glow   { animation-delay: 1.0s; }
   .lumen-eye--boot .e-iris-outer  { animation-delay: 1.0s; }
   .lumen-eye--boot .e-iris-inner  { animation-delay: 1.2s; }
@@ -135,6 +227,24 @@
 {% macro animated_eye(size="full") -%}
 <span class="lumen-eye lumen-eye--{{ size }}" aria-hidden="true">
   <svg viewBox="0 0 220 130" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="lumenEyeCore" x1="70" y1="20" x2="150" y2="110" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="#7d7dff" />
+        <stop offset="45%" stop-color="#3d3dd6" />
+        <stop offset="80%" stop-color="#24249a" />
+        <stop offset="100%" stop-color="#171c66" />
+      </linearGradient>
+    </defs>
+    {% if size != "mini" %}
+    <path class="e-shell" d="M20,65 Q50,22 110,16 Q170,22 200,65 Q170,108 110,114 Q50,108 20,65 Z" />
+    <ellipse class="e-logo-glow" cx="110" cy="65" rx="56" ry="42" />
+    <polygon class="e-logo-core" points="110,25 147,43 156,71 134,100 97,103 69,82 63,49 84,31" />
+    <polygon class="e-logo-facet e-logo-facet-1" points="110,25 147,43 123,55 96,45" />
+    <polygon class="e-logo-facet e-logo-facet-2" points="147,43 156,71 132,82 123,55" />
+    <polygon class="e-logo-facet e-logo-facet-3" points="69,82 97,103 132,82 102,69" />
+    <polygon class="e-logo-coral" points="129,57 141,62 132,72 121,67" />
+    <polygon class="e-logo-cut" points="121,34 136,42 118,54 103,45" />
+    {% endif %}
     <!-- outline -->
     <path class="e-outline"
       d="M10,65 Q45,15 110,10 Q175,15 210,65 Q175,115 110,120 Q45,115 10,65 Z" />

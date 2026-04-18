@@ -9,12 +9,46 @@ from pathlib import Path
 
 import typer
 import yaml
+from rich.align import Align
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Prompt
 
 from lumen.core.registry import CapabilityKind
 from lumen.core.runtime import bootstrap_runtime
+
+
+def _load_persisted_config() -> dict:
+    if not CONFIG_PATH.exists():
+        return {}
+    loaded = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _is_runtime_configured(config: dict | None = None) -> bool:
+    loaded = config if config is not None else _load_persisted_config()
+    return bool(loaded.get("model"))
+
+
+def _prepare_runtime_if_configured(config: dict | None = None):
+    loaded = config if config is not None else _load_persisted_config()
+    if not _is_runtime_configured(loaded):
+        return None, loaded
+
+    if loaded.get("api_key") and loaded.get("api_key_env"):
+        os.environ[loaded["api_key_env"]] = loaded["api_key"]
+
+    runtime = asyncio.run(
+        bootstrap_runtime(
+            loaded,
+            pkg_dir=PKG_DIR,
+            lumen_dir=LUMEN_DIR,
+            active_channels=["web"],
+        )
+    )
+    return runtime, loaded
+
 
 app = typer.Typer(
     name="lumen",
@@ -48,12 +82,10 @@ def render_eye_boot():
         "   ◌─────◌\n   ╱  ◉  ╲\n ◌───────◌\n   ╲     ╱\n    ◌───◌",
     ]
 
-    for idx, frame in enumerate(frames):
-        if idx:
-            console.clear()
-        console.print(frame, style="#3d3dd6", justify="center")
-        time.sleep(0.2)
-    console.clear()
+    with Live(console=console, refresh_per_second=12, transient=True) as live:
+        for frame in frames:
+            live.update(Align.center(f"[bold #3d3dd6]{frame}[/bold #3d3dd6]"))
+            time.sleep(0.2)
 
 
 @app.command()
@@ -138,26 +170,16 @@ def run(
     If Lumen is not configured yet, the browser will show the setup wizard.
     No 'neo install' needed — the web handles everything.
     """
-    from lumen.channels.web import app as web_app, configure
+    from lumen.channels.web import app as web_app, configure, configure_access_mode
 
     render_eye_boot()
+    configure_access_mode("run")
 
     # If config exists, pre-initialize brain (faster first page load)
-    if CONFIG_PATH.exists():
-        config = yaml.safe_load(CONFIG_PATH.read_text())
+    config = _load_persisted_config()
+    runtime, config = _prepare_runtime_if_configured(config)
 
-        if config.get("api_key") and config.get("api_key_env"):
-            os.environ[config["api_key_env"]] = config["api_key"]
-
-        runtime = asyncio.run(
-            bootstrap_runtime(
-                config,
-                pkg_dir=PKG_DIR,
-                lumen_dir=LUMEN_DIR,
-                active_channels=["web"],
-            )
-        )
-
+    if runtime is not None:
         configure(runtime.brain, runtime.locale, runtime.config)
         use_port = port or config.get("port", 3000)
         lang = config.get("language", "en")
@@ -197,13 +219,61 @@ def run(
 
 
 @app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", help="Server bind host"),
+    port: int = typer.Option(3000, help="Server bind port"),
+):
+    """Start Lumen in hosted/server mode with authenticated access."""
+    from lumen.channels.web import (
+        app as web_app,
+        configure,
+        configure_access_mode,
+        ensure_server_bootstrap,
+    )
+
+    render_eye_boot()
+    configure_access_mode("serve")
+
+    config = _load_persisted_config()
+    runtime, config = _prepare_runtime_if_configured(config)
+    if runtime is not None:
+        configure(runtime.brain, runtime.locale, runtime.config)
+
+    setup_token = ensure_server_bootstrap(host=host, port=port)
+    current = _load_persisted_config()
+
+    body = (
+        f"[bold cyan]Lumen[/bold cyan] server mode\n\n"
+        f"  Dashboard:  [link]http://{host}:{port}[/link]\n"
+        f"  Auth:       {'owner login required' if _is_runtime_configured(current) else 'setup token required'}"
+    )
+    if not _is_runtime_configured(current):
+        body += f"\n  Setup token: [bold]{setup_token}[/bold]\n\n  Open /setup and enter this one-time token to begin onboarding."
+    else:
+        body += "\n\n  Open /login and sign in with the owner password or PIN."
+
+    console.print(
+        Panel(
+            body,
+            title="Lumen",
+            expand=False,
+            border_style="#3d3dd6",
+        )
+    )
+
+    import uvicorn
+
+    uvicorn.run(web_app, host=host, port=port, log_level="warning")
+
+
+@app.command()
 def status():
     """Show Lumen's current configuration."""
-    if not CONFIG_PATH.exists():
+    config = _load_persisted_config()
+    if not _is_runtime_configured(config):
         console.print("[red]Lumen is not installed.[/red]")
         raise typer.Exit(1)
 
-    config = yaml.safe_load(CONFIG_PATH.read_text())
     console.print(
         Panel(
             f"Model:     {config.get('model', 'not set')}\n"

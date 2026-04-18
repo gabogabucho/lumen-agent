@@ -28,9 +28,12 @@
       flex-shrink: 0;
       background: var(--lumen-paper-2);
       border-right: 1px solid var(--lumen-line);
+      box-shadow: 10px 0 30px rgba(15,21,69,0.06);
       display: flex;
       flex-direction: column;
       transition: width 0.25s ease;
+      position: relative;
+      z-index: 2;
     }
     aside.sidebar.collapsed { width: 64px; }
     aside.sidebar.collapsed .sidebar-text { display: none; }
@@ -160,6 +163,7 @@
       flex-direction: column;
       overflow: hidden;
       background: var(--lumen-paper);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
     }
 
     .topbar {
@@ -167,29 +171,11 @@
       border-bottom: 1px solid var(--lumen-line);
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-start;
       gap: var(--lumen-s-4);
       background: var(--lumen-paper);
+      box-shadow: 0 8px 24px rgba(15,21,69,0.04);
     }
-    .topbar-actions {
-      display: flex;
-      align-items: center;
-      gap: var(--lumen-s-3);
-    }
-    .topbar-avatar {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--lumen-s-2);
-      padding: 8px 12px;
-      border-radius: var(--lumen-r-pill);
-      background: var(--lumen-surface);
-      border: 1px solid var(--lumen-line);
-      box-shadow: var(--lumen-shadow-sm);
-      color: var(--lumen-ink-soft);
-      font-size: 12px;
-      font-weight: 500;
-    }
-    .topbar-avatar .lumen-eye { flex-shrink: 0; }
     .topbar h2 {
       font-size: 18px;
       font-weight: 600;
@@ -238,6 +224,7 @@
       display: flex;
       flex-direction: column;
       gap: var(--lumen-s-4);
+      background: linear-gradient(180deg, rgba(255,255,255,0.35), rgba(255,255,255,0));
     }
     .chat-empty {
       flex: 1;
@@ -269,7 +256,7 @@
       gap: var(--lumen-s-3);
       animation: msgIn 0.3s ease-out;
     }
-    .msg.user { justify-content: flex-end; }
+    .msg.user { justify-content: flex-start; }
     .msg .avatar {
       width: 32px; height: 20px;
       flex-shrink: 0;
@@ -283,17 +270,21 @@
       line-height: 1.55;
       white-space: pre-wrap;
       word-wrap: break-word;
+      box-shadow: var(--lumen-shadow-sm);
     }
     .msg.assistant .bubble {
       background: var(--lumen-surface);
       border: 1px solid var(--lumen-line);
       color: var(--lumen-ink);
       border-top-left-radius: 4px;
+      box-shadow: 0 10px 24px rgba(15,21,69,0.06);
     }
     .msg.user .bubble {
-      background: var(--lumen-ink);
-      color: var(--lumen-paper);
-      border-top-right-radius: 4px;
+      background: linear-gradient(180deg, var(--lumen-coral-soft), #fff4f1);
+      color: var(--lumen-ink);
+      border: 1px solid rgba(255,138,122,0.26);
+      border-top-left-radius: 4px;
+      box-shadow: 0 10px 24px rgba(255,138,122,0.12);
     }
     @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -311,6 +302,7 @@
       border-radius: var(--lumen-r-md);
       display: inline-flex;
       gap: 5px;
+      box-shadow: var(--lumen-shadow-sm);
     }
     .typing .dot {
       width: 6px; height: 6px;
@@ -329,6 +321,7 @@
       border-top: 1px solid var(--lumen-line);
       padding: var(--lumen-s-4) var(--lumen-s-5);
       background: var(--lumen-paper);
+      box-shadow: 0 -10px 24px rgba(15,21,69,0.04);
     }
     .composer form {
       display: flex;
@@ -555,7 +548,6 @@
     @media (max-width: 720px) {
       aside.sidebar { width: 64px; }
       aside.sidebar .sidebar-text { display: none; }
-      .topbar-avatar span:last-child { display: none; }
       .panel { padding: var(--lumen-s-4); }
     }
   </style>
@@ -634,12 +626,6 @@
         <h2 id="topbar-title">{{ ui.chat | default('Charlas') }}</h2>
         <p class="sub" id="topbar-sub">{{ ui.chat_sub | default('Conversa con Lumen') }}</p>
       </div>
-      <div class="topbar-actions">
-        <div class="topbar-avatar">
-          {{ animated_eye(size="mini") }}
-          <span>{{ current_personality }}</span>
-        </div>
-      </div>
     </div>
 
     <!-- Chat Panel (default) -->
@@ -648,12 +634,11 @@
         <div id="chat-empty" class="chat-empty">
           {{ animated_eye(size="boot") }}
           <div class="hello">{{ ui.greeting | default('Hola, soy Lumen.') }}</div>
-          <div class="sub">{{ ui.welcome | default('Soy tu asistente personal. Puedo ayudarte con tareas, notas y búsquedas. ¿En qué empezamos?') }}</div>
+          <div class="sub">{{ ui.welcome | default('Soy un asistente modular: puedo adaptarme a lo que necesitás sumando capacidades, personalidades y herramientas a medida.') }}</div>
         </div>
       </div>
 
       <div id="typing-indicator" class="typing hidden">
-        <span class="avatar">{% from "_partials/animated_eye.html" import animated_eye %}{{ animated_eye(size="mini") }}</span>
         <div class="bubble">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
         </div>
@@ -714,16 +699,21 @@
       </div>
 
       <div class="pill-row" id="marketplace-tabs">
-        <button type="button" onclick="switchMarketplaceTab('kits_lumen')" id="tab-kits_lumen" class="l-pill marketplace-tab active">{{ ui.tab_modules | default('Módulos y personalidades') }}</button>
-        <button type="button" onclick="switchMarketplaceTab('skills')" id="tab-skills" class="l-pill marketplace-tab" style="display:none;">Skills</button>
-        <button type="button" onclick="switchMarketplaceTab('mcps')" id="tab-mcps" class="l-pill marketplace-tab" style="display:none;">MCPs</button>
+        <button type="button" onclick="switchMarketplaceTab('modules')" id="tab-modules" class="l-pill marketplace-tab active">{{ ui.tab_modules | default('Módulos') }}</button>
+        <button type="button" onclick="switchMarketplaceTab('kits')" id="tab-kits" class="l-pill marketplace-tab">{{ ui.tab_kits | default('Kits') }}</button>
+        <button type="button" onclick="switchMarketplaceTab('skills')" id="tab-skills" class="l-pill marketplace-tab">Skills</button>
       </div>
 
       <div class="pill-row" id="marketplace-filter-bar">
         <button type="button" onclick="setMarketplaceFilter('all')" id="filter-all" class="l-pill marketplace-filter-btn active">{{ ui.filter_all | default('Todo') }}</button>
-        <button type="button" onclick="setMarketplaceFilter('personality')" id="filter-personality" class="l-pill marketplace-filter-btn">{{ ui.filter_personality | default('Personalidad') }}</button>
-        <button type="button" onclick="setMarketplaceFilter('tools')" id="filter-tools" class="l-pill marketplace-filter-btn">{{ ui.filter_tools | default('Herramientas y utilidades') }}</button>
+        <button type="button" onclick="setMarketplaceFilter('installed')" id="filter-installed" class="l-pill marketplace-filter-btn">{{ ui.filter_installed | default('Instalados') }}</button>
+        <button type="button" onclick="setMarketplaceFilter('available')" id="filter-available" class="l-pill marketplace-filter-btn">{{ ui.filter_available | default('Disponibles') }}</button>
       </div>
+
+      <div class="pill-row" style="align-items:center; margin-top:-4px;">
+        <input id="marketplace-search" class="l-input" type="search" placeholder="{{ ui.marketplace_search | default('Buscar por nombre, descripción o tag...') }}" style="max-width:420px;" />
+      </div>
+      <div class="pill-row" id="marketplace-tag-bar"></div>
 
       <div class="legend">
         <strong>Compatibilidad</strong>
@@ -867,12 +857,6 @@
     const chatInput = document.getElementById('chat-input');
     const typingIndicator = document.getElementById('typing-indicator');
 
-    const MINI_EYE_HTML = {{ animated_eye(size="mini") | tojson }};
-
-    function miniEyeAvatar() {
-      return MINI_EYE_HTML;
-    }
-
     async function loadHistory() {
       try {
         const res = await fetch(`/api/history/${sessionId}`);
@@ -889,11 +873,7 @@
       if (chatEmpty && chatEmpty.parentNode) chatEmpty.remove();
       const wrapper = document.createElement('div');
       wrapper.className = `msg ${role}`;
-      if (role === 'assistant') {
-        wrapper.innerHTML = `${miniEyeAvatar()}<div class="bubble">${escapeHtml(content)}</div>`;
-      } else {
-        wrapper.innerHTML = `<div class="bubble">${escapeHtml(content)}</div>`;
-      }
+      wrapper.innerHTML = `<div class="bubble">${escapeHtml(content)}</div>`;
       chatMessages.appendChild(wrapper);
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -945,8 +925,10 @@
 
     // === Marketplace ===
     let marketplaceState = null;
-    let currentMarketplaceTab = 'kits_lumen';
+    let currentMarketplaceTab = 'modules';
     let currentMarketplaceFilter = 'all';
+    let currentMarketplaceQuery = '';
+    let currentMarketplaceTag = '';
 
     function isPersonalityModule(item) {
       const tags = item.tags || [];
@@ -961,11 +943,19 @@
       renderMarketplaceTab();
     }
 
+    function setMarketplaceTag(tag) {
+      currentMarketplaceTag = tag;
+      renderMarketplaceTags();
+      renderMarketplaceTab();
+    }
+
     function switchMarketplaceTab(tab) {
       currentMarketplaceTab = tab;
+      currentMarketplaceTag = '';
       document.querySelectorAll('.marketplace-tab').forEach(btn => btn.classList.remove('active'));
       const active = document.getElementById(`tab-${tab}`);
       if (active) active.classList.add('active');
+      renderMarketplaceTags();
       renderMarketplaceTab();
     }
 
@@ -993,7 +983,7 @@
         <div class="mod-card">
           <div class="mod-card-top">
             <div>
-              <h4>${escapeHtml(item.display_name || item.name)}</h4>
+              <h4>${escapeHtml(item.display_name || item.name)}<span class="badge">Skill</span></h4>
               <div class="mod-meta">${escapeHtml(item.min_capability || 'tier-1')} · ${item.installed ? 'instalado' : 'descubierto'}</div>
             </div>
             ${renderCompatBadge(item)}
@@ -1009,9 +999,11 @@
       const reasons = item.compatibility?.reasons || [];
       const warnings = item.compatibility?.warnings || [];
       const personality = isPersonalityModule(item);
+      const typeLabel = item.kind === 'kit' ? 'Kit' : 'Módulo';
       const personalityBadge = personality
         ? '<span class="badge badge-personality">Personalidad</span>'
         : '';
+      const typeBadge = `<span class="badge">${typeLabel}</span>`;
       const installBtn = item.actions?.can_install
         ? `<button onclick="installModule('${item.name}', this)" class="l-btn small">Instalar</button>` : '';
       const uninstallBtn = item.actions?.can_uninstall
@@ -1020,8 +1012,8 @@
         <div class="mod-card ${personality ? 'is-personality' : ''}">
           <div class="mod-card-top">
             <div>
-              <h4>${escapeHtml(item.display_name || item.name)}${personalityBadge}</h4>
-              <div class="mod-meta">v${escapeHtml(item.version || '0.0.0')} · ${escapeHtml(item.min_capability || 'tier-1')} · ${escapeHtml(item.price || 'free')}</div>
+              <h4>${escapeHtml(item.display_name || item.name)}${typeBadge}${personalityBadge}</h4>
+              <div class="mod-meta">v${escapeHtml(item.version || '0.0.0')} · ${escapeHtml(item.min_capability || 'tier-1')} · ${item.installed ? 'instalado' : 'disponible'}</div>
             </div>
             <div class="mod-actions">
               ${renderCompatBadge(item)}
@@ -1048,13 +1040,54 @@
 
     function filterAndSortItems(items) {
       let filtered = items || [];
-      if (currentMarketplaceFilter === 'personality') {
-        filtered = filtered.filter(isPersonalityModule);
-      } else if (currentMarketplaceFilter === 'tools') {
-        filtered = filtered.filter(item => !isPersonalityModule(item));
+      if (currentMarketplaceFilter === 'installed') {
+        filtered = filtered.filter(item => item.installed);
+      } else if (currentMarketplaceFilter === 'available') {
+        filtered = filtered.filter(item => !item.installed);
+      }
+      if (currentMarketplaceQuery) {
+        const q = currentMarketplaceQuery.toLowerCase();
+        filtered = filtered.filter(item => {
+          const haystack = [item.display_name, item.name, item.description, ...(item.tags || [])]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(q);
+        });
+      }
+      if (currentMarketplaceTag) {
+        filtered = filtered.filter(item => (item.tags || []).includes(currentMarketplaceTag));
       }
       filtered.sort((a, b) => (isPersonalityModule(a) ? 0 : 1) - (isPersonalityModule(b) ? 0 : 1));
       return filtered;
+    }
+
+    function collectMarketplaceTags(section) {
+      const tags = new Set();
+      [...(section.installed || []), ...(section.available || [])].forEach(item => {
+        (item.tags || []).forEach(tag => {
+          if (tag && tag !== 'x-lumen') tags.add(tag);
+        });
+      });
+      return Array.from(tags).sort((a, b) => a.localeCompare(b));
+    }
+
+    function renderMarketplaceTags() {
+      const tagBar = document.getElementById('marketplace-tag-bar');
+      if (!tagBar || !marketplaceState) return;
+      const section = marketplaceState[currentMarketplaceTab];
+      if (!section) {
+        tagBar.innerHTML = '';
+        return;
+      }
+      const tags = collectMarketplaceTags(section);
+      if (!tags.length) {
+        tagBar.innerHTML = '';
+        return;
+      }
+      tagBar.innerHTML = [`<button type="button" class="l-pill ${!currentMarketplaceTag ? 'active' : ''}" onclick="setMarketplaceTag('')">Tags</button>`]
+        .concat(tags.map(tag => `<button type="button" class="l-pill ${currentMarketplaceTag === tag ? 'active' : ''}" onclick="setMarketplaceTag('${tag.replace(/'/g, "\\'")}')">${escapeHtml(tag)}</button>`))
+        .join('');
     }
 
     function renderMarketplaceTab() {
@@ -1068,28 +1101,33 @@
       const noteEl = document.getElementById('marketplace-note');
       const uploadLabel = document.getElementById('marketplace-upload-label');
       const filterBar = document.getElementById('marketplace-filter-bar');
-      const isKits = currentMarketplaceTab === 'kits_lumen';
+      const uploadEnabled = !!section.upload_enabled;
 
-      filterBar.style.display = isKits ? 'flex' : 'none';
+      filterBar.style.display = 'flex';
       installedTitle.textContent = section.installed_label || 'Instalados';
       availableTitle.textContent = section.available_label || 'Disponibles';
       noteEl.textContent = section.read_only
         ? 'Descubrimiento de solo lectura. La compatibilidad se calcula en el servidor.'
-        : 'Módulos y personalidades del catálogo local.';
-      uploadLabel.classList.toggle('hidden', !isKits);
+        : currentMarketplaceTab === 'kits'
+        ? 'Los kits transforman Lumen como un todo: personalidad, experiencia y más adelante también skins.'
+        : currentMarketplaceTab === 'modules'
+        ? 'Los módulos agregan funcionalidades completas. Las integraciones MCP se presentan acá como módulos.'
+        : 'Las skills enseñan criterio y uso, pero no ejecutan por sí solas.';
+      uploadLabel.classList.toggle('hidden', !uploadEnabled);
 
-      const renderer = isKits ? renderKitCard : item => renderReadOnlyCard(item, 'Sin descripción.');
+      const renderer = currentMarketplaceTab === 'skills' ? item => renderReadOnlyCard(item, 'Sin descripción.') : renderKitCard;
+      renderMarketplaceTags();
 
       renderMarketplaceList(installedEl,
-        isKits ? filterAndSortItems(section.installed) : (section.installed || []),
+        filterAndSortItems(section.installed || []),
         renderer,
-        isKits ? 'Aún no hay módulos ni personalidades instalados.' : 'Nada de esta pestaña está activo.',
+        currentMarketplaceTab === 'kits' ? 'Todavía no hay kits instalados.' : currentMarketplaceTab === 'modules' ? 'Todavía no hay módulos instalados.' : 'Nada de esta pestaña está activo.',
         false);
 
       renderMarketplaceList(availableEl,
-        isKits ? filterAndSortItems(section.available) : (section.available || []),
+        filterAndSortItems(section.available || []),
         renderer,
-        isKits ? 'No hay más módulos ni personalidades disponibles.' : 'No se encontraron entradas.',
+        currentMarketplaceTab === 'kits' ? 'No hay más kits disponibles.' : currentMarketplaceTab === 'modules' ? 'No hay más módulos disponibles.' : 'No se encontraron entradas.',
         true);
     }
 
@@ -1102,6 +1140,11 @@
         console.error('Failed to load marketplace:', e);
       }
     }
+
+    document.getElementById('marketplace-search')?.addEventListener('input', (event) => {
+      currentMarketplaceQuery = event.target.value.trim();
+      renderMarketplaceTab();
+    });
 
     async function installModule(name, btn) {
       if (btn) { btn.disabled = true; btn.textContent = 'Instalando…'; }

@@ -33,7 +33,7 @@ Lumen is a **downloadable AI agent framework** that works from minute zero. Inst
 
 - Install it &rarr; working assistant
 - Pick a personality &rarr; different behavior, same core
-- Install a module &rarr; new vertical (barbershop, restaurant, support, ...)
+- Install a module &rarr; new capability or integration (Telegram, search, file tools, MCP-backed features, ...)
 - Bring your own module &rarr; load any custom `module.yaml`
 
 ## Quickstart
@@ -59,6 +59,54 @@ cd lumen-agent
 pip install -e .[dev]
 lumen run
 ```
+
+## `lumen run` vs `lumen serve`
+
+Lumen has two startup modes depending on where it runs.
+
+### `lumen run`
+
+Use this for:
+
+- local development
+- personal use on your own computer
+- quick UI and module testing
+
+Behavior:
+
+- starts Lumen locally
+- optimized for localhost workflows
+- simpler local access model
+
+```bash
+lumen run
+```
+
+### `lumen serve`
+
+Use this for:
+
+- a VPS
+- a remote server
+- a home server / always-on machine
+- any installation that should stay available over the network
+
+Behavior:
+
+- starts Lumen as a hosted web service
+- exposes onboarding through IP/domain + port
+- first setup is protected with a one-time setup token
+- onboarding creates the owner password/PIN
+- future access to the dashboard requires login
+
+```bash
+lumen serve --host 0.0.0.0 --port 3000
+```
+
+Rule of thumb:
+
+- `lumen run` = I am running Lumen for myself on this machine
+- `lumen serve` = I am hosting Lumen so it can be accessed like a real installed web app
 
 ### Run the test suite
 
@@ -102,7 +150,7 @@ User message
 
 ### Skills Are Instructions, Not Code
 
-Skills are markdown files the LLM reads on demand. Anyone can create a skill &mdash; just write a `SKILL.md`. No runtime, no compiler, no framework.
+Skills are markdown files the LLM reads on demand. Anyone can create a skill &mdash; just write a `SKILL.md`. No runtime, no compiler, no framework. They teach judgment and usage patterns; they do not execute anything by themselves.
 
 ### Connectors and MCP
 
@@ -110,13 +158,13 @@ Skills are markdown files the LLM reads on demand. Anyone can create a skill &md
 Connector → action → result
 ```
 
-Built-in handlers for `task`, `note`, and `memory`. Anything else plugs in via MCP servers (advisory requirements declared in `module.yaml`, validated at install time).
+Built-in handlers for `task`, `note`, and `memory`. Anything else plugs in via MCP servers (advisory requirements declared in `module.yaml`, validated at install time). In the product UX, an MCP-powered capability is surfaced as a **module** &mdash; the user installs a new capability, not a technical transport.
 
 ## Features
 
 - **Three-path onboarding** &mdash; quick start, personality picker, or bring-your-own module
 - **Consumer UI** &mdash; clean chat-first dashboard, collapsable sidebar, no dev panel
-- **Personality marketplace** &mdash; personality modules surfaced first with filters and badges
+- **Catalog taxonomy** &mdash; kits reshape Lumen, modules add concrete capabilities, skills teach the model how to think/use them
 - **Bilingual** &mdash; English and Spanish locale packs out of the box
 - **Self-aware** &mdash; knows its capabilities, gaps, and recommended LLM tiers
 - **Model-agnostic** &mdash; DeepSeek, OpenAI, Anthropic, OpenRouter (OAuth + free tier curated), Ollama via LiteLLM
@@ -130,9 +178,16 @@ Built-in handlers for `task`, `note`, and `memory`. Anything else plugs in via M
 
 | Artifact | Contains | Scope |
 |---|---|---|
-| Kit | One bundled experience: can include personality, flows, modules, skills, and assets | Bigger, opinionated package |
-| Module | One installable capability | Narrow feature, like Telegram |
-| Skill | Markdown instructions only | No runtime |
+| Kit | A full transformation package for Lumen: personality, flows, modules, skills, assets, and eventually skins | Bigger, opinionated package that changes Lumen as a whole |
+| Module | One complete installable capability: integrations, tools, channels, MCP-backed features, runtimes | Individual functionality, like Telegram or file tools |
+| Skill | Markdown instructions only | Mental model only: teaches, does not execute |
+
+### Taxonomy in plain language
+
+- **Kit** = changes Lumen as a whole
+- **Module** = gives Lumen new hands and new ways to act
+- **Skill** = teaches Lumen how to think or use what it has
+- **MCP** = implementation detail; in the user-facing catalog it appears as a **module**
 
 ## The "channel as module" pattern
 

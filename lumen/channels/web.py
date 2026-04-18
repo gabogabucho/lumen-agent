@@ -8,6 +8,7 @@ Routing logic:
 
 import base64
 import hashlib
+import hmac
 import json
 import secrets
 import threading
@@ -41,6 +42,7 @@ from lumen.core.module_manifest import load_module_manifest
 _brain = None
 _locale: dict = {}
 _config: dict = {}
+_access_mode = "run"
 
 LUMEN_DIR = Path.home() / ".lumen"
 CONFIG_PATH = LUMEN_DIR / "config.yaml"
@@ -55,6 +57,9 @@ OPENROUTER_CURATED_MODELS = {
 }
 OPENROUTER_STATE_TTL_SECONDS = 600
 DEFAULT_QUICK_PERSONALITY = "x-lumen-personal"
+AUTH_COOKIE_NAME = "lumen_owner"
+SETUP_COOKIE_NAME = "lumen_setup"
+COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 LEGACY_ENTRY_PATH_MAP = {
     "uso_personal": "rapido",
     "negocio": "elegir_personality",
@@ -77,8 +82,14 @@ def configure(brain, locale: dict, config: dict):
     _config = config
 
 
+def configure_access_mode(mode: str = "run"):
+    """Configure whether the web app runs locally or as hosted server."""
+    global _access_mode
+    _access_mode = "serve" if str(mode).strip().lower() == "serve" else "run"
+
+
 def _has_config() -> bool:
-    return CONFIG_PATH.exists()
+    return _is_configured(_load_config())
 
 
 def _load_config() -> dict:
@@ -93,6 +104,177 @@ def _load_config() -> dict:
         loaded["entry_path"] = LEGACY_ENTRY_PATH_MAP[entry_path]
 
     return loaded
+
+
+def _is_configured(config: dict | None = None) -> bool:
+    loaded = config if config is not None else _load_config()
+    return bool(loaded.get("model"))
+
+
+def _is_serve_mode() -> bool:
+    return _access_mode == "serve"
+
+
+def _server_secret(config: dict | None = None) -> str | None:
+    loaded = config if config is not None else _load_config()
+    secret = loaded.get("server_secret")
+    return str(secret) if secret else None
+
+
+def _hash_secret(value: str, *, salt: str | None = None) -> str:
+    used_salt = salt or secrets.token_urlsafe(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        value.encode("utf-8"),
+        used_salt.encode("utf-8"),
+        260000,
+    )
+    encoded = base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
+    return f"pbkdf2_sha256$260000${used_salt}${encoded}"
+
+
+def _verify_secret(value: str, stored_hash: str | None) -> bool:
+    if not value or not stored_hash:
+        return False
+    try:
+        algorithm, iterations, salt, digest = str(stored_hash).split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        computed = hashlib.pbkdf2_hmac(
+            "sha256",
+            value.encode("utf-8"),
+            salt.encode("utf-8"),
+            int(iterations),
+        )
+        encoded = base64.urlsafe_b64encode(computed).decode("utf-8").rstrip("=")
+        return hmac.compare_digest(encoded, digest)
+    except (TypeError, ValueError):
+        return False
+
+
+def _sign_cookie(payload: dict, secret: str) -> str:
+    body = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+    signature = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256)
+    digest = base64.urlsafe_b64encode(signature.digest()).decode("utf-8").rstrip("=")
+    return f"{body}.{digest}"
+
+
+def _read_signed_cookie(value: str | None, secret: str | None) -> dict | None:
+    if not value or not secret:
+        return None
+    try:
+        body, digest = value.split(".", 1)
+    except ValueError:
+        return None
+    expected = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256)
+    expected_digest = (
+        base64.urlsafe_b64encode(expected.digest()).decode("utf-8").rstrip("=")
+    )
+    if not hmac.compare_digest(expected_digest, digest):
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(f"{body}==").decode("utf-8"))
+    except Exception:
+        return None
+    if payload.get("exp", 0) <= time():
+        return None
+    return payload
+
+
+def _issue_cookie(
+    scope: str, secret: str, *, ttl_seconds: int = COOKIE_MAX_AGE_SECONDS
+) -> str:
+    return _sign_cookie(
+        {
+            "scope": scope,
+            "exp": int(time()) + ttl_seconds,
+            "nonce": secrets.token_urlsafe(8),
+        },
+        secret,
+    )
+
+
+def _request_has_setup_access(request: Request, config: dict | None = None) -> bool:
+    payload = _read_signed_cookie(
+        request.cookies.get(SETUP_COOKIE_NAME),
+        _server_secret(config),
+    )
+    return bool(payload and payload.get("scope") == "setup")
+
+
+def _request_has_owner_access(request: Request, config: dict | None = None) -> bool:
+    payload = _read_signed_cookie(
+        request.cookies.get(AUTH_COOKIE_NAME),
+        _server_secret(config),
+    )
+    return bool(payload and payload.get("scope") == "owner")
+
+
+def _websocket_has_owner_access(
+    websocket: WebSocket, config: dict | None = None
+) -> bool:
+    payload = _read_signed_cookie(
+        websocket.cookies.get(AUTH_COOKIE_NAME),
+        _server_secret(config),
+    )
+    return bool(payload and payload.get("scope") == "owner")
+
+
+def _require_setup_access(
+    request: Request, config: dict | None = None
+) -> JSONResponse | None:
+    loaded = config if config is not None else _load_config()
+    if (
+        _is_serve_mode()
+        and not _is_configured(loaded)
+        and not _request_has_setup_access(request, loaded)
+    ):
+        return JSONResponse(status_code=401, content={"error": "setup_token_required"})
+    return None
+
+
+def _require_owner_access(
+    request: Request, config: dict | None = None
+) -> JSONResponse | None:
+    loaded = config if config is not None else _load_config()
+    if (
+        _is_serve_mode()
+        and _is_configured(loaded)
+        and not _request_has_owner_access(request, loaded)
+    ):
+        return JSONResponse(
+            status_code=401, content={"error": "authentication_required"}
+        )
+    return None
+
+
+def ensure_server_bootstrap(*, host: str = "0.0.0.0", port: int = 3000) -> str:
+    """Ensure hosted mode has a token-protected bootstrap state."""
+    loaded = _load_config()
+    updates = {
+        "server_mode": True,
+        "host": host,
+        "port": int(port),
+        "server_secret": loaded.get("server_secret") or secrets.token_urlsafe(32),
+    }
+
+    token = secrets.token_urlsafe(18)
+    if not _is_configured(loaded):
+        updates["setup_token_hash"] = _hash_secret(token)
+
+    _merge_save_config(updates)
+    return token
+
+
+def _load_ui_locale(language: str | None) -> dict:
+    lang = str(language or "en").strip().lower() or "en"
+    ui_path = PKG_DIR / "locales" / lang / "ui.yaml"
+    if not ui_path.exists() and lang != "en":
+        ui_path = PKG_DIR / "locales" / "en" / "ui.yaml"
+    if not ui_path.exists():
+        return {}
+    loaded = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def _merge_save_config(updates: dict, *, removals: set[str] | None = None) -> dict:
@@ -336,13 +518,18 @@ async def _init_brain_from_config():
     """Lazy brain initialization — runs once after web setup saves config."""
     global _brain, _locale, _config
 
+    latest_config = _load_config() if _has_config() else {}
+
     if _brain is not None:
+        if latest_config:
+            _config = latest_config
+            _locale = _load_ui_locale(_config.get("language", "en"))
         return True
 
     if not _has_config():
         return False
 
-    _config = _load_config()
+    _config = latest_config
 
     runtime = await bootstrap_runtime(
         _config,
@@ -478,8 +665,12 @@ session_manager = SessionManager()
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     """Smart routing: setup → awakening → dashboard."""
-    if not _has_config():
-        return templates.TemplateResponse(request, "setup.html")
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse(url="/setup")
+
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
 
     await _init_brain_from_config()
 
@@ -501,12 +692,99 @@ async def root(request: Request):
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request):
     """Setup wizard — for manual access or re-configuration."""
-    return templates.TemplateResponse(request, "setup.html")
+    loaded = _load_config()
+    if _is_configured(loaded):
+        if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+            return RedirectResponse(url="/login")
+        return RedirectResponse(url="/")
+
+    if _is_serve_mode() and not _request_has_setup_access(request, loaded):
+        return templates.TemplateResponse(request, "setup_gate.html")
+
+    return templates.TemplateResponse(
+        request,
+        "setup.html",
+        context={"hosted_mode": _is_serve_mode()},
+    )
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    loaded = _load_config()
+    if not _is_serve_mode() or not _is_configured(loaded):
+        return RedirectResponse(url="/")
+    if _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/")
+    return templates.TemplateResponse(request, "login.html")
+
+
+@app.post("/api/setup/token")
+async def api_setup_token(request: Request):
+    loaded = _load_config()
+    if not _is_serve_mode() or _is_configured(loaded):
+        return {"status": "ok"}
+
+    body = await request.json()
+    token = str(body.get("token") or "").strip()
+    if not _verify_secret(token, loaded.get("setup_token_hash")):
+        return JSONResponse(
+            status_code=401, content={"status": "error", "error": "invalid_setup_token"}
+        )
+
+    response = JSONResponse(content={"status": "ok"})
+    response.set_cookie(
+        SETUP_COOKIE_NAME,
+        _issue_cookie(
+            "setup",
+            _server_secret(loaded) or secrets.token_urlsafe(32),
+            ttl_seconds=3600,
+        ),
+        httponly=True,
+        samesite="lax",
+        max_age=3600,
+    )
+    return response
+
+
+@app.post("/api/login")
+async def api_login(request: Request):
+    loaded = _load_config()
+    if not _is_serve_mode() or not _is_configured(loaded):
+        return JSONResponse(
+            status_code=400, content={"status": "error", "error": "login_not_available"}
+        )
+
+    body = await request.json()
+    secret = str(body.get("secret") or "").strip()
+    if not _verify_secret(secret, loaded.get("owner_secret_hash")):
+        return JSONResponse(
+            status_code=401, content={"status": "error", "error": "invalid_credentials"}
+        )
+
+    response = JSONResponse(content={"status": "ok"})
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        _issue_cookie("owner", _server_secret(loaded) or secrets.token_urlsafe(32)),
+        httponly=True,
+        samesite="lax",
+        max_age=COOKIE_MAX_AGE_SECONDS,
+    )
+    return response
+
+
+@app.post("/api/logout")
+async def api_logout():
+    response = JSONResponse(content={"status": "ok"})
+    response.delete_cookie(AUTH_COOKIE_NAME)
+    return response
 
 
 @app.get("/api/setup/personalities")
-async def api_setup_personalities(entry_path: str | None = None):
+async def api_setup_personalities(request: Request, entry_path: str | None = None):
     """List setup-safe personality modules for the selected entry path."""
+    guard = _require_setup_access(request)
+    if guard is not None:
+        return guard
     return {"modules": _list_setup_personality_modules(entry_path)}
 
 
@@ -514,6 +792,11 @@ async def api_setup_personalities(entry_path: str | None = None):
 async def api_setup(request: Request):
     """Save configuration from the web setup wizard."""
     try:
+        loaded = _load_config()
+        guard = _require_setup_access(request, loaded)
+        if guard is not None:
+            return guard
+
         body = await request.json()
         resolved_personality = _resolve_setup_active_personality(
             body.get("entry_path"),
@@ -533,8 +816,23 @@ async def api_setup(request: Request):
             config["api_key"] = body["api_key"]
         if resolved_personality:
             config["active_personality"] = resolved_personality
+        if _is_serve_mode():
+            owner_secret = str(body.get("owner_secret") or "").strip()
+            if not owner_secret:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "status": "error",
+                        "error": "Owner password or PIN is required.",
+                    },
+                )
+            config["owner_secret_hash"] = _hash_secret(owner_secret)
+            config["server_mode"] = True
+            config["server_secret"] = loaded.get(
+                "server_secret"
+            ) or secrets.token_urlsafe(32)
 
-        _merge_save_config(config)
+        _merge_save_config(config, removals={"setup_token_hash"})
 
         # Initialize brain with new config
         await _init_brain_from_config()
@@ -542,7 +840,19 @@ async def api_setup(request: Request):
         if _brain and _brain.memory._db is None:
             await _brain.memory.init()
 
-        return {"status": "ok"}
+        response = JSONResponse(content={"status": "ok"})
+        if _is_serve_mode():
+            response.set_cookie(
+                AUTH_COOKIE_NAME,
+                _issue_cookie(
+                    "owner", _server_secret(_load_config()) or secrets.token_urlsafe(32)
+                ),
+                httponly=True,
+                samesite="lax",
+                max_age=COOKIE_MAX_AGE_SECONDS,
+            )
+            response.delete_cookie(SETUP_COOKIE_NAME)
+        return response
 
     except Exception as e:
         return JSONResponse(
@@ -647,8 +957,11 @@ async def openrouter_oauth_callback(
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """The main dashboard — Lumen's UI-FIRST experience."""
-    if not _has_config():
+    loaded = _load_config()
+    if not _is_configured(loaded):
         return RedirectResponse(url="/")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
 
     await _init_brain_from_config()
 
@@ -672,15 +985,21 @@ async def dashboard(request: Request):
 
 
 @app.post("/api/awakened")
-async def mark_awakened_endpoint():
+async def mark_awakened_endpoint(request: Request):
     """Called by the awakening animation when it completes."""
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
     _mark_awakened()
     return {"status": "ok"}
 
 
 @app.get("/api/history/{session_id}")
-async def api_history(session_id: str):
+async def api_history(request: Request, session_id: str):
     """Load conversation history for a session from persistent memory."""
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
     if not _brain:
         return {"messages": []}
     try:
@@ -693,6 +1012,13 @@ async def api_history(session_id: str):
 @app.websocket("/ws/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
     """Real-time chat via WebSocket."""
+    if (
+        _is_serve_mode()
+        and _is_configured(_load_config())
+        and not _websocket_has_owner_access(websocket)
+    ):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     session = session_manager.get_or_create(session_id)
 
@@ -744,8 +1070,11 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
 
 
 @app.get("/api/debug/prompt")
-async def api_debug_prompt():
+async def api_debug_prompt(request: Request):
     """Show the exact system prompt the LLM receives. For debugging."""
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
     if not _brain:
         return {"error": "Brain not initialized"}
 
@@ -780,8 +1109,11 @@ async def api_debug_prompt():
 
 
 @app.get("/api/modules/catalog")
-async def api_modules_catalog():
+async def api_modules_catalog(request: Request):
     """List all available modules from the catalog."""
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
     if not _brain:
         return {"modules": []}
     marketplace = getattr(_brain, "marketplace", None)
@@ -796,8 +1128,11 @@ async def api_modules_catalog():
 
 
 @app.get("/api/modules/installed")
-async def api_modules_installed():
+async def api_modules_installed(request: Request):
     """List installed modules."""
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
     if not _brain:
         return {"modules": []}
     marketplace = getattr(_brain, "marketplace", None)
@@ -810,21 +1145,30 @@ async def api_modules_installed():
 
 
 @app.get("/api/marketplace")
-async def api_marketplace():
-    """Aggregated marketplace read model: Body + Kits Lumen + remote feeds."""
+async def api_marketplace(request: Request):
+    """Aggregated marketplace read model: kits, modules, skills, and feeds."""
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
     if not _brain:
         return {
             "generated_at": None,
             "feeds": [],
             "tabs": [],
             "skills": {"items": [], "installed": [], "available": [], "counts": {}},
-            "mcps": {"items": [], "installed": [], "available": [], "counts": {}},
-            "kits_lumen": {
+            "modules": {
                 "items": [],
                 "installed": [],
                 "available": [],
                 "counts": {},
                 "upload_enabled": True,
+            },
+            "kits": {
+                "items": [],
+                "installed": [],
+                "available": [],
+                "counts": {},
+                "upload_enabled": False,
             },
         }
 
@@ -838,8 +1182,11 @@ async def api_marketplace():
 
 
 @app.post("/api/modules/install/{name}")
-async def api_modules_install(name: str):
+async def api_modules_install(request: Request, name: str):
     """Install a module from the catalog. Lumen knows."""
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
     if not _brain:
         return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
     from lumen.core.installer import Installer
@@ -875,9 +1222,13 @@ async def api_modules_install(name: str):
 
 
 @app.delete("/api/modules/uninstall/{name}")
-async def api_modules_uninstall(name: str):
+async def api_modules_uninstall(request: Request, name: str):
     """Uninstall a module. Lumen forgets."""
     global _config
+
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
 
     if not _brain:
         return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
@@ -908,6 +1259,10 @@ async def api_modules_uninstall(name: str):
 @app.post("/api/modules/upload")
 async def api_modules_upload(request: Request):
     """Upload and install a module from a ZIP file. WordPress-style."""
+    if not _brain:
+        setup_guard = _require_setup_access(request)
+        if setup_guard is not None:
+            return setup_guard
     if not _brain:
         return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
     from lumen.core.installer import Installer
@@ -951,8 +1306,11 @@ async def api_modules_upload(request: Request):
 
 
 @app.get("/api/status")
-async def api_status():
+async def api_status(request: Request):
     """Lumen's current status — from the Body (registry)."""
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
     registry = _brain.registry if _brain else None
 
     flows_info = []

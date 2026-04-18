@@ -95,29 +95,59 @@ class Marketplace:
                 for cap in self.registry.list_by_kind(CapabilityKind.SKILL)
             ],
         )
-        mcps = self._merge_cards(
-            remote["mcps"],
-            [
-                self._runtime_card(
-                    cap, category="mcps", runtime_surface=runtime_surface
-                )
-                for cap in self.registry.list_by_kind(CapabilityKind.MCP)
-            ],
+        kits = self._build_product_section(
+            runtime_surface,
+            product_kind="kit",
+            remote_items=[],
         )
-        kits = self._build_kits(runtime_surface)
+        modules = self._build_product_section(
+            runtime_surface,
+            product_kind="module",
+            remote_items=remote["mcps"],
+        )
 
         return {
             "generated_at": int(time.time()),
             "feeds": remote["feeds"],
             "tabs": [
                 {
-                    "key": "kits_lumen",
-                    "label": "Modules & Personalities",
+                    "key": "modules",
+                    "label": "Modules",
+                    "count": len(modules["items"]),
+                },
+                {
+                    "key": "kits",
+                    "label": "Kits",
                     "count": len(kits["items"]),
                 },
                 {"key": "skills", "label": "Skills", "count": len(skills)},
-                {"key": "mcps", "label": "MCPs", "count": len(mcps)},
             ],
+            "modules": {
+                **self._section_payload(
+                    "modules",
+                    "Modules",
+                    modules["items"],
+                    read_only=False,
+                    installed_label="Installed modules",
+                    available_label="Available modules",
+                ),
+                "installed": modules["installed"],
+                "available": modules["available"],
+                "upload_enabled": True,
+            },
+            "kits": {
+                **self._section_payload(
+                    "kits",
+                    "Kits",
+                    kits["items"],
+                    read_only=False,
+                    installed_label="Installed kits",
+                    available_label="Available kits",
+                ),
+                "installed": kits["installed"],
+                "available": kits["available"],
+                "upload_enabled": False,
+            },
             "skills": self._section_payload(
                 "skills",
                 "Skills",
@@ -126,34 +156,19 @@ class Marketplace:
                 installed_label="Already in Body",
                 available_label="Discoverable",
             ),
-            "mcps": self._section_payload(
-                "mcps",
-                "MCPs",
-                mcps,
-                read_only=True,
-                installed_label="Connected in Body",
-                available_label="Discoverable",
-            ),
-            "kits_lumen": {
-                **self._section_payload(
-                    "kits_lumen",
-                    "Modules & Personalities",
-                    kits["items"],
-                    read_only=False,
-                    installed_label="Installed modules",
-                    available_label="Ready to install",
-                ),
-                "installed": kits["installed"],
-                "available": kits["available"],
-                "upload_enabled": True,
-            },
         }
 
     def kits_catalog(self) -> list[dict[str, Any]]:
-        return self.snapshot()["kits_lumen"]["available"]
+        return self.snapshot()["kits"]["available"]
 
     def kits_installed(self) -> list[dict[str, Any]]:
-        return self.snapshot()["kits_lumen"]["installed"]
+        return self.snapshot()["kits"]["installed"]
+
+    def modules_catalog(self) -> list[dict[str, Any]]:
+        return self.snapshot()["modules"]["available"]
+
+    def modules_installed(self) -> list[dict[str, Any]]:
+        return self.snapshot()["modules"]["installed"]
 
     def sync_registry(self, registry: Registry):
         """Update runtime registry truth and invalidate cached projections."""
@@ -189,8 +204,12 @@ class Marketplace:
             },
         }
 
-    def _build_kits(
-        self, runtime_surface: dict[str, Any]
+    def _build_product_section(
+        self,
+        runtime_surface: dict[str, Any],
+        *,
+        product_kind: str,
+        remote_items: list[dict[str, Any]],
     ) -> dict[str, list[dict[str, Any]]]:
         catalog_cards = [
             self._catalog_kit_card(entry)
@@ -202,11 +221,17 @@ class Marketplace:
         ]
         runtime_cards = [
             self._runtime_card(
-                cap, category="kits_lumen", runtime_surface=runtime_surface
+                cap, category=product_kind, runtime_surface=runtime_surface
             )
-            for cap in self.registry.list_by_kind(CapabilityKind.MODULE)
+            for kind in (
+                [CapabilityKind.MODULE]
+                if product_kind == "kit"
+                else [CapabilityKind.MODULE, CapabilityKind.MCP]
+            )
+            for cap in self.registry.list_by_kind(kind)
         ]
-        items = self._merge_cards(catalog_cards, runtime_cards)
+        items = self._merge_cards(remote_items, catalog_cards, runtime_cards)
+        items = [item for item in items if item.get("kind") == product_kind]
         return {
             "items": items,
             "installed": [item for item in items if item.get("installed")],
@@ -217,7 +242,7 @@ class Marketplace:
         compatibility = self._with_badge(entry.get("compatibility") or {})
         installed = self.registry.get(CapabilityKind.MODULE, entry["name"]) is not None
         path = str(entry.get("path") or "")
-        is_personality_kit = path.startswith("kits/")
+        is_personality_kit = self._product_kind_for_entry(entry) == "kit"
         source_label = "Kits Lumen" if is_personality_kit else "Lumen Modules"
         kind = "kit" if is_personality_kit else "module"
         return {
@@ -228,7 +253,7 @@ class Marketplace:
             ),
             "description": entry.get("description", ""),
             "kind": kind,
-            "category": "kits_lumen",
+            "category": kind,
             "installed": installed,
             "runtime": False,
             "status": "installed" if installed else "catalog",
@@ -240,7 +265,7 @@ class Marketplace:
             "provides": entry.get("provides", []),
             "requires": entry.get("requires", {}),
             "compatibility": compatibility,
-            "sources": [{"type": "kits_lumen", "label": source_label}],
+            "sources": [{"type": kind, "label": source_label}],
             "actions": {
                 "read_only": False,
                 "can_install": not installed,
@@ -261,11 +286,16 @@ class Marketplace:
             compatibility = calculate_compatibility(artifact, runtime_surface)
         compatibility = self._with_badge(compatibility)
 
-        kind = (
-            "kit" if capability.kind == CapabilityKind.MODULE else capability.kind.value
-        )
+        kind = self._product_kind_for_capability(capability)
         display_name = humanize_module_name(
             capability.name, capability.metadata.get("display_name")
+        )
+        source_label = (
+            "Installed kit"
+            if kind == "kit"
+            else "Installed module"
+            if capability.kind == CapabilityKind.MODULE
+            else "MCP module"
         )
         return {
             "id": f"{kind}:{capability.name}",
@@ -287,14 +317,37 @@ class Marketplace:
             "provides": list(capability.provides),
             "requires": dict(capability.requires),
             "compatibility": compatibility,
-            "sources": [{"type": "body", "label": "Body"}],
+            "sources": [{"type": kind, "label": source_label}],
             "actions": {
-                "read_only": capability.kind != CapabilityKind.MODULE,
+                "read_only": capability.kind
+                not in {CapabilityKind.MODULE, CapabilityKind.MCP},
                 "can_install": False,
                 "can_uninstall": capability.kind == CapabilityKind.MODULE,
             },
             "metadata": capability.metadata,
         }
+
+    def _product_kind_for_entry(self, entry: dict[str, Any]) -> str:
+        tags = set(entry.get("tags") or [])
+        path = str(entry.get("path") or "")
+        x_lumen = entry.get("x-lumen") or entry.get("x_lumen") or {}
+        if x_lumen.get("product_kind") == "kit":
+            return "kit"
+        if path.startswith("kits/") or "personality" in tags:
+            return "kit"
+        return "module"
+
+    def _product_kind_for_capability(self, capability: Capability) -> str:
+        if capability.kind == CapabilityKind.MCP:
+            return "module"
+        tags = set(capability.metadata.get("tags") or [])
+        path = str(capability.metadata.get("path") or "")
+        x_lumen = capability.metadata.get("x_lumen") or {}
+        if x_lumen.get("product_kind") == "kit":
+            return "kit"
+        if "personality" in tags or "catalog/kits/" in path:
+            return "kit"
+        return "module"
 
     def _load_remote(self, runtime_surface: dict[str, Any]) -> dict[str, Any]:
         now = time.time()
@@ -457,7 +510,7 @@ class Marketplace:
         return self._artifact_card(
             artifact,
             compatibility=compatibility,
-            category="mcps",
+            category="modules",
             source_name=source_name,
             display_name=raw.get("display_name") or raw.get("title"),
             tags=raw.get("tags", []),
@@ -475,14 +528,15 @@ class Marketplace:
         tags: list[str] | None = None,
         version: str | None = None,
     ) -> dict[str, Any]:
+        kind = "module" if artifact.kind == "mcp" else artifact.kind
         return {
-            "id": f"{artifact.kind}:{artifact.name}",
+            "id": f"{kind}:{artifact.name}",
             "name": artifact.name,
             "display_name": display_name
             or artifact.metadata.get("display_name")
             or artifact.name,
             "description": artifact.description,
-            "kind": artifact.kind,
+            "kind": kind,
             "category": category,
             "installed": False,
             "runtime": False,
@@ -504,47 +558,46 @@ class Marketplace:
 
     def _merge_cards(
         self,
-        incoming: list[dict[str, Any]],
-        runtime_cards: list[dict[str, Any]],
+        *card_groups: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        merged: dict[str, dict[str, Any]] = {
-            self._merge_key(card): dict(card) for card in incoming
-        }
-        for card in runtime_cards:
-            key = self._merge_key(card)
-            existing = merged.get(key)
-            if not existing:
-                merged[key] = dict(card)
-                continue
+        merged: dict[str, dict[str, Any]] = {}
+        for cards in card_groups:
+            for card in cards:
+                key = self._merge_key(card)
+                existing = merged.get(key)
+                if not existing:
+                    merged[key] = dict(card)
+                    continue
 
-            combined = dict(existing)
-            for field in (
-                "description",
-                "version",
-                "min_capability",
-                "price",
-                "tags",
-                "provides",
-                "requires",
-            ):
-                value = card.get(field)
-                if value not in (None, "", [], {}):
-                    combined[field] = value
-            combined["installed"] = card.get("installed", False) or existing.get(
-                "installed", False
-            )
-            combined["runtime"] = card.get("runtime", False) or existing.get(
-                "runtime", False
-            )
-            combined["status"] = card.get("status") or existing.get("status")
-            combined["compatibility"] = card.get("compatibility") or existing.get(
-                "compatibility"
-            )
-            combined["actions"] = card.get("actions") or existing.get("actions")
-            combined["sources"] = _dedupe_sources(
-                existing.get("sources", []) + card.get("sources", [])
-            )
-            merged[key] = combined
+                combined = dict(existing)
+                for field in (
+                    "description",
+                    "version",
+                    "min_capability",
+                    "price",
+                    "tags",
+                    "provides",
+                    "requires",
+                    "display_name",
+                ):
+                    value = card.get(field)
+                    if value not in (None, "", [], {}):
+                        combined[field] = value
+                combined["installed"] = card.get("installed", False) or existing.get(
+                    "installed", False
+                )
+                combined["runtime"] = card.get("runtime", False) or existing.get(
+                    "runtime", False
+                )
+                combined["status"] = card.get("status") or existing.get("status")
+                combined["compatibility"] = card.get("compatibility") or existing.get(
+                    "compatibility"
+                )
+                combined["actions"] = card.get("actions") or existing.get("actions")
+                combined["sources"] = _dedupe_sources(
+                    existing.get("sources", []) + card.get("sources", [])
+                )
+                merged[key] = combined
 
         return sorted(
             merged.values(),
@@ -559,7 +612,7 @@ class Marketplace:
         )
 
     def _is_personality_first(self, item: dict[str, Any]) -> bool:
-        if item.get("category") != "kits_lumen":
+        if item.get("kind") != "kit":
             return False
         return "personality" in {
             str(tag).strip().lower() for tag in item.get("tags", []) if str(tag).strip()

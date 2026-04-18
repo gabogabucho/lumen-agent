@@ -243,6 +243,15 @@
       margin-bottom: var(--lumen-s-4);
       display: none;
     }
+    .hosted-note {
+      margin-bottom: var(--lumen-s-5);
+      padding: 12px 14px;
+      border-radius: var(--lumen-r-sm);
+      background: var(--lumen-lavender);
+      color: var(--lumen-ink-soft);
+      font-size: 13px;
+      line-height: 1.55;
+    }
   </style>
 </head>
 <body>
@@ -365,6 +374,10 @@
       <div class="step-label">Paso 4 de 4</div>
       <div class="step-title" id="key-title">Agregá tu API key</div>
 
+      {% if hosted_mode %}
+      <div class="hosted-note">Este servidor quedará protegido. Elegí ahora la contraseña o PIN de propietario para futuros accesos al dashboard y la API.</div>
+      {% endif %}
+
       <div id="openrouter-model-section" style="display:none; margin-bottom: var(--lumen-s-5);">
         <div class="input-group" style="margin-bottom: 12px;">
           <label>Elegí un modelo de OpenRouter</label>
@@ -406,6 +419,14 @@
         </p>
       </div>
 
+      {% if hosted_mode %}
+      <div class="input-group">
+        <label for="owner-secret-input">Contraseña o PIN del owner</label>
+        <input type="password" id="owner-secret-input" class="l-input" placeholder="Creá una clave para este servidor" autocomplete="new-password" />
+        <div class="input-hint">Se pedirá para entrar al dashboard, APIs y websocket cuando uses <code>lumen serve</code>.</div>
+      </div>
+      {% endif %}
+
       <div class="error-msg" id="error-msg"></div>
 
       <div class="btn-row">
@@ -418,6 +439,7 @@
   <script>
     let currentStep = 0;
     const QUICK_DEFAULT_PERSONALITY = 'x-lumen-personal';
+    const hostedMode = {{ 'true' if hosted_mode else 'false' }};
     const QUICK_DEFAULT_MODEL = 'deepseek/deepseek-chat:free';
     let config = { entry_path: '', active_personality: '', language: '', provider: '', model: '', api_key_env: '', api_key: '', key_label: '' };
 
@@ -651,6 +673,16 @@
       btn.disabled = true;
       btn.textContent = 'Iniciando Lumen...';
 
+      const ownerSecretInput = document.getElementById('owner-secret-input');
+      const ownerSecret = hostedMode && ownerSecretInput ? ownerSecretInput.value.trim() : '';
+      if (hostedMode && !ownerSecret) {
+        errEl.textContent = 'Creá una contraseña o PIN para el owner.';
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Iniciar Lumen';
+        return;
+      }
+
       try {
         const res = await fetch('/api/setup', {
           method: 'POST',
@@ -662,6 +694,7 @@
             model: config.model,
             api_key_env: config.api_key_env || null,
             api_key: config.api_key || null,
+            owner_secret: ownerSecret || null,
             port: parseInt(location.port) || 3000,
           }),
         });

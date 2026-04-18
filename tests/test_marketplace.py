@@ -140,17 +140,13 @@ class MarketplaceTests(unittest.TestCase):
         self.assertEqual(
             snapshot["skills"]["available"][0]["compatibility"]["status"], "installable"
         )
-        self.assertEqual(snapshot["mcps"]["available"][0]["name"], "docs-mcp")
-        self.assertTrue(snapshot["mcps"]["available"][0]["actions"]["read_only"])
-        self.assertEqual(snapshot["kits_lumen"]["available"][0]["name"], "scheduler")
+        self.assertEqual(snapshot["modules"]["available"][0]["name"], "docs-mcp")
+        self.assertTrue(snapshot["modules"]["available"][0]["actions"]["read_only"])
+        self.assertEqual(snapshot["kits"]["available"][0]["name"], "scheduler")
+        self.assertEqual(snapshot["kits"]["available"][0]["path"], "kits/scheduler")
+        self.assertTrue(snapshot["kits"]["available"][0]["actions"]["can_install"])
         self.assertEqual(
-            snapshot["kits_lumen"]["available"][0]["path"], "kits/scheduler"
-        )
-        self.assertTrue(
-            snapshot["kits_lumen"]["available"][0]["actions"]["can_install"]
-        )
-        self.assertEqual(
-            snapshot["kits_lumen"]["available"][0]["compatibility"]["status"],
+            snapshot["kits"]["available"][0]["compatibility"]["status"],
             "installable",
         )
 
@@ -188,7 +184,8 @@ class MarketplaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("skills", payload)
-        self.assertIn("kits_lumen", payload)
+        self.assertIn("kits", payload)
+        self.assertIn("modules", payload)
         self.assertEqual(payload["skills"]["items"][0]["name"], "notify")
 
     def test_marketplace_surfaces_advisory_model_tier_warnings_without_blocking(self):
@@ -220,14 +217,14 @@ class MarketplaceTests(unittest.TestCase):
 
             snapshot = marketplace.snapshot()
 
-        module_card = snapshot["kits_lumen"]["available"][0]
+        module_card = snapshot["kits"]["available"][0]
         self.assertEqual(module_card["compatibility"]["status"], "installable")
         self.assertIn(
             "recommends tier-3",
             module_card["compatibility"]["warnings"][0],
         )
 
-    def test_kits_lumen_personalities_sort_before_generic_modules(self):
+    def test_kits_personalities_sort_before_generic_kits(self):
         with tempfile.TemporaryDirectory() as tmp:
             catalog_path = Path(tmp) / "index.yaml"
             catalog_path.write_text(
@@ -263,21 +260,22 @@ class MarketplaceTests(unittest.TestCase):
 
             snapshot = marketplace.snapshot()
 
-        self.assertEqual(snapshot["tabs"][0]["key"], "kits_lumen")
-        self.assertEqual(snapshot["tabs"][0]["label"], "Modules & Personalities")
+        self.assertEqual(snapshot["tabs"][0]["key"], "modules")
+        self.assertEqual(snapshot["tabs"][1]["key"], "kits")
+        self.assertEqual(snapshot["tabs"][1]["label"], "Kits")
         self.assertEqual(
-            [item["name"] for item in snapshot["kits_lumen"]["available"]],
+            [item["name"] for item in snapshot["kits"]["available"]],
             ["alpha-personality", "zeta-generic"],
         )
         self.assertEqual(
             [item["name"] for item in marketplace.kits_catalog()],
             ["alpha-personality", "zeta-generic"],
         )
-        self.assertIn("kits_lumen", snapshot)
-        self.assertIn("available", snapshot["kits_lumen"])
-        self.assertIn("installed", snapshot["kits_lumen"])
+        self.assertIn("kits", snapshot)
+        self.assertIn("available", snapshot["kits"])
+        self.assertIn("installed", snapshot["kits"])
 
-    def test_dashboard_template_defaults_marketplace_to_modules_and_personalities(self):
+    def test_dashboard_template_defaults_marketplace_to_modules(self):
         template = (
             Path(__file__).resolve().parents[1]
             / "lumen"
@@ -286,10 +284,14 @@ class MarketplaceTests(unittest.TestCase):
             / "dashboard.html"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("let currentMarketplaceTab = 'kits_lumen';", template)
-        self.assertIn("Modules &amp; Personalities", template)
+        self.assertIn("let currentMarketplaceTab = 'modules';", template)
+        self.assertIn('id="tab-modules"', template)
         self.assertLess(
-            template.index('id="tab-kits_lumen"'),
+            template.index('id="tab-modules"'),
+            template.index('id="tab-kits"'),
+        )
+        self.assertLess(
+            template.index('id="tab-kits"'),
             template.index('id="tab-skills"'),
         )
 
@@ -342,7 +344,7 @@ class MarketplaceTests(unittest.TestCase):
             web._init_brain_from_config = original_init_brain
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("demo-personality", response.text)
+        self.assertIn("Demo Personality", response.text)
 
     def test_dashboard_falls_back_to_runtime_personality_name_when_no_active_module(
         self,
