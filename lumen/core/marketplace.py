@@ -400,6 +400,18 @@ class Marketplace:
         env_feeds = os.getenv("LUMEN_MARKETPLACE_FEEDS", "")
         for url in [value.strip() for value in env_feeds.split(",") if value.strip()]:
             feeds.append({"name": self._infer_feed_name(url), "url": url})
+
+        # Append community defaults unless explicitly disabled. User/env config
+        # always wins — defaults only fill in what isn't already there.
+        if os.getenv("LUMEN_MARKETPLACE_DISABLE_DEFAULTS", "").lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
+            existing_urls = {f["url"] for f in feeds}
+            for default in DEFAULT_FEEDS:
+                if default["url"] not in existing_urls:
+                    feeds.append(dict(default))
         return feeds
 
     def _fetch_json(self, url: str) -> Any:
@@ -424,6 +436,17 @@ class Marketplace:
             payload = {"items": payload}
         if not isinstance(payload, dict):
             return []
+
+        # Format detection: dispatch by payload shape.
+        # - Native Lumen feeds: {skills: [...], mcps: [...]} (or legacy {items})
+        # - ClawHub API v1:     {results: [{slug, displayName, summary, ...}]}
+        # - MCP Registry v0:    {servers: [{server: {name, description, remotes, ...}}]}
+        if "results" in payload and "skills" not in payload and "mcps" not in payload:
+            return self._parse_clawhub_payload(payload, source_name, source_type, runtime_surface)
+        if "servers" in payload and "skills" not in payload and "mcps" not in payload:
+            return self._parse_mcp_registry_payload(
+                payload, source_name, source_type, runtime_surface
+            )
 
         entries: list[tuple[str, dict[str, Any]]] = []
         for item in payload.get("skills", []):
@@ -452,6 +475,57 @@ class Marketplace:
                 )
                 if card:
                     entries.append(("skills", card))
+        return entries
+
+    def _parse_clawhub_payload(
+        self,
+        payload: dict[str, Any],
+        source_name: str,
+        source_type: str,
+        runtime_surface: dict[str, Any],
+    ):
+        """ClawHub /api/v1/search → Lumen skills cards.
+
+        ClawHub items look like:
+          {slug, displayName, summary, score, version, updatedAt}
+        We pre-map to the native skill shape and reuse _remote_skill_card.
+        """
+        entries: list[tuple[str, dict[str, Any]]] = []
+        for item in payload.get("results", []):
+            raw = _clawhub_item_to_skill_raw(item)
+            if not raw:
+                continue
+            card = self._remote_skill_card(
+                raw, runtime_surface, source_name, source_type
+            )
+            if card:
+                entries.append(("skills", card))
+        return entries
+
+    def _parse_mcp_registry_payload(
+        self,
+        payload: dict[str, Any],
+        source_name: str,
+        source_type: str,
+        runtime_surface: dict[str, Any],
+    ):
+        """Anthropic MCP Registry /v0/servers → Lumen mcps cards.
+
+        Items look like:
+          {server: {name, title, description, version, remotes[], repository}, _meta: {...}}
+        Remote transports (sse, streamable-http) are listed but flagged as
+        unsupported by the current Lumen MCP runtime (stdio only).
+        """
+        entries: list[tuple[str, dict[str, Any]]] = []
+        for item in payload.get("servers", []):
+            raw = _mcp_registry_item_to_mcp_raw(item)
+            if not raw:
+                continue
+            card = self._remote_mcp_card(
+                raw, runtime_surface, source_name, source_type
+            )
+            if card:
+                entries.append(("mcps", card))
         return entries
 
     def _remote_skill_card(
@@ -650,6 +724,8 @@ class Marketplace:
             return "ClawHub"
         if "openclaw" in lowered:
             return "OpenClaw"
+        if "modelcontextprotocol" in lowered or "mcp-registry" in lowered:
+            return "MCP Registry"
         return "Remote Feed"
 
     def _source_type_for(self, source_name: str) -> str:
@@ -658,6 +734,8 @@ class Marketplace:
             return "clawhub"
         if "openclaw" in lowered:
             return "openclaw"
+        if "mcp registry" in lowered or "mcp-registry" in lowered:
+            return "mcp-registry"
         return "remote"
 
 
@@ -669,6 +747,105 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(item) for item in value if str(item).strip()]
     return [str(value)]
+
+
+# Default community feeds shipped with Lumen. Merged into user config unless
+# LUMEN_MARKETPLACE_DISABLE_DEFAULTS is set.
+DEFAULT_FEEDS: list[dict[str, str]] = [
+    {
+        "name": "MCP Registry",
+        "url": "https://registry.modelcontextprotocol.io/v0/servers?limit=100",
+    },
+    {
+        "name": "ClawHub",
+        "url": "https://clawhub.ai/api/v1/search?q=skill&limit=50",
+    },
+]
+
+
+def _clawhub_item_to_skill_raw(item: Any) -> dict[str, Any] | None:
+    """Map a ClawHub /api/v1/search result into the native skill raw shape.
+
+    Input:  {slug, displayName, summary, score, version, updatedAt}
+    Output: dict compatible with _remote_skill_card / normalize_openclaw_metadata.
+    """
+    if not isinstance(item, dict):
+        return None
+    slug = str(item.get("slug") or "").strip()
+    if not slug:
+        return None
+    version = item.get("version")
+    return {
+        "name": slug,
+        "display_name": item.get("displayName") or slug,
+        "description": item.get("summary") or "",
+        "version": str(version) if version else "latest",
+        "tags": ["clawhub", "skill"],
+        "install": {
+            "method": "npx",
+            "target": f"clawhub@latest install {slug}",
+        },
+        "source_url": f"https://clawhub.ai/skills/{slug}",
+        "provides": [],
+        "requires": {},
+    }
+
+
+def _mcp_registry_item_to_mcp_raw(item: Any) -> dict[str, Any] | None:
+    """Map an Anthropic MCP Registry entry into the native MCP raw shape.
+
+    Input:  {server: {name, title, description, version, remotes, repository}, _meta: {...}}
+    Output: dict compatible with _remote_mcp_card.
+
+    Remote transports (sse, streamable-http) are preserved in metadata so the
+    install bridge can later wire them as remote MCPs. Until the Lumen MCP
+    runtime supports non-stdio transports, cards are still listable but will
+    be flagged in metadata.remote_transport.
+    """
+    if not isinstance(item, dict):
+        return None
+    server = item.get("server")
+    if not isinstance(server, dict):
+        return None
+    raw_name = str(server.get("name") or "").strip()
+    if not raw_name:
+        return None
+
+    # MCP Registry names often use slashes: "ac.inference.sh/mcp".
+    # Keep original in display_name; sanitize for Lumen internal name.
+    safe_name = raw_name.replace("/", "-").replace(" ", "-")
+
+    remotes = server.get("remotes") or []
+    primary_remote: dict[str, Any] | None = None
+    if isinstance(remotes, list) and remotes:
+        first = remotes[0]
+        if isinstance(first, dict):
+            primary_remote = first
+
+    repository = server.get("repository")
+    repo_url = ""
+    if isinstance(repository, dict):
+        repo_url = str(repository.get("url") or "")
+
+    return {
+        "name": safe_name,
+        "display_name": server.get("title") or raw_name,
+        "description": str(server.get("description") or ""),
+        "version": str(server.get("version") or "latest"),
+        "tags": ["mcp-registry", "mcp"],
+        "provides": [],
+        "requires": {},
+        "source_url": repo_url,
+        "remote_transport": (
+            {
+                "type": primary_remote.get("type"),
+                "url": primary_remote.get("url"),
+            }
+            if primary_remote
+            else None
+        ),
+        "original_name": raw_name,
+    }
 
 
 def _dedupe_sources(values: list[dict[str, Any]]) -> list[dict[str, Any]]:

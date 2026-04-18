@@ -1,0 +1,91 @@
+{
+  "servers": [
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ac.inference.sh/mcp",
+        "description": "Run 150+ AI apps \u2014 image, video, audio, LLMs, 3D and more. Browse, execute, stream results.",
+        "title": "inference.sh",
+        "version": "1.0.0",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://sh.inference.ac"
+          },
+          {
+            "type": "streamable-http",
+            "url": "https://api.inference.sh/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-04-13T17:32:20.852269Z",
+          "publishedAt": "2026-04-13T17:32:20.852269Z",
+          "updatedAt": "2026-04-13T17:32:20.852269Z",
+          "isLatest": false
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ac.inference.sh/mcp",
+        "description": "Run 150+ AI apps \u2014 image, video, audio, LLMs, 3D and more. Browse, execute, stream results.",
+        "title": "inference.sh",
+        "version": "1.0.1",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://sh.inference.ac"
+          },
+          {
+            "type": "streamable-http",
+            "url": "https://api.inference.sh/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-04-13T17:33:26.613537Z",
+          "publishedAt": "2026-04-13T17:33:26.613537Z",
+          "updatedAt": "2026-04-13T17:33:26.613537Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ac.tandem/docs-mcp",
+        "description": "Remote MCP server for Tandem docs, install guides, SDKs, workflows, and agent setup help.",
+        "repository": {
+          "url": "https://github.com/frumu-ai/tandem",
+          "source": "github"
+        },
+        "version": "0.3.0",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://tandem.ac/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-04-02T11:22:40.005172Z",
+          "publishedAt": "2026-04-02T11:22:40.005172Z",
+          "updatedAt": "2026-04-02T11:22:40.005172Z",
+          "isLatest": false
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "nextCursor": "ac.tandem/docs-mcp:0.3.0",
+    "count": 3
+  }
+}

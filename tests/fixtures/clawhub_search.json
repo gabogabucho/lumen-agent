@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "score": 3.6221617498631042,
+      "slug": "email-daily-summary",
+      "displayName": "Automatically logs into email accounts (Gmail, Outlook, QQ Mail, etc.) and generates daily email summaries. Use when the user wants to get a summary of their emails, check important messages, or create daily email digests.",
+      "summary": "Automatically logs into email accounts (Gmail, Outlook, QQ Mail, etc.) and generates daily email summaries. Use when the user wants to get a summary of their emails, check important messages, or create daily email digests.",
+      "version": null,
+      "updatedAt": 1776482591989
+    },
+    {
+      "score": 3.5599785152203625,
+      "slug": "porteden-email",
+      "displayName": "PortEden - secured email (Gmail, Outlook, Exchange) access for OpenClaw",
+      "summary": "Secured Email Mnagement - Gmail, Outlook & Exchange - list, search, read, send, reply, forward, delete, and modify emails across multiple accounts (gog-cli s...",
+      "version": null,
+      "updatedAt": 1774891535120
+    },
+    {
+      "score": 3.5228426751339454,
+      "slug": "email-marketing",
+      "displayName": "Email Marketing",
+      "summary": "Email deliverability, list management, sequences, segmentation, and campaign optimization.",
+      "version": null,
+      "updatedAt": 1772064635893
+    }
+  ]
+}

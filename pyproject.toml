@@ -8,6 +8,22 @@ version = "0.1.0"
 description = "Open-source AI agent engine. Modular. No limits."
 requires-python = ">=3.11"
 license = "MIT"
+authors = [
+    { name = "Gabo Urrutia", email = "gabogabucho@gmail.com" },
+]
+maintainers = [
+    { name = "Gabo Urrutia", email = "gabogabucho@gmail.com" },
+]
+keywords = ["ai", "agent", "modular", "assistant", "framework"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "litellm>=1.40.0",
     "fastapi>=0.111.0",
@@ -24,7 +40,14 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "build",
+    "twine",
 ]
+
+[project.urls]
+Homepage = "https://github.com/gabogabucho/lumen-agent"
+Repository = "https://github.com/gabogabucho/lumen-agent"
+Issues = "https://github.com/gabogabucho/lumen-agent/issues"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -34,12 +57,25 @@ lumen = "lumen.cli.main:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["lumen"]
+artifacts = [
+    "lumen/core/consciousness.yaml",
+    "lumen/connectors/built-in.yaml",
+    "lumen/channels/templates/**/*",
+    "lumen/locales/**/*",
+    "lumen/modules/**/*",
+    "lumen/skills/**/*",
+    "lumen/catalog/**/*",
+    "logo.png",
+]
 
-[tool.hatch.build.targets.wheel.force-include]
-"lumen/core/consciousness.yaml" = "lumen/core/consciousness.yaml"
-"lumen/connectors/built-in.yaml" = "lumen/connectors/built-in.yaml"
-"lumen/channels/templates" = "lumen/channels/templates"
-"lumen/locales" = "lumen/locales"
-"lumen/modules" = "lumen/modules"
-"lumen/skills" = "lumen/skills"
-"lumen/catalog" = "lumen/catalog"
+[tool.hatch.build.targets.sdist]
+artifacts = [
+    "lumen/core/consciousness.yaml",
+    "lumen/connectors/built-in.yaml",
+    "lumen/channels/templates/**/*",
+    "lumen/locales/**/*",
+    "lumen/modules/**/*",
+    "lumen/skills/**/*",
+    "lumen/catalog/**/*",
+    "logo.png",
+]
