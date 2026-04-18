@@ -126,6 +126,14 @@ Built-in handlers for `task`, `note`, and `memory`. Anything else plugs in via M
 - **Module catalog + uploads** &mdash; install from catalog or upload a custom `module.yaml`/zip
 - **Tested** &mdash; 148 tests covering brain, memory, web surfaces, marketplace, OAuth, MCP runtime, personality swap (including disk-snapshot guarantees)
 
+## Packaging model
+
+| Artifact | Contains | Scope |
+|---|---|---|
+| Kit | One bundled experience: can include personality, flows, modules, skills, and assets | Bigger, opinionated package |
+| Module | One installable capability | Narrow feature, like Telegram |
+| Skill | Markdown instructions only | No runtime |
+
 ## The "channel as module" pattern
 
 Channels like Telegram, WhatsApp, Slack, etc. are **not core**. They live as `x-lumen` modules tagged `comunicacion`. The core ships only the web channel; everything else extends Lumen the same way any third-party module would.
@@ -165,7 +173,7 @@ lumen/
 │   ├── web.py            # FastAPI + WebSocket dashboard
 │   └── templates/        # Dashboard, setup wizard, awakening
 ├── locales/{en,es}/      # Language packs
-├── catalog/              # Built-in module catalog (incl. personality kits)
+├── catalog/              # Built-in catalog (kits + installable modules)
 ├── modules/              # Installed modules (user-managed)
 ├── connectors/           # Built-in connector definitions
 ├── skills/               # Skill definitions (SKILL.md)

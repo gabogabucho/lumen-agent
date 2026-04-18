@@ -1,0 +1,15 @@
+name: x-lumen-comunicacion-telegram
+display_name: "Telegram"
+description: "Canal de comunicación por Telegram para enviar mensajes y recibir updates entrantes de forma autocontenida."
+version: 1.0.0
+author: "Lumen Team"
+price: free
+min_capability: tier-1
+provides:
+  - message.send_telegram
+tags: [x-lumen, comunicacion, telegram]
+x-lumen:
+  runtime:
+    env:
+      - TELEGRAM_BOT_TOKEN
+      - TELEGRAM_DEFAULT_CHAT_ID

@@ -16,6 +16,7 @@ from lumen.core.discovery import discover_all
 from lumen.core.handlers import register_builtin_handlers
 from lumen.core.mcp import MCPManager
 from lumen.core.memory import Memory
+from lumen.core.module_runtime import ModuleRuntimeManager
 from lumen.core.marketplace import Marketplace
 from lumen.core.module_manifest import load_module_manifest
 from lumen.core.personality import Personality
@@ -61,6 +62,31 @@ def refresh_runtime_registry(
     return registry
 
 
+async def sync_runtime_modules(
+    brain: Brain,
+    *,
+    config: dict,
+    pkg_dir: Path,
+    lumen_dir: Path,
+) -> None:
+    manager = getattr(brain, "module_manager", None)
+    if not isinstance(manager, ModuleRuntimeManager):
+        manager = ModuleRuntimeManager(
+            pkg_dir=pkg_dir,
+            lumen_dir=lumen_dir,
+            config=config,
+            connectors=brain.connectors,
+            memory=brain.memory,
+            brain=brain,
+        )
+        brain.module_manager = manager
+    else:
+        manager.config = config
+        manager.brain = brain
+
+    await manager.sync()
+
+
 def reload_runtime_personality_surface(
     brain: Brain,
     *,
@@ -102,7 +128,9 @@ async def bootstrap_runtime(
     consciousness = Consciousness()
     lang = config.get("language", "en")
     locale_personality_path = pkg_dir / "locales" / lang / "personality.yaml"
-    active_personality_module = _resolve_active_personality_module(config, pkg_dir, lumen_dir)
+    active_personality_module = _resolve_active_personality_module(
+        config, pkg_dir, lumen_dir
+    )
     personality_path = _resolve_personality_path(
         active_personality_module, locale_personality_path
     )
@@ -117,6 +145,15 @@ async def bootstrap_runtime(
 
     mcp_manager = MCPManager(config.get("mcp"))
     await mcp_manager.start(connectors.register_tool)
+
+    module_manager = ModuleRuntimeManager(
+        pkg_dir=pkg_dir,
+        lumen_dir=lumen_dir,
+        config=config,
+        connectors=connectors,
+        memory=memory,
+    )
+    await module_manager.sync()
 
     registry = Registry()
     discover_all(
@@ -146,6 +183,8 @@ async def bootstrap_runtime(
         mcp_manager=mcp_manager,
         marketplace=marketplace,
     )
+    brain.module_manager = module_manager
+    module_manager.brain = brain
 
     flows_dir = pkg_dir / "locales" / lang / "flows"
     brain.load_flows(flows_dir)
@@ -161,7 +200,9 @@ async def bootstrap_runtime(
     return RuntimeBootstrap(brain=brain, locale=locale, config=config)
 
 
-def _resolve_active_personality_module(config: dict, pkg_dir: Path, lumen_dir: Path | None = None) -> dict | None:
+def _resolve_active_personality_module(
+    config: dict, pkg_dir: Path, lumen_dir: Path | None = None
+) -> dict | None:
     module_name = config.get("active_personality")
 
     if lumen_dir is not None:
@@ -169,13 +210,19 @@ def _resolve_active_personality_module(config: dict, pkg_dir: Path, lumen_dir: P
         if config_path.exists():
             try:
                 import yaml
-                disk_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+
+                disk_config = (
+                    yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+                )
                 if "active_personality" in disk_config:
                     module_name = disk_config["active_personality"]
                     config["active_personality"] = module_name
             except Exception as e:
                 import logging
-                logging.warning(f"Failed to load active_personality from disk config: {e}")
+
+                logging.warning(
+                    f"Failed to load active_personality from disk config: {e}"
+                )
 
     if not module_name:
         return None

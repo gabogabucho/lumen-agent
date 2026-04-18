@@ -167,6 +167,9 @@ class ConnectorRegistry:
             for name, tool in self._explicit_tools.items()
         ]
 
+    def unregister_tool(self, name: str):
+        self._explicit_tools.pop(name, None)
+
     def parse_tool_name(self, tool_name: str) -> tuple[str, str]:
         """Parse 'connector__action' back into (connector_name, action)."""
         parts = tool_name.split("__", 1)

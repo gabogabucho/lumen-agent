@@ -23,6 +23,10 @@ from lumen.core.module_manifest import (
     resolve_module_manifest_path,
     zip_manifest_root_prefix,
 )
+from lumen.core.module_runtime import (
+    run_module_install_hook,
+    run_module_uninstall_hook,
+)
 
 
 # Where installed modules live
@@ -38,11 +42,13 @@ class Installer:
         connectors: ConnectorRegistry,
         memory: Memory,
         catalog: Catalog | None = None,
+        lumen_dir: Path | None = None,
     ):
         self.pkg_dir = pkg_dir
         self.connectors = connectors
         self.memory = memory
         self.catalog = catalog or Catalog()
+        self.lumen_dir = lumen_dir or (Path.home() / ".lumen")
         self.installed_dir = pkg_dir / "modules"
         self.installed_dir.mkdir(parents=True, exist_ok=True)
 
@@ -117,6 +123,13 @@ class Installer:
             skill_content = self._generate_skill_md(module_info)
             (module_dir / "SKILL.md").write_text(skill_content, encoding="utf-8")
 
+        run_module_install_hook(
+            name=name,
+            module_dir=module_dir,
+            runtime_root=self.lumen_dir / "modules",
+            lumen_dir=self.lumen_dir,
+        )
+
         return {
             "status": "installed",
             "name": name,
@@ -168,6 +181,13 @@ class Installer:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         target.write_bytes(zf.read(zip_entry))
 
+                run_module_install_hook(
+                    name=module_name,
+                    module_dir=module_dir,
+                    runtime_root=self.lumen_dir / "modules",
+                    lumen_dir=self.lumen_dir,
+                )
+
                 return {
                     "status": "installed",
                     "name": module_name,
@@ -188,6 +208,13 @@ class Installer:
         # Don't allow uninstalling the template
         if name.startswith("_"):
             return {"status": "error", "error": "Cannot uninstall templates"}
+
+        run_module_uninstall_hook(
+            name=name,
+            module_dir=module_dir,
+            runtime_root=self.lumen_dir / "modules",
+            lumen_dir=self.lumen_dir,
+        )
 
         shutil.rmtree(module_dir)
 

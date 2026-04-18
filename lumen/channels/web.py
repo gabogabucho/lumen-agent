@@ -28,7 +28,9 @@ from lumen.core.runtime import (
     bootstrap_runtime,
     refresh_runtime_registry,
     reload_runtime_personality_surface,
+    sync_runtime_modules,
 )
+from lumen.core.module_runtime import ModuleRuntimeManager
 from lumen.core.session import SessionManager
 from lumen.core.module_manifest import load_module_manifest
 
@@ -453,6 +455,8 @@ async def lifespan(app: FastAPI):
         await _brain.memory.init()
     yield
     if _brain:
+        if isinstance(getattr(_brain, "module_manager", None), ModuleRuntimeManager):
+            await _brain.module_manager.close()
         if getattr(_brain, "mcp_manager", None):
             await _brain.mcp_manager.close()
         await _brain.memory.close()
@@ -836,11 +840,20 @@ async def api_modules_install(name: str):
         return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
     from lumen.core.installer import Installer
 
-    installer = Installer(PKG_DIR, _brain.connectors, _brain.memory, _brain.catalog)
+    installer = Installer(
+        PKG_DIR,
+        _brain.connectors,
+        _brain.memory,
+        _brain.catalog,
+        lumen_dir=LUMEN_DIR,
+    )
     result = installer.install_from_catalog(name)
 
     if result["status"] == "installed":
         global _config
+        await sync_runtime_modules(
+            _brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR
+        )
         is_personality = False
         manifest = _installed_personality_manifest(name)
         if manifest:
@@ -866,8 +879,16 @@ async def api_modules_uninstall(name: str):
         return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
     from lumen.core.installer import Installer
 
-    installer = Installer(PKG_DIR, _brain.connectors, _brain.memory, _brain.catalog)
+    installer = Installer(
+        PKG_DIR,
+        _brain.connectors,
+        _brain.memory,
+        _brain.catalog,
+        lumen_dir=LUMEN_DIR,
+    )
     was_active_personality = _config.get("active_personality") == name
+    if isinstance(getattr(_brain, "module_manager", None), ModuleRuntimeManager):
+        await _brain.module_manager.unload(name)
     result = installer.uninstall(name)
 
     if result["status"] == "uninstalled":
@@ -888,11 +909,20 @@ async def api_modules_upload(request: Request):
     from lumen.core.installer import Installer
 
     body = await request.body()
-    installer = Installer(PKG_DIR, _brain.connectors, _brain.memory, _brain.catalog)
+    installer = Installer(
+        PKG_DIR,
+        _brain.connectors,
+        _brain.memory,
+        _brain.catalog,
+        lumen_dir=LUMEN_DIR,
+    )
     result = installer.install_from_zip(body)
 
     if result["status"] == "installed":
         global _config
+        await sync_runtime_modules(
+            _brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR
+        )
         is_personality = False
 
         # result typically includes the 'name' of the installed module

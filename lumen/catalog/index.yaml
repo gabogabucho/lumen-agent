@@ -57,6 +57,17 @@ modules:
     tags: [x-lumen, personality, vertical, negocio]
     path: kits/x-lumen-restaurant
 
+  - name: x-lumen-comunicacion-telegram
+    display_name: "Telegram"
+    description: "Canal de comunicación por Telegram para enviar mensajes y capturar updates entrantes."
+    version: "1.0.0"
+    author: "Lumen Team"
+    price: free
+    tags: [x-lumen, comunicacion, telegram]
+    provides:
+      - message.send_telegram
+    path: modules/x-lumen-comunicacion-telegram
+
 
   - name: scheduler
     display_name: "Scheduler"
