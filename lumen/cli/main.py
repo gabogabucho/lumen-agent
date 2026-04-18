@@ -2,6 +2,8 @@
 
 import asyncio
 import os
+import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -24,6 +26,34 @@ console = Console()
 LUMEN_DIR = Path.home() / ".lumen"
 CONFIG_PATH = LUMEN_DIR / "config.yaml"
 PKG_DIR = Path(__file__).parent.parent
+
+
+def _supports_unicode() -> bool:
+    encoding = (sys.stdout.encoding or "").lower()
+    return "utf" in encoding
+
+
+def render_eye_boot():
+    """Show a tiny Lumen eye boot animation before the panel."""
+    if not console.is_terminal:
+        return
+
+    if not _supports_unicode():
+        console.print("[bold #3d3dd6](o)[/bold #3d3dd6]")
+        return
+
+    frames = [
+        "      ·\n",
+        "      ·\n   ╭──┴──╮\n   │  ●  │\n   ╰──┬──╯\n      ·",
+        "   ◌─────◌\n   ╱  ◉  ╲\n ◌───────◌\n   ╲     ╱\n    ◌───◌",
+    ]
+
+    for idx, frame in enumerate(frames):
+        if idx:
+            console.clear()
+        console.print(frame, style="#3d3dd6", justify="center")
+        time.sleep(0.2)
+    console.clear()
 
 
 @app.command()
@@ -110,6 +140,8 @@ def run(
     """
     from lumen.channels.web import app as web_app, configure
 
+    render_eye_boot()
+
     # If config exists, pre-initialize brain (faster first page load)
     if CONFIG_PATH.exists():
         config = yaml.safe_load(CONFIG_PATH.read_text())
@@ -141,7 +173,7 @@ def run(
                 f"  MCP:        {mcp_count}",
                 title="Lumen",
                 expand=False,
-                border_style="cyan",
+                border_style="#3d3dd6",
             )
         )
     else:
@@ -153,7 +185,7 @@ def run(
                 f"  Follow the setup wizard in your browser.",
                 title="Lumen",
                 expand=False,
-                border_style="cyan",
+                border_style="#3d3dd6",
             )
         )
 
@@ -181,7 +213,7 @@ def status():
             f"Config:    {CONFIG_PATH}",
             title="Lumen — Status",
             expand=False,
-            border_style="cyan",
+            border_style="#3d3dd6",
         )
     )
 
