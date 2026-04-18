@@ -51,6 +51,11 @@ OPENROUTER_CURATED_MODELS = {
 }
 OPENROUTER_STATE_TTL_SECONDS = 600
 DEFAULT_QUICK_PERSONALITY = "x-lumen-personal"
+LEGACY_ENTRY_PATH_MAP = {
+    "uso_personal": "rapido",
+    "negocio": "elegir_personality",
+    "desde_cero": "custom_module",
+}
 VALID_ENTRY_PATHS = {"rapido", "elegir_personality", "custom_module"}
 PERSONALITY_ENTRY_TAGS = {
     "rapido": {"personality", "personal"},
@@ -76,7 +81,14 @@ def _load_config() -> dict:
     if not CONFIG_PATH.exists():
         return {}
     loaded = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    return loaded if isinstance(loaded, dict) else {}
+    if not isinstance(loaded, dict):
+        return {}
+
+    entry_path = loaded.get("entry_path")
+    if entry_path in LEGACY_ENTRY_PATH_MAP:
+        loaded["entry_path"] = LEGACY_ENTRY_PATH_MAP[entry_path]
+
+    return loaded
 
 
 def _merge_save_config(updates: dict, *, removals: set[str] | None = None) -> dict:
@@ -97,6 +109,10 @@ def _sanitize_config_updates(updates: dict) -> dict:
     sanitized = {k: v for k, v in updates.items() if v is not None}
 
     entry_path = sanitized.get("entry_path")
+    if entry_path in LEGACY_ENTRY_PATH_MAP:
+        entry_path = LEGACY_ENTRY_PATH_MAP[entry_path]
+        sanitized["entry_path"] = entry_path
+
     if entry_path not in VALID_ENTRY_PATHS:
         sanitized.pop("entry_path", None)
 
@@ -228,9 +244,23 @@ def _resolve_setup_active_personality(
     entry_path: str | None, module_name: str | None
 ) -> str | None:
     normalized_entry_path = str(entry_path or "").strip().lower()
+    catalog, installer = _build_setup_installer()
 
     if normalized_entry_path == "rapido":
         selected_name = str(module_name or DEFAULT_QUICK_PERSONALITY).strip()
+        if _is_valid_personality_for_entry_path(selected_name, normalized_entry_path):
+            return selected_name
+
+        module_info = catalog.get(selected_name)
+        if not module_info or not _module_matches_setup_personality_tags(
+            module_info, normalized_entry_path
+        ):
+            return None
+
+        result = installer.install_from_catalog(selected_name)
+        if result.get("status") not in {"installed", "already_installed"}:
+            return None
+
         return (
             selected_name
             if _is_valid_personality_for_entry_path(
@@ -259,7 +289,6 @@ def _resolve_setup_active_personality(
     if _is_valid_personality_for_entry_path(selected_name, normalized_entry_path):
         return selected_name
 
-    catalog, installer = _build_setup_installer()
     module_info = catalog.get(selected_name)
     if not module_info or not _module_matches_setup_personality_tags(
         module_info, normalized_entry_path
