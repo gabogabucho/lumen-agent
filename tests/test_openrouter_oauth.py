@@ -49,7 +49,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
         response = self.client.get(
             "/oauth/openrouter/start",
             params={
-                "entry_path": "negocio",
+                "entry_path": "elegir_personality",
                 "language": "es",
                 "model": "deepseek/deepseek-chat:free",
                 "port": 4312,
@@ -71,7 +71,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
 
         state = query["state"][0]
         stored = web._oauth_state_store[state]
-        self.assertEqual(stored["entry_path"], "negocio")
+        self.assertEqual(stored["entry_path"], "elegir_personality")
         self.assertEqual(stored["language"], "es")
         self.assertEqual(stored["model"], "deepseek/deepseek-chat:free")
         self.assertEqual(stored["port"], 4312)
@@ -91,7 +91,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
         web._oauth_state_store["state-123"] = {
             "code_verifier": "verifier-123",
             "model": "meta-llama/llama-3.3-70b-instruct:free",
-            "entry_path": "uso_personal",
+            "entry_path": "rapido",
             "language": "es",
             "port": 3000,
             "expires_at": 9999999999,
@@ -114,7 +114,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 307)
         self.assertEqual(response.headers["location"], "/")
         config = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(config["entry_path"], "uso_personal")
+        self.assertEqual(config["entry_path"], "rapido")
         self.assertEqual(config["language"], "es")
         self.assertEqual(config["port"], 3000)
         self.assertEqual(config["model"], "meta-llama/llama-3.3-70b-instruct:free")
@@ -197,7 +197,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
             response = self.client.post(
                 "/api/setup",
                 json={
-                    "entry_path": "desde_cero",
+                    "entry_path": "custom_module",
                     "language": "es",
                     "model": "deepseek/deepseek-chat",
                     "api_key_env": "DEEPSEEK_API_KEY",
@@ -209,7 +209,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
         config = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(config["entry_path"], "desde_cero")
+        self.assertEqual(config["entry_path"], "custom_module")
         self.assertEqual(config["language"], "es")
         self.assertEqual(config["model"], "deepseek/deepseek-chat")
         self.assertEqual(config["api_key_env"], "DEEPSEEK_API_KEY")
@@ -236,11 +236,11 @@ class OpenRouterOAuthTests(unittest.TestCase):
         try:
             merged = web._merge_save_config(
                 {
-                    "entry_path": "uso_personal",
+                    "entry_path": "rapido",
                     "active_personality": "test-web-personality",
                 }
             )
-            self.assertEqual(merged["entry_path"], "uso_personal")
+            self.assertEqual(merged["entry_path"], "rapido")
             self.assertEqual(merged["active_personality"], "test-web-personality")
 
             merged = web._merge_save_config(
@@ -249,7 +249,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
                     "active_personality": "missing-personality",
                 }
             )
-            self.assertEqual(merged["entry_path"], "uso_personal")
+            self.assertEqual(merged["entry_path"], "rapido")
             self.assertEqual(merged["active_personality"], "test-web-personality")
         finally:
             for file_path in created_files:
@@ -258,6 +258,13 @@ class OpenRouterOAuthTests(unittest.TestCase):
             for directory in created_dirs:
                 if directory.exists():
                     directory.rmdir()
+
+    def test_merge_save_config_migrates_legacy_entry_path_values(self):
+        merged = web._merge_save_config({"entry_path": "uso_personal"})
+
+        self.assertEqual(merged["entry_path"], "rapido")
+        saved = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(saved["entry_path"], "rapido")
 
     def test_setup_personalities_filters_by_entry_path(self):
         self._write_catalog_personality(
@@ -280,21 +287,21 @@ class OpenRouterOAuthTests(unittest.TestCase):
             tags=["x-lumen", "personality", "personal"],
         )
 
-        personal = self.client.get(
-            "/api/setup/personalities", params={"entry_path": "uso_personal"}
+        rapido = self.client.get(
+            "/api/setup/personalities", params={"entry_path": "rapido"}
         )
-        negocio = self.client.get(
-            "/api/setup/personalities", params={"entry_path": "negocio"}
+        elegir = self.client.get(
+            "/api/setup/personalities", params={"entry_path": "elegir_personality"}
         )
-        desde_cero = self.client.get(
-            "/api/setup/personalities", params={"entry_path": "desde_cero"}
+        custom = self.client.get(
+            "/api/setup/personalities", params={"entry_path": "custom_module"}
         )
 
-        self.assertEqual(personal.status_code, 200)
-        self.assertEqual(negocio.status_code, 200)
-        self.assertEqual(desde_cero.status_code, 200)
+        self.assertEqual(rapido.status_code, 200)
+        self.assertEqual(elegir.status_code, 200)
+        self.assertEqual(custom.status_code, 200)
         self.assertEqual(
-            personal.json()["modules"],
+            rapido.json()["modules"],
             [
                 {
                     "name": "x-lumen-personal",
@@ -306,7 +313,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            negocio.json()["modules"],
+            elegir.json()["modules"],
             [
                 {
                     "name": "x-lumen-negocio",
@@ -314,10 +321,17 @@ class OpenRouterOAuthTests(unittest.TestCase):
                     "description": "Business assistant",
                     "tags": ["x-lumen", "personality", "negocio"],
                     "installed": False,
-                }
+                },
+                {
+                    "name": "x-lumen-personal",
+                    "display_name": "Personal",
+                    "description": "Personal assistant",
+                    "tags": ["x-lumen", "personality", "personal"],
+                    "installed": True,
+                },
             ],
         )
-        self.assertEqual(desde_cero.json()["modules"], [])
+        self.assertEqual(custom.json()["modules"], [])
 
     def test_api_setup_installs_catalog_personality_before_saving(self):
         self._write_catalog_personality(
@@ -331,7 +345,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
             response = self.client.post(
                 "/api/setup",
                 json={
-                    "entry_path": "uso_personal",
+                    "entry_path": "rapido",
                     "active_personality": "x-lumen-personal",
                     "language": "es",
                     "model": "deepseek/deepseek-chat",
@@ -361,7 +375,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
             response = self.client.post(
                 "/api/setup",
                 json={
-                    "entry_path": "uso_personal",
+                    "entry_path": "rapido",
                     "active_personality": "x-lumen-negocio",
                     "language": "es",
                     "model": "deepseek/deepseek-chat",
@@ -373,11 +387,11 @@ class OpenRouterOAuthTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         saved = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(saved["entry_path"], "uso_personal")
+        self.assertEqual(saved["entry_path"], "rapido")
         self.assertNotIn("active_personality", saved)
         self.assertFalse((web.PKG_DIR / "modules" / "x-lumen-negocio").exists())
 
-    def test_api_setup_from_scratch_clears_active_personality(self):
+    def test_api_setup_custom_module_keeps_valid_active_personality(self):
         self._write_personality_module(
             web.PKG_DIR / "modules" / "x-lumen-personal",
             module_name="x-lumen-personal",
@@ -390,7 +404,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
             response = self.client.post(
                 "/api/setup",
                 json={
-                    "entry_path": "desde_cero",
+                    "entry_path": "custom_module",
                     "active_personality": "x-lumen-personal",
                     "language": "es",
                     "model": "deepseek/deepseek-chat",
@@ -402,8 +416,8 @@ class OpenRouterOAuthTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         saved = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(saved["entry_path"], "desde_cero")
-        self.assertNotIn("active_personality", saved)
+        self.assertEqual(saved["entry_path"], "custom_module")
+        self.assertEqual(saved["active_personality"], "x-lumen-personal")
 
     def test_openrouter_callback_installs_catalog_personality_before_save(self):
         self._write_catalog_personality(
@@ -415,7 +429,7 @@ class OpenRouterOAuthTests(unittest.TestCase):
         web._oauth_state_store["state-456"] = {
             "code_verifier": "verifier-456",
             "model": "meta-llama/llama-3.3-70b-instruct:free",
-            "entry_path": "negocio",
+            "entry_path": "elegir_personality",
             "active_personality": "x-lumen-negocio",
             "language": "es",
             "port": 3000,

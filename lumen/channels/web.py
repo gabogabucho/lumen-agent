@@ -50,10 +50,16 @@ OPENROUTER_CURATED_MODELS = {
     "google/gemma-3-27b-it:free",
 }
 OPENROUTER_STATE_TTL_SECONDS = 600
-VALID_ENTRY_PATHS = {"uso_personal", "negocio", "desde_cero"}
+DEFAULT_QUICK_PERSONALITY = "x-lumen-personal"
+LEGACY_ENTRY_PATH_MAP = {
+    "uso_personal": "rapido",
+    "negocio": "elegir_personality",
+    "desde_cero": "custom_module",
+}
+VALID_ENTRY_PATHS = {"rapido", "elegir_personality", "custom_module"}
 PERSONALITY_ENTRY_TAGS = {
-    "uso_personal": {"personality", "personal"},
-    "negocio": {"personality", "negocio"},
+    "rapido": {"personality", "personal"},
+    "elegir_personality": {"personality"},
 }
 _oauth_state_store: dict[str, dict] = {}
 _oauth_state_lock = threading.Lock()
@@ -75,7 +81,14 @@ def _load_config() -> dict:
     if not CONFIG_PATH.exists():
         return {}
     loaded = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    return loaded if isinstance(loaded, dict) else {}
+    if not isinstance(loaded, dict):
+        return {}
+
+    entry_path = loaded.get("entry_path")
+    if entry_path in LEGACY_ENTRY_PATH_MAP:
+        loaded["entry_path"] = LEGACY_ENTRY_PATH_MAP[entry_path]
+
+    return loaded
 
 
 def _merge_save_config(updates: dict, *, removals: set[str] | None = None) -> dict:
@@ -96,6 +109,10 @@ def _sanitize_config_updates(updates: dict) -> dict:
     sanitized = {k: v for k, v in updates.items() if v is not None}
 
     entry_path = sanitized.get("entry_path")
+    if entry_path in LEGACY_ENTRY_PATH_MAP:
+        entry_path = LEGACY_ENTRY_PATH_MAP[entry_path]
+        sanitized["entry_path"] = entry_path
+
     if entry_path not in VALID_ENTRY_PATHS:
         sanitized.pop("entry_path", None)
 
@@ -157,8 +174,9 @@ def _enforce_personality_selection_rules(config: dict):
         return
 
     entry_path = config.get("entry_path")
-    if entry_path == "desde_cero":
-        config.pop("active_personality", None)
+    if entry_path == "custom_module":
+        if not _is_valid_personality_for_entry_path(active_personality):
+            config.pop("active_personality", None)
         return
 
     if not _is_valid_personality_for_entry_path(active_personality, entry_path):
@@ -225,23 +243,55 @@ def _list_setup_personality_modules(entry_path: str | None) -> list[dict]:
 def _resolve_setup_active_personality(
     entry_path: str | None, module_name: str | None
 ) -> str | None:
-    if not module_name or entry_path == "desde_cero":
-        return None
+    normalized_entry_path = str(entry_path or "").strip().lower()
+    catalog, installer = _build_setup_installer()
 
-    if not _required_personality_tags(entry_path):
+    if normalized_entry_path == "rapido":
+        selected_name = str(module_name or DEFAULT_QUICK_PERSONALITY).strip()
+        if _is_valid_personality_for_entry_path(selected_name, normalized_entry_path):
+            return selected_name
+
+        module_info = catalog.get(selected_name)
+        if not module_info or not _module_matches_setup_personality_tags(
+            module_info, normalized_entry_path
+        ):
+            return None
+
+        result = installer.install_from_catalog(selected_name)
+        if result.get("status") not in {"installed", "already_installed"}:
+            return None
+
+        return (
+            selected_name
+            if _is_valid_personality_for_entry_path(
+                selected_name, normalized_entry_path
+            )
+            else None
+        )
+
+    if not module_name:
         return None
 
     selected_name = str(module_name).strip()
     if not selected_name:
         return None
 
-    if _is_valid_personality_for_entry_path(selected_name, entry_path):
+    if normalized_entry_path == "custom_module":
+        return (
+            selected_name
+            if _is_valid_personality_for_entry_path(selected_name)
+            else None
+        )
+
+    if not _required_personality_tags(normalized_entry_path):
+        return None
+
+    if _is_valid_personality_for_entry_path(selected_name, normalized_entry_path):
         return selected_name
 
-    catalog, installer = _build_setup_installer()
     module_info = catalog.get(selected_name)
     if not module_info or not _module_matches_setup_personality_tags(
-        module_info, entry_path
+        module_info, normalized_entry_path
     ):
         return None
 
@@ -249,7 +299,7 @@ def _resolve_setup_active_personality(
     if result.get("status") not in {"installed", "already_installed"}:
         return None
 
-    if _is_valid_personality_for_entry_path(selected_name, entry_path):
+    if _is_valid_personality_for_entry_path(selected_name, normalized_entry_path):
         return selected_name
 
     return None
@@ -800,7 +850,7 @@ async def api_modules_install(name: str):
                 _config = _merge_save_config({"active_personality": name})
 
         refresh_runtime_registry(_brain, pkg_dir=PKG_DIR, active_channels=["web"])
-        
+
         if is_personality:
             reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
 
@@ -844,7 +894,7 @@ async def api_modules_upload(request: Request):
     if result["status"] == "installed":
         global _config
         is_personality = False
-        
+
         # result typically includes the 'name' of the installed module
         module_name = result.get("name")
         if module_name:
