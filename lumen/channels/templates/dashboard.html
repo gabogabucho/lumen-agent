@@ -1165,8 +1165,12 @@
     }
 
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    let ws = new WebSocket(`${wsProtocol}//${location.host}/ws/${sessionId}`);
+    const wsUrl = `${wsProtocol}//${location.host}/ws/${sessionId}`;
+    let ws = new WebSocket(wsUrl);
     let heartbeatTimer = null;
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    let connectionLostShown = false;
 
     const chatMessages = document.getElementById('chat-messages');
     const chatEmpty = document.getElementById('chat-empty');
@@ -1298,44 +1302,72 @@
     }
     renderSensePanel();
 
-    ws.addEventListener('message', (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'pong') return;
-      if (data.type === 'typing') {
-        typingIndicator.classList.toggle('hidden', !data.status);
-        if (data.status) {
-          chatMessages.scrollTop = chatMessages.scrollHeight;
+    function attachWsHandlers(socket) {
+      socket.addEventListener('message', (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'pong') return;
+        if (data.type === 'typing') {
+          typingIndicator.classList.toggle('hidden', !data.status);
+          if (data.status) {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            pulse('heartbeat');
+          }
+        }
+        if (data.type === 'message' && data.role === 'assistant') {
+          typingIndicator.classList.add('hidden');
+          addMessage('assistant', data.content);
           pulse('heartbeat');
         }
-      }
-      if (data.type === 'message' && data.role === 'assistant') {
-        typingIndicator.classList.add('hidden');
-        addMessage('assistant', data.content);
-        pulse('heartbeat');
-      }
-      if (data.type === 'awareness' && data.content) {
-        typingIndicator.classList.add('hidden');
-        addMessage('assistant', data.content);
-        pulse('awaken');
-        renderSensePanel();
-      }
-    });
-
-    ws.addEventListener('close', () => {
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      if (lifePulseTimer) clearInterval(lifePulseTimer);
-      if (pulseStrip) pulseStrip.classList.add('offline');
-      addMessage('assistant', '{{ ui.connection_lost | default("Se perdió la conexión. Recarga la página.") }}');
-    });
-
-    ws.addEventListener('open', () => {
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      heartbeatTimer = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
+        if (data.type === 'awareness' && data.content) {
+          typingIndicator.classList.add('hidden');
+          addMessage('assistant', data.content);
+          pulse('awaken');
+          renderSensePanel();
         }
-      }, 30000);
-    });
+      });
+
+      socket.addEventListener('close', () => {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        if (lifePulseTimer) clearInterval(lifePulseTimer);
+        if (pulseStrip) pulseStrip.classList.add('offline');
+        scheduleReconnect();
+      });
+
+      socket.addEventListener('open', () => {
+        reconnectAttempts = 0;
+        connectionLostShown = false;
+        if (pulseStrip) pulseStrip.classList.remove('offline');
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = setInterval(() => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30000);
+        if (lifePulseTimer) clearInterval(lifePulseTimer);
+        lifePulseTimer = setInterval(() => pulse('heartbeat'), 12000);
+      });
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      reconnectAttempts += 1;
+      const delay = Math.min(8000, 500 * Math.pow(1.7, reconnectAttempts - 1));
+      if (reconnectAttempts === 3 && !connectionLostShown) {
+        addMessage('assistant', '{{ ui.connection_lost | default("Se perdió la conexión. Reintentando…") }}');
+        connectionLostShown = true;
+      }
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        try {
+          ws = new WebSocket(wsUrl);
+          attachWsHandlers(ws);
+        } catch (e) {
+          scheduleReconnect();
+        }
+      }, delay);
+    }
+
+    attachWsHandlers(ws);
 
     chatInput.focus();
 
@@ -1402,13 +1434,40 @@
     }
     window.switchModelPickerTab = switchModelPickerTab;
 
-    function selectModelFromPicker(el) {
+    async function selectModelFromPicker(el) {
       const id = el.dataset.modelId;
       if (!id) return;
       const input = document.getElementById('settings-model');
       if (input) input.value = id;
       document.querySelectorAll('.model-picker-item').forEach(item => item.classList.remove('selected'));
       el.classList.add('selected');
+
+      setSettingsMessage('{{ ui.saving | default("Guardando cambios…") }}');
+      try {
+        const providerInput = document.getElementById('settings-provider');
+        const envInput = document.getElementById('settings-api-key-env');
+        const response = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: providerInput?.value || 'openrouter',
+            model: id,
+            api_key_env: envInput?.value || 'OPENROUTER_API_KEY',
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.status !== 'ok') {
+          throw new Error(payload.error || 'No se pudo guardar el modelo.');
+        }
+        document.getElementById('current-provider').textContent = payload.config.provider || 'Custom';
+        document.getElementById('current-model').textContent = payload.config.model || '—';
+        providerInput.value = payload.config.provider || '';
+        input.value = payload.config.model || '';
+        updateOpenRouterUi(payload.config);
+        setSettingsMessage('Modelo actualizado. Lumen ya lo está usando.', 'success');
+      } catch (error) {
+        setSettingsMessage(error.message || 'No se pudo guardar el modelo.', 'error');
+      }
     }
     window.selectModelFromPicker = selectModelFromPicker;
 
@@ -1428,12 +1487,14 @@
     function refreshModelPickerVisibility() {
       if (!modelPickerWrapper) return;
       const provider = (document.getElementById('settings-provider')?.value || '').trim().toLowerCase();
-      const shouldShow = provider === 'openrouter';
+      const keyEnv = (document.getElementById('settings-api-key-env')?.value || '').trim().toUpperCase();
+      const shouldShow = provider === 'openrouter' || keyEnv === 'OPENROUTER_API_KEY';
       modelPickerWrapper.classList.toggle('hidden', !shouldShow);
       if (shouldShow) loadModelPicker();
     }
 
     document.getElementById('settings-provider')?.addEventListener('input', refreshModelPickerVisibility);
+    document.getElementById('settings-api-key-env')?.addEventListener('input', refreshModelPickerVisibility);
     modelPickerSearch?.addEventListener('input', renderModelPicker);
     refreshModelPickerVisibility();
 

@@ -198,6 +198,8 @@ async def bootstrap_runtime(
         mcp_manager=mcp_manager,
         marketplace=marketplace,
         capability_awareness=awareness,
+        language=config.get("language", "en"),
+        api_key_env=config.get("api_key_env"),
     )
     brain.module_manager = module_manager
     module_manager.brain = brain

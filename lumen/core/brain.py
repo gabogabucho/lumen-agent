@@ -47,6 +47,8 @@ class Brain:
         mcp_manager=None,
         marketplace=None,
         capability_awareness: CapabilityAwareness | None = None,
+        language: str = "en",
+        api_key_env: str | None = None,
     ):
         self.consciousness = consciousness
         self.personality = personality
@@ -59,6 +61,26 @@ class Brain:
         self.mcp_manager = mcp_manager
         self.marketplace = marketplace
         self.capability_awareness = capability_awareness
+        self.language = (language or "en").lower()
+        self.api_key_env = api_key_env
+
+    def _resolved_model(self) -> str:
+        """Route model through OpenRouter when OpenRouter creds are active."""
+        model = self.model or ""
+        if self.api_key_env == "OPENROUTER_API_KEY" and not model.startswith("openrouter/"):
+            return f"openrouter/{model}"
+        return model
+
+    def _language_directive(self) -> str:
+        mapping = {
+            "es": "Always respond in Spanish (español rioplatense, natural y cálido).",
+            "en": "Always respond in English.",
+            "pt": "Always respond in Portuguese.",
+            "fr": "Always respond in French.",
+            "it": "Always respond in Italian.",
+            "de": "Always respond in German.",
+        }
+        return mapping.get(self.language, f"Always respond in the user's language (code: {self.language}).")
 
     async def think(self, message: str, session: Session) -> dict:
         """Receive message -> assemble context -> LLM decides -> response."""
@@ -153,7 +175,7 @@ class Brain:
 
         try:
             response = await acompletion(
-                model=self.model,
+                model=self._resolved_model(),
                 messages=messages,
                 tools=tools if tools else None,
                 temperature=0.7,
@@ -203,6 +225,7 @@ class Brain:
                 "role": "system",
                 "content": (
                     f"{self.consciousness.as_context()}\n\n"
+                    f"{self._language_directive()}\n\n"
                     f"{awareness_text}\n\n"
                     "You just noticed something changed in your capabilities. "
                     "Briefly and naturally tell the user about it. "
@@ -215,7 +238,7 @@ class Brain:
 
         try:
             response = await acompletion(
-                model=self.model,
+                model=self._resolved_model(),
                 messages=messages,
                 max_tokens=150,
                 temperature=0.7,
@@ -302,6 +325,12 @@ class Brain:
         4. Current state — active flow, memories, conversation
         """
         system_parts = [
+            # LANGUAGE — responses must match the user's chosen locale
+            "## LANGUAGE (HIGHEST PRIORITY — this overrides any other instruction)",
+            "",
+            self._language_directive(),
+            "Even if other sections below are written in English, you MUST answer in the language above. Translate on the fly.",
+            "",
             # CRITICAL RULES — the LLM MUST obey these
             "## RULES (you MUST follow these exactly)",
             "",
@@ -533,7 +562,7 @@ class Brain:
             # Send tool results back to LLM for final response
             try:
                 response = await acompletion(
-                    model=self.model,
+                    model=self._resolved_model(),
                     messages=messages,
                     tools=tools,
                     temperature=0.7,

@@ -54,13 +54,13 @@ PKG_DIR = Path(__file__).parent.parent
 OPENROUTER_AUTH_URL = "https://openrouter.ai/auth"
 OPENROUTER_KEYS_URL = "https://openrouter.ai/api/v1/auth/keys"
 OPENROUTER_CURATED_MODELS = {
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-chat:free",
-    "mistralai/mistral-7b-instruct:free",
+    "openai/gpt-oss-120b:free",
+    "qwen/qwen3-coder:free",
     "google/gemma-3-27b-it:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
 }
 OPENROUTER_STATE_TTL_SECONDS = 600
-DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-chat:free"
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-120b:free"
 DEFAULT_QUICK_PERSONALITY = "x-lumen-personal"
 AUTH_COOKIE_NAME = "lumen_owner"
 SETUP_COOKIE_NAME = "lumen_setup"
@@ -323,11 +323,16 @@ def _normalize_optional_text(value) -> str | None:
 
 def _infer_provider_name(config: dict | None = None) -> str:
     loaded = config if config is not None else _config
-    provider = _normalize_optional_text((loaded or {}).get("provider"))
+    loaded = loaded or {}
+
+    if loaded.get("api_key_env") == "OPENROUTER_API_KEY" and loaded.get("api_key"):
+        return "OpenRouter"
+
+    provider = _normalize_optional_text(loaded.get("provider"))
     if provider:
         return provider
 
-    model = str((loaded or {}).get("model") or "").strip().lower()
+    model = str(loaded.get("model") or "").strip().lower()
     if model.startswith("deepseek/"):
         return "DeepSeek"
     if model.startswith("gpt-") or model.startswith("openai/"):
@@ -392,6 +397,8 @@ async def _refresh_runtime_from_config(previous_config: dict | None = None) -> b
     _config = latest_config
     _locale = _load_ui_locale(_config.get("language", "en"))
     _brain.model = _config.get("model", _brain.model)
+    _brain.api_key_env = _config.get("api_key_env")
+    _brain.language = str(_config.get("language") or "en").lower()
 
     if getattr(_brain, "marketplace", None) is not None:
         _brain.marketplace.config = _config
@@ -1097,6 +1104,7 @@ async def openrouter_oauth_callback(
             {
                 "language": oauth_state.get("language", "en"),
                 "port": oauth_state.get("port", 3000),
+                "provider": "openrouter",
                 "model": oauth_state["model"],
                 "entry_path": oauth_state.get("entry_path"),
                 "active_personality": resolved_personality,
@@ -1128,6 +1136,9 @@ async def dashboard(request: Request):
         return RedirectResponse(url="/login")
 
     await _init_brain_from_config()
+
+    if _brain and _brain.memory._db is None:
+        await _brain.memory.init()
 
     ui = _locale.get("dashboard", {})
     return templates.TemplateResponse(
@@ -1713,23 +1724,13 @@ async def api_openrouter_models(request: Request):
     curated = []
     curated_lookup = {m["id"]: m for m in models}
     for model_id in [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "deepseek/deepseek-chat:free",
-        "mistralai/mistral-7b-instruct:free",
+        "openai/gpt-oss-120b:free",
+        "qwen/qwen3-coder:free",
         "google/gemma-3-27b-it:free",
+        "nousresearch/hermes-3-llama-3.1-405b:free",
     ]:
         if model_id in curated_lookup:
             curated.append(curated_lookup[model_id])
-        else:
-            curated.append(
-                {
-                    "id": model_id,
-                    "name": model_id,
-                    "description": "",
-                    "context_length": None,
-                    "is_free": True,
-                }
-            )
 
     return {
         "curated": curated,
