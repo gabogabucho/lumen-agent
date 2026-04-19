@@ -10,6 +10,8 @@ slots:
 on_complete: activate_kit_with_context
 
 first_message: |
-  Hola {{user_name}}, soy Lumen. Estoy listo para ayudarte con lo que necesites.
-  Puedo buscar en la web, leer y guardar archivos, y recordar cosas importantes para vos.
-  ¿Por dónde empezamos?
+  Hola {{user_name}}, soy Lumen.
+
+  No soy un chat común: soy un organismo modular. Siento lo que tengo —skills, módulos, conexiones— y también lo que me falta. Si me pedís algo que todavía no sé hacer, te digo qué me falta y vamos a buscarlo juntos en el marketplace.
+
+  ¿Por dónde arrancamos?

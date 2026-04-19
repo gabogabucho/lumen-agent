@@ -412,7 +412,37 @@
       color: var(--lumen-ink);
       border-top-left-radius: 4px;
       box-shadow: 0 10px 24px rgba(15,21,69,0.06);
+      white-space: normal;
     }
+    .msg.assistant .bubble p { margin: 0 0 8px 0; }
+    .msg.assistant .bubble p:last-child { margin-bottom: 0; }
+    .msg.assistant .bubble h1,
+    .msg.assistant .bubble h2,
+    .msg.assistant .bubble h3 { margin: 10px 0 6px 0; font-weight: 600; line-height: 1.25; }
+    .msg.assistant .bubble h1 { font-size: 1.15em; }
+    .msg.assistant .bubble h2 { font-size: 1.08em; }
+    .msg.assistant .bubble h3 { font-size: 1em; }
+    .msg.assistant .bubble ul,
+    .msg.assistant .bubble ol { margin: 4px 0 8px 0; padding-left: 22px; }
+    .msg.assistant .bubble li { margin: 2px 0; }
+    .msg.assistant .bubble li:last-child { margin-bottom: 0; }
+    .msg.assistant .bubble code {
+      background: rgba(15,21,69,0.06);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+    }
+    .msg.assistant .bubble pre {
+      background: rgba(15,21,69,0.06);
+      padding: 10px 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 6px 0;
+    }
+    .msg.assistant .bubble pre code { background: transparent; padding: 0; }
+    .msg.assistant .bubble a { color: var(--lumen-coral); text-decoration: underline; }
+    .msg.assistant .bubble strong { font-weight: 600; }
     .msg.user .bubble {
       background: linear-gradient(180deg, var(--lumen-coral-soft), #fff4f1);
       color: var(--lumen-ink);
@@ -1233,7 +1263,8 @@
       if (chatEmpty && chatEmpty.parentNode) chatEmpty.remove();
       const wrapper = document.createElement('div');
       wrapper.className = `msg ${role}`;
-      wrapper.innerHTML = `<div class="bubble">${escapeHtml(content)}</div>`;
+      const html = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content);
+      wrapper.innerHTML = `<div class="bubble">${html}</div>`;
       chatMessages.appendChild(wrapper);
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -1242,6 +1273,58 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    function renderMarkdown(src) {
+      if (!src) return '';
+      let text = escapeHtml(String(src));
+      const codeBlocks = [];
+      text = text.replace(/```([\s\S]*?)```/g, (_, body) => {
+        codeBlocks.push(`<pre><code>${body.replace(/^\n/, '')}</code></pre>`);
+        return `\u0000CB${codeBlocks.length - 1}\u0000`;
+      });
+      const inlineCodes = [];
+      text = text.replace(/`([^`\n]+)`/g, (_, body) => {
+        inlineCodes.push(`<code>${body}</code>`);
+        return `\u0000IC${inlineCodes.length - 1}\u0000`;
+      });
+      text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+      text = text.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>');
+      text = text.replace(/(^|\s)_([^_\n]+)_(?=[\s.,!?:;]|$)/g, '$1<em>$2</em>');
+
+      const lines = text.split('\n');
+      const out = [];
+      let listType = null;
+      const flushList = () => { if (listType) { out.push(`</${listType}>`); listType = null; } };
+      let paraBuf = [];
+      const flushPara = () => {
+        if (paraBuf.length) { out.push(`<p>${paraBuf.join('<br>')}</p>`); paraBuf = []; }
+      };
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+        if (!line.trim()) { flushPara(); flushList(); continue; }
+        const h = line.match(/^(#{1,3})\s+(.*)$/);
+        if (h) { flushPara(); flushList(); out.push(`<h${h[1].length}>${h[2]}</h${h[1].length}>`); continue; }
+        const ul = line.match(/^[-*]\s+(.*)$/);
+        const ol = line.match(/^\d+\.\s+(.*)$/);
+        if (ul || ol) {
+          flushPara();
+          const want = ul ? 'ul' : 'ol';
+          if (listType && listType !== want) flushList();
+          if (!listType) { out.push(`<${want}>`); listType = want; }
+          out.push(`<li>${(ul || ol)[1]}</li>`);
+          continue;
+        }
+        flushList();
+        paraBuf.push(line);
+      }
+      flushPara();
+      flushList();
+      let html = out.join('');
+      html = html.replace(/\u0000CB(\d+)\u0000/g, (_, i) => codeBlocks[+i]);
+      html = html.replace(/\u0000IC(\d+)\u0000/g, (_, i) => inlineCodes[+i]);
+      return html;
     }
 
     chatForm.addEventListener('submit', (e) => {
