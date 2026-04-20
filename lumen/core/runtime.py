@@ -210,6 +210,9 @@ async def bootstrap_runtime(
     brain.module_manager = module_manager
     module_manager.brain = brain
 
+    from lumen.core.inbox import Inbox
+    brain.inbox = Inbox()
+
     flows_dir = pkg_dir / "locales" / lang / "flows"
     brain.load_flows(flows_dir)
     onboarding_flow_path = _resolve_module_onboarding_flow(active_personality_module)

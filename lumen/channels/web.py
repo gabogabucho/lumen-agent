@@ -104,6 +104,25 @@ def configure(brain, locale: dict, config: dict, awareness=None):
 def _attach_brain_runtime_handlers():
     if _brain is not None:
         _brain.flow_action_handler = _handle_flow_action
+        _start_inbox_consumer()
+
+
+_inbox_consumer_task = None
+
+
+def _start_inbox_consumer():
+    global _inbox_consumer_task
+    inbox = getattr(_brain, "inbox", None)
+    if inbox is None:
+        return
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _inbox_consumer_task = loop.create_task(
+        inbox.start_consumer(_brain, session_manager)
+    )
 
 
 async def _handle_flow_action(action: str, slots: dict, *, session=None) -> dict:

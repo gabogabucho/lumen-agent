@@ -30,6 +30,7 @@ class ModuleRuntimeContext:
     lumen_dir: Path | None = None
     brain: Any = None
     registered_tools: list[str] = field(default_factory=list)
+    inbox: Any = None
 
     def ensure_runtime_dir(self) -> Path:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -115,6 +116,7 @@ def _build_context(
     memory: Memory | None = None,
     lumen_dir: Path | None = None,
     brain: Any = None,
+    inbox: Any = None,
 ) -> ModuleRuntimeContext:
     _, manifest = load_module_manifest(module_dir)
     return ModuleRuntimeContext(
@@ -127,6 +129,7 @@ def _build_context(
         memory=memory,
         lumen_dir=lumen_dir,
         brain=brain,
+        inbox=inbox,
     )
 
 
@@ -254,6 +257,7 @@ class ModuleRuntimeManager:
             memory=self.memory,
             lumen_dir=self.lumen_dir,
             brain=self.brain,
+            inbox=getattr(self.brain, "inbox", None) if self.brain else None,
         )
         context.ensure_runtime_dir()
 
