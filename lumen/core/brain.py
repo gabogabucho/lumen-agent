@@ -68,6 +68,7 @@ class Brain:
         self.language = (language or "en").lower()
         self.api_key_env = api_key_env
         self.flow_action_handler = flow_action_handler
+        self._last_detected_language: str = self.language
 
     def _resolved_model(self) -> str:
         """Route model through OpenRouter when OpenRouter creds are active."""
@@ -77,9 +78,14 @@ class Brain:
         return model
 
     def _language_directive(
-        self, message: str | None = None, session: Session | None = None
+        self, message: str | None = None, session: Session | None = None,
+        *,
+        language_override: str | None = None,
     ) -> str:
-        resolved_language = self._resolve_conversation_language(message, session)
+        if language_override:
+            resolved_language = language_override
+        else:
+            resolved_language = self._resolve_conversation_language(message, session)
         mapping = {
             "es": "Respond in Spanish (español rioplatense, natural y cálido).",
             "en": "Respond in English.",
@@ -108,6 +114,7 @@ class Brain:
     ) -> str:
         detected = self._detect_obvious_language(message)
         if detected:
+            self._last_detected_language = detected
             return detected
 
         if session:
@@ -119,6 +126,7 @@ class Brain:
             for previous_message in recent_user_messages[:3]:
                 detected = self._detect_obvious_language(previous_message)
                 if detected:
+                    self._last_detected_language = detected
                     return detected
 
         return self.language
@@ -388,7 +396,7 @@ class Brain:
                 "role": "system",
                 "content": (
                     f"{self.consciousness.as_context()}\n\n"
-                    f"{self._language_directive()}\n\n"
+                    f"{self._language_directive(language_override=self._last_detected_language)}\n\n"
                     f"{awareness_text}\n\n"
                     "You just noticed something changed in your capabilities. "
                     "Briefly and naturally tell the user about it. "
