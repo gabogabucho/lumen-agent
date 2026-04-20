@@ -56,6 +56,11 @@ class ModuleRuntimeContext:
         module_settings = ((self.config or {}).get("modules") or {}).get(self.name, {})
         if key in module_settings and module_settings[key] not in {None, ""}:
             return str(module_settings[key])
+        module_secrets = ((self.config or {}).get("secrets") or {}).get(self.name, {})
+        if env_name and env_name in module_secrets and module_secrets[env_name] not in {None, ""}:
+            return str(module_secrets[env_name])
+        if key in module_secrets and module_secrets[key] not in {None, ""}:
+            return str(module_secrets[key])
         if env_name:
             env_value = os.environ.get(env_name)
             if env_value:
@@ -252,9 +257,13 @@ class ModuleRuntimeManager:
         )
         context.ensure_runtime_dir()
 
-        result = module.activate(context)
-        if inspect.isawaitable(result):
-            result = await result
+        try:
+            result = module.activate(context)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            context.unregister_registered_tools()
+            return
 
         self._loaded[name] = LoadedModuleRuntime(
             module=module, context=context, state=result

@@ -39,6 +39,45 @@ class MCPRuntimeTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await runtime.brain.memory.close()
 
+    async def test_bootstrap_loads_pending_module_setup_flows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg_dir = self._make_runtime_pkg(Path(tmp))
+            module_dir = pkg_dir / "modules" / "pending-module"
+            module_dir.mkdir(parents=True)
+            (module_dir / "module.yaml").write_text(
+                yaml.dump(
+                    {
+                        "name": "pending-module",
+                        "display_name": "Pending Module",
+                        "description": "Needs setup",
+                        "x-lumen": {
+                            "runtime": {
+                                "env": [
+                                    {"name": "DEMO_TOKEN", "secret": True},
+                                ]
+                            }
+                        },
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            runtime = await bootstrap_runtime(
+                {"language": "en", "model": "deepseek/deepseek-chat"},
+                pkg_dir=pkg_dir,
+                lumen_dir=Path(tmp) / "runtime",
+                active_channels=["web"],
+            )
+
+            try:
+                self.assertEqual(
+                    [flow["intent"] for flow in runtime.brain.flows],
+                    ["locale-default", "module-setup-pending-module"],
+                )
+            finally:
+                await runtime.brain.memory.close()
+
     async def test_bootstrap_uses_active_personality_module_when_valid(self):
         with tempfile.TemporaryDirectory() as tmp:
             pkg_dir = self._make_runtime_pkg(Path(tmp))

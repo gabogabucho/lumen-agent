@@ -328,6 +328,7 @@ class Marketplace:
             "tags": capability.metadata.get("tags", []),
             "provides": list(capability.provides),
             "requires": dict(capability.requires),
+            "pending_setup": capability.metadata.get("pending_setup"),
             "compatibility": compatibility,
             "interoperability": capability.metadata.get("interoperability")
             or classify_capability_interoperability(capability),

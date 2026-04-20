@@ -22,6 +22,7 @@ from lumen.core.cerebellum import (
 )
 from lumen.core.connectors import ConnectorRegistry
 from lumen.core.module_manifest import load_module_manifest
+from lumen.core.module_setup import pending_setup_for_manifest
 from lumen.core.registry import (
     Capability,
     CapabilityKind,
@@ -37,6 +38,7 @@ def discover_all(
     active_channels: list[str] | None = None,
     mcp_config: dict | None = None,
     model: str | None = None,
+    config: dict | None = None,
 ) -> Registry:
     """Run full discovery and populate the registry."""
     # Built-in skills
@@ -52,7 +54,7 @@ def discover_all(
                     _discover_skill_file(registry, skill_file, module_dir.name)
 
     _discover_connectors(registry, connectors)
-    _discover_modules(registry, pkg_dir / "modules")
+    _discover_modules(registry, pkg_dir / "modules", config=config)
     _discover_channels(registry, active_channels or ["web"])
 
     if mcp_config:
@@ -193,7 +195,12 @@ def _discover_connectors(registry: Registry, connectors: ConnectorRegistry):
         )
 
 
-def _discover_modules(registry: Registry, modules_dir: Path):
+def _discover_modules(
+    registry: Registry,
+    modules_dir: Path,
+    *,
+    config: dict | None = None,
+):
     """Scan modules/ for module.yaml files, with manifest.yaml fallback."""
     if not modules_dir.exists():
         return
@@ -212,10 +219,20 @@ def _discover_modules(registry: Registry, modules_dir: Path):
                 manifest_path=str(manifest_file),
             )
             name = normalized.name or module_dir.name
+            pending_setup = pending_setup_for_manifest(
+                name,
+                manifest,
+                config,
+                module_dir=module_dir,
+            )
 
             # Module is installed (it's in modules/ dir) — check if its skill is ready
             has_skill = (module_dir / "SKILL.md").exists()
-            status = CapabilityStatus.READY if has_skill else CapabilityStatus.AVAILABLE
+            status = (
+                CapabilityStatus.READY
+                if has_skill and not pending_setup
+                else CapabilityStatus.AVAILABLE
+            )
 
             registry.register(
                 Capability(
@@ -238,6 +255,7 @@ def _discover_modules(registry: Registry, modules_dir: Path):
                         ),
                         "schema_aliases": normalized.metadata.get("schema_aliases", {}),
                         "x_lumen": normalized.metadata.get("x_lumen", {}),
+                        "pending_setup": pending_setup,
                     },
                 )
             )

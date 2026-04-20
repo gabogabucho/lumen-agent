@@ -30,6 +30,7 @@ from lumen.core.module_runtime import (
     run_module_install_hook,
     run_module_uninstall_hook,
 )
+from lumen.core.module_setup import pending_setup_for_manifest
 
 
 # Where installed modules live
@@ -46,6 +47,7 @@ class Installer:
         memory: Memory,
         catalog: Catalog | None = None,
         lumen_dir: Path | None = None,
+        config: dict | None = None,
     ):
         self.pkg_dir = pkg_dir
         self.connectors = connectors
@@ -54,6 +56,20 @@ class Installer:
         self.lumen_dir = lumen_dir or (Path.home() / ".lumen")
         self.installed_dir = pkg_dir / "modules"
         self.installed_dir.mkdir(parents=True, exist_ok=True)
+        self.config = config if config is not None else {}
+
+    def _detect_pending_setup(self, module_name: str) -> dict | None:
+        """Inspect the installed module and return setup info if env vars are missing."""
+        module_dir = self.installed_dir / module_name
+        if not module_dir.exists():
+            return None
+        _, manifest = load_module_manifest(module_dir)
+        return pending_setup_for_manifest(
+            module_name,
+            manifest,
+            self.config,
+            module_dir=module_dir,
+        )
 
     def list_installed(self) -> list[dict]:
         """List all installed modules."""
@@ -63,19 +79,27 @@ class Installer:
                 continue
             manifest_path, manifest = load_module_manifest(module_dir)
             if manifest_path is not None:
-                installed.append(
-                    {
-                        "name": manifest.get("name", module_dir.name),
-                        "display_name": humanize_module_name(
-                            manifest.get("name", module_dir.name),
-                            manifest.get("display_name"),
-                        ),
-                        "description": manifest.get("description", ""),
-                        "version": manifest.get("version", "0.0.0"),
-                        "tags": manifest.get("tags", []),
-                        "path": str(module_dir),
-                    }
+                module_name = manifest.get("name", module_dir.name)
+                item = {
+                    "name": module_name,
+                    "display_name": humanize_module_name(
+                        module_name,
+                        manifest.get("display_name"),
+                    ),
+                    "description": manifest.get("description", ""),
+                    "version": manifest.get("version", "0.0.0"),
+                    "tags": manifest.get("tags", []),
+                    "path": str(module_dir),
+                }
+                pending = pending_setup_for_manifest(
+                    module_name,
+                    manifest,
+                    self.config,
+                    module_dir=module_dir,
                 )
+                if pending:
+                    item["pending_setup"] = pending
+                installed.append(item)
         return installed
 
     def is_installed(self, name: str) -> bool:
@@ -92,7 +116,11 @@ class Installer:
         Otherwise, generate manifest + SKILL.md from catalog metadata.
         """
         if self.is_installed(name):
-            return {"status": "already_installed", "name": name}
+            result = {"status": "already_installed", "name": name}
+            pending = self._detect_pending_setup(name)
+            if pending:
+                result["pending_setup"] = pending
+            return result
 
         module_info = self.catalog.get(name)
         if not module_info:
@@ -133,15 +161,20 @@ class Installer:
             name=name,
             module_dir=module_dir,
             runtime_root=self.lumen_dir / "modules",
+            config=self.config,
             lumen_dir=self.lumen_dir,
         )
 
-        return {
+        result = {
             "status": "installed",
             "name": name,
             "display_name": module_info.get("display_name", name),
             "description": module_info.get("description", ""),
         }
+        pending = self._detect_pending_setup(name)
+        if pending:
+            result["pending_setup"] = pending
+        return result
 
     def install_marketplace_item(self, item: dict) -> dict:
         """Install a marketplace card from a remote source."""
@@ -182,10 +215,14 @@ class Installer:
                 module_name = manifest.get("name", "unknown")
 
                 if self.is_installed(module_name):
-                    return {
+                    result = {
                         "status": "already_installed",
                         "name": module_name,
                     }
+                    pending = self._detect_pending_setup(module_name)
+                    if pending:
+                        result["pending_setup"] = pending
+                    return result
 
                 warnings = self._external_module_warnings(module_name)
 
@@ -212,10 +249,11 @@ class Installer:
                     name=module_name,
                     module_dir=module_dir,
                     runtime_root=self.lumen_dir / "modules",
+                    config=self.config,
                     lumen_dir=self.lumen_dir,
                 )
 
-                return {
+                result = {
                     "status": "installed",
                     "name": module_name,
                     "display_name": humanize_module_name(
@@ -224,6 +262,10 @@ class Installer:
                     "description": manifest.get("description", ""),
                     "warnings": warnings,
                 }
+                pending = self._detect_pending_setup(module_name)
+                if pending:
+                    result["pending_setup"] = pending
+                return result
 
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -353,9 +395,10 @@ class Installer:
             name=module_name,
             module_dir=module_dir,
             runtime_root=self.lumen_dir / "modules",
+            config=self.config,
             lumen_dir=self.lumen_dir,
         )
-        return {
+        result = {
             "status": "installed",
             "name": module_name,
             "display_name": humanize_module_name(
@@ -363,6 +406,10 @@ class Installer:
             ),
             "description": manifest.get("description", item.get("description", "")),
         }
+        pending = self._detect_pending_setup(module_name)
+        if pending:
+            result["pending_setup"] = pending
+        return result
 
     def _install_from_mcp_registry(self, item: dict) -> dict:
         remote_transport = item.get("remote_transport") or {}
