@@ -158,6 +158,7 @@ class WebSurfaceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["skill"]["ready"], 1)
         self.assertEqual(payload["summary"]["mcp"]["error"], 1)
         self.assertEqual(payload["awareness"], {"pending": 0, "counts": {}, "effects": {}, "events": []})
+        self.assertEqual(payload["module_setup"], {"pending": 0})
         self.assertEqual(payload["flows"][0]["intent"], "book_demo")
         self.assertEqual(payload["flows"][0]["slots"], ["email", "date"])
         self.assertEqual(payload["capabilities"][2]["min_capability"], "tier-2")
@@ -177,10 +178,187 @@ class WebSurfaceTests(unittest.TestCase):
                 "capabilities": [],
                 "summary": {},
                 "awareness": {"pending": 0, "counts": {}, "effects": {}, "events": []},
+                "module_setup": {"pending": 0},
                 "flows": [],
                 "ready": 0,
                 "gaps": 0,
             },
+        )
+
+    def test_api_modules_setup_persists_values_without_echoing_secrets(self):
+        pkg_dir = Path(self.temp_dir.name) / "pkg"
+        module_dir = pkg_dir / "modules" / "pending-module"
+        module_dir.mkdir(parents=True, exist_ok=True)
+        (module_dir / "module.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": "pending-module",
+                    "display_name": "Pending Module",
+                    "description": "Needs setup",
+                    "x-lumen": {
+                        "runtime": {
+                            "env": [
+                                {"name": "DEMO_TOKEN", "secret": True},
+                                {"name": "DEMO_CHAT_ID", "secret": False},
+                            ]
+                        }
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (module_dir / "SKILL.md").write_text("# Pending Module\n", encoding="utf-8")
+
+        web._brain = BrainStub()
+        web._config = {"model": "demo-model"}
+
+        with patch.object(web, "PKG_DIR", pkg_dir):
+            with patch("lumen.channels.web.sync_runtime_modules") as sync_mock:
+                with patch("lumen.channels.web.refresh_runtime_registry") as refresh_mock:
+                    with patch("lumen.channels.web.reload_runtime_personality_surface") as reload_mock:
+                        with patch("lumen.channels.web.broadcast_awareness") as awareness_mock:
+                            response = self.client.post(
+                                "/api/modules/setup/pending-module",
+                                json={
+                                    "DEMO_TOKEN": "super-secret-token",
+                                    "DEMO_CHAT_ID": "chat-123",
+                                },
+                            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["module"], "pending-module")
+        self.assertEqual(payload["saved_env"], ["DEMO_CHAT_ID", "DEMO_TOKEN"])
+        self.assertIsNone(payload["pending_setup"])
+        self.assertNotIn("super-secret-token", json.dumps(payload))
+
+        saved = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        self.assertEqual(
+            saved["secrets"]["pending-module"],
+            {
+                "DEMO_TOKEN": "super-secret-token",
+                "DEMO_CHAT_ID": "chat-123",
+            },
+        )
+        self.assertEqual(web._config["secrets"]["pending-module"]["DEMO_TOKEN"], "super-secret-token")
+        self.assertTrue(sync_mock.await_count == 1)
+        refresh_mock.assert_called_once()
+        reload_mock.assert_called_once()
+        self.assertTrue(awareness_mock.await_count == 1)
+
+    def test_api_modules_setup_rejects_invalid_values_and_keeps_module_pending(self):
+        pkg_dir = Path(self.temp_dir.name) / "pkg"
+        module_dir = pkg_dir / "modules" / "pending-module"
+        module_dir.mkdir(parents=True, exist_ok=True)
+        (module_dir / "module.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": "pending-module",
+                    "display_name": "Pending Module",
+                    "description": "Needs setup",
+                    "x-lumen": {
+                        "runtime": {
+                            "env": [
+                                {
+                                    "name": "DEMO_TOKEN",
+                                    "secret": True,
+                                    "pattern": r"token-[A-Z0-9]+",
+                                    "examples": ["token-ABC123"],
+                                    "format_guidance": "Pegá solo el token",
+                                },
+                            ]
+                        }
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (module_dir / "SKILL.md").write_text("# Pending Module\n", encoding="utf-8")
+
+        web._brain = BrainStub()
+        web._config = {"model": "demo-model"}
+
+        with patch.object(web, "PKG_DIR", pkg_dir):
+            response = self.client.post(
+                "/api/modules/setup/pending-module",
+                json={"DEMO_TOKEN": "Te dejo el token: hola"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["status"], "error")
+        self.assertIn("DEMO_TOKEN", payload["errors"])
+        self.assertEqual(
+            [spec["name"] for spec in payload["pending_setup"]["env_specs"]],
+            ["DEMO_TOKEN"],
+        )
+        if web.CONFIG_PATH.exists():
+            saved = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8")) or {}
+            self.assertNotIn("pending-module", saved.get("secrets", {}))
+
+    def test_api_modules_setup_valid_values_and_smoke_mark_module_ready(self):
+        pkg_dir = Path(self.temp_dir.name) / "pkg"
+        module_dir = pkg_dir / "modules" / "pending-module"
+        module_dir.mkdir(parents=True, exist_ok=True)
+        (module_dir / "connector.py").write_text(
+            "def check_setup_readiness(context):\n"
+            "    token = context.resolve_setting('demo_token', 'DEMO_TOKEN')\n"
+            "    if token != 'token-READY':\n"
+            "        return {'ok': False, 'reason': 'Smoke check failed'}\n"
+            "    return {'ok': True}\n",
+            encoding="utf-8",
+        )
+        (module_dir / "module.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": "pending-module",
+                    "display_name": "Pending Module",
+                    "description": "Needs setup",
+                    "x-lumen": {
+                        "runtime": {
+                            "env": [
+                                {
+                                    "name": "DEMO_TOKEN",
+                                    "secret": True,
+                                    "pattern": r"token-[A-Z]+",
+                                    "examples": ["token-READY"],
+                                },
+                            ]
+                        }
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (module_dir / "SKILL.md").write_text("# Pending Module\n", encoding="utf-8")
+
+        web._brain = BrainStub()
+        web._config = {"model": "demo-model"}
+
+        with patch.object(web, "PKG_DIR", pkg_dir):
+            with patch("lumen.channels.web.sync_runtime_modules"):
+                with patch("lumen.channels.web.refresh_runtime_registry"):
+                    with patch("lumen.channels.web.reload_runtime_personality_surface"):
+                        with patch("lumen.channels.web.broadcast_awareness"):
+                            response = self.client.post(
+                                "/api/modules/setup/pending-module",
+                                json={"DEMO_TOKEN": "Te dejo el token: token-READY"},
+                            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["saved_env"], ["DEMO_TOKEN"])
+        self.assertIsNone(payload["pending_setup"])
+
+        saved = yaml.safe_load(web.CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        self.assertEqual(
+            saved["secrets"]["pending-module"],
+            {"DEMO_TOKEN": "token-READY"},
         )
 
     def test_api_history_returns_persisted_messages(self):

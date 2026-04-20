@@ -37,6 +37,11 @@ from lumen.core.module_runtime import ModuleRuntimeManager
 from lumen.core.marketplace import humanize_module_name
 from lumen.core.session import SessionManager
 from lumen.core.module_manifest import load_module_manifest
+from lumen.core.module_setup import (
+    merge_module_setup_config,
+    normalize_module_setup_values,
+    pending_setup_for_manifest,
+)
 
 
 # State — initialized lazily after web setup or by CLI
@@ -86,6 +91,119 @@ def configure(brain, locale: dict, config: dict, awareness=None):
     _locale = locale
     _config = config
     _awareness = awareness
+    _attach_brain_runtime_handlers()
+
+
+def _attach_brain_runtime_handlers():
+    if _brain is not None:
+        _brain.flow_action_handler = _handle_flow_action
+
+
+async def _handle_flow_action(action: str, slots: dict, *, session=None) -> dict:
+    if not action.startswith("save_module_env:"):
+        return {"status": "ignored", "message": "Listo."}
+
+    module_name = action.split(":", 1)[1].strip()
+    if not module_name:
+        return {"status": "error", "message": "No pude identificar el módulo a configurar."}
+    return await _persist_module_setup_slots(module_name, slots)
+
+
+async def _persist_module_setup_slots(module_name: str, values: dict | None) -> dict:
+    global _config
+
+    module_dir = PKG_DIR / "modules" / module_name
+    manifest_path, manifest = load_module_manifest(module_dir)
+    if manifest_path is None:
+        return {"status": "error", "message": f"El módulo {module_name} ya no está instalado."}
+
+    before_pending = pending_setup_for_manifest(
+        module_name,
+        manifest,
+        _config,
+        module_dir=module_dir,
+    )
+    if before_pending is None:
+        return {
+            "status": "ok",
+            "module": module_name,
+            "saved_env": [],
+            "pending_setup": None,
+            "message": f"{module_name} ya estaba listo.",
+        }
+
+    normalized = normalize_module_setup_values(
+        values,
+        module_name=module_name,
+        manifest=manifest,
+        module_dir=module_dir,
+        config=_config,
+    )
+    merged = merge_module_setup_config(
+        _config,
+        module_name,
+        normalized.get("values"),
+        manifest=manifest,
+        module_dir=module_dir,
+        config_for_validation=_config,
+    )
+    after_pending = pending_setup_for_manifest(
+        module_name,
+        manifest,
+        merged,
+        module_dir=module_dir,
+    )
+    previous_saved = set((((_config.get("secrets") or {}).get(module_name) or {}).keys()))
+    current_saved = set((((merged.get("secrets") or {}).get(module_name) or {}).keys()))
+    saved_env = sorted(current_saved - previous_saved)
+
+    validation_errors = normalized.get("errors") or {}
+    if validation_errors and not saved_env:
+        return {
+            "status": "error",
+            "module": module_name,
+            "saved_env": [],
+            "pending_setup": before_pending,
+            "errors": validation_errors,
+            "message": "No guardé esos datos porque el formato no es válido todavía.",
+        }
+
+    _config = _merge_save_config({"secrets": merged.get("secrets", {})})
+
+    if _brain is not None:
+        # Unload the module first so sync re-activates with updated config
+        manager = getattr(_brain, "module_manager", None)
+        if manager:
+            await manager.unload(module_name)
+        await sync_runtime_modules(_brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR)
+        refresh_runtime_registry(_brain, pkg_dir=PKG_DIR, active_channels=["web"])
+        reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
+        await broadcast_awareness()
+
+    if after_pending is None:
+        message = f"Listo, {module_name} ya quedó listo para usar."
+    else:
+        remaining = len(after_pending.get("env_specs") or [])
+        readiness = after_pending.get("readiness") or {}
+        reason = str(readiness.get("reason") or "").strip()
+        if remaining:
+            message = f"Guardé lo válido, pero todavía necesito {remaining} dato{'s' if remaining != 1 else ''} para {module_name}."
+        elif reason:
+            message = f"Guardé los datos, pero {module_name} todavía no está listo: {reason}"
+        else:
+            message = f"Guardé los datos, pero {module_name} todavía no quedó listo."
+
+    if validation_errors:
+        message = f"{message} También rechacé algunos valores por formato inválido."
+
+    return {
+        "status": "ok" if not validation_errors else "partial",
+        "module": module_name,
+        "saved_env": saved_env,
+        "pending_setup": after_pending,
+        "errors": validation_errors,
+        "message": message,
+    }
 
 
 def configure_access_mode(mode: str = "run"):
@@ -662,6 +780,7 @@ async def _init_brain_from_config():
     _locale = runtime.locale
     _config = runtime.config
     _awareness = runtime.awareness
+    _attach_brain_runtime_handlers()
 
     return True
 
@@ -1431,7 +1550,13 @@ async def api_modules_installed(request: Request):
         return {"modules": marketplace.kits_installed()}
     from lumen.core.installer import Installer
 
-    installer = Installer(PKG_DIR, _brain.connectors, _brain.memory, _brain.catalog)
+    installer = Installer(
+        PKG_DIR,
+        _brain.connectors,
+        _brain.memory,
+        _brain.catalog,
+        config=_config,
+    )
     return {"modules": installer.list_installed()}
 
 
@@ -1475,6 +1600,8 @@ async def api_marketplace(request: Request):
 @app.post("/api/modules/install/{name}")
 async def api_modules_install(request: Request, name: str):
     """Install a module from the catalog. Lumen knows."""
+    global _config
+
     guard = _require_owner_access(request)
     if guard is not None:
         return guard
@@ -1488,6 +1615,7 @@ async def api_modules_install(request: Request, name: str):
         _brain.memory,
         _brain.catalog,
         lumen_dir=LUMEN_DIR,
+        config=_config,
     )
     result = installer.install_from_catalog(name)
     if result.get("status") == "not_found":
@@ -1496,23 +1624,18 @@ async def api_modules_install(request: Request, name: str):
             result = installer.install_marketplace_item(remote_item)
 
     if result["status"] == "installed":
-        global _config
         installed_name = result.get("name", name)
         await sync_runtime_modules(
             _brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR
         )
-        is_personality = False
         manifest = _installed_personality_manifest(installed_name)
         if manifest:
             tags = _normalize_module_tags(manifest.get("tags"))
             if "personality" in tags:
-                is_personality = True
                 _config = _merge_save_config({"active_personality": installed_name})
 
         refresh_runtime_registry(_brain, pkg_dir=PKG_DIR, active_channels=["web"])
-
-        if is_personality:
-            reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
+        reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
 
         # Proactively announce the new capability to connected clients
         await broadcast_awareness()
@@ -1539,6 +1662,7 @@ async def api_modules_uninstall(request: Request, name: str):
         _brain.memory,
         _brain.catalog,
         lumen_dir=LUMEN_DIR,
+        config=_config,
     )
     was_active_personality = _config.get("active_personality") == name
     if isinstance(getattr(_brain, "module_manager", None), ModuleRuntimeManager):
@@ -1549,8 +1673,7 @@ async def api_modules_uninstall(request: Request, name: str):
         if was_active_personality:
             _config = _merge_save_config({}, removals={"active_personality"})
         refresh_runtime_registry(_brain, pkg_dir=PKG_DIR, active_channels=["web"])
-        if was_active_personality:
-            reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
+        reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
 
         await broadcast_awareness()
 
@@ -1560,6 +1683,8 @@ async def api_modules_uninstall(request: Request, name: str):
 @app.post("/api/modules/upload")
 async def api_modules_upload(request: Request):
     """Upload and install a module from a ZIP file. WordPress-style."""
+    global _config
+
     if not _brain:
         setup_guard = _require_setup_access(request)
         if setup_guard is not None:
@@ -1575,16 +1700,14 @@ async def api_modules_upload(request: Request):
         _brain.memory,
         _brain.catalog,
         lumen_dir=LUMEN_DIR,
+        config=_config,
     )
     result = installer.install_from_zip(body)
 
     if result["status"] == "installed":
-        global _config
         await sync_runtime_modules(
             _brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR
         )
-        is_personality = False
-
         # result typically includes the 'name' of the installed module
         module_name = result.get("name")
         if module_name:
@@ -1592,16 +1715,39 @@ async def api_modules_upload(request: Request):
             if manifest:
                 tags = _normalize_module_tags(manifest.get("tags"))
                 if "personality" in tags:
-                    is_personality = True
                     _config = _merge_save_config({"active_personality": module_name})
 
         refresh_runtime_registry(_brain, pkg_dir=PKG_DIR, active_channels=["web"])
-
-        if is_personality:
-            reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
+        reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR)
 
         await broadcast_awareness()
 
+    return result
+
+
+@app.post("/api/modules/setup/{name}")
+async def api_modules_complete_setup(request: Request, name: str):
+    """Persist collected module setup values without exposing them back."""
+    global _config
+
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
+    if not _brain:
+        return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
+
+    body = await request.json()
+    values = body.get("values") if isinstance(body, dict) and "values" in body else body
+    if not isinstance(values, dict):
+        return JSONResponse(status_code=400, content={"error": "Expected a JSON object of setup values"})
+
+    module_dir = PKG_DIR / "modules" / name
+    manifest_path, _ = load_module_manifest(module_dir)
+    if manifest_path is None:
+        return JSONResponse(status_code=404, content={"error": "Module not installed"})
+    result = await _persist_module_setup_slots(name, values)
+    if result.get("status") == "error":
+        return JSONResponse(status_code=400, content=result)
     return result
 
 
@@ -1650,6 +1796,13 @@ async def api_status(request: Request):
             else {"pending": 0, "counts": {}, "effects": {}, "events": []}
         ),
         "flows": flows_info,
+        "module_setup": {
+            "pending": sum(
+                1
+                for cap in capabilities
+                if (cap.get("metadata") or {}).get("pending_setup")
+            ),
+        },
         "ready": len(registry.ready()) if registry else 0,
         "gaps": len(registry.gaps()) if registry else 0,
     }
