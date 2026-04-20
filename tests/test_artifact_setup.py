@@ -1,4 +1,4 @@
-"""Tests for the unified artifact setup contract (Phase 1)."""
+"""Tests for the unified artifact setup contract (Phases 1-4)."""
 
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ from lumen.core.artifact_setup import (
     KIND_NATIVE,
     build_flow_from_contract,
     collect_pending_artifact_setup_flows,
+    contract_from_external,
     contract_from_mcp_server,
     contract_from_native_manifest,
+    contract_from_opaque_manifest,
     load_mcp_overlay,
     parse_artifact_action,
 )
@@ -318,6 +320,189 @@ x-lumen:
                 "module-setup-pending-module",
                 "artifact-setup-mcp-github",
             ]
+        finally:
+            secrets_store.LUMEN_DIR = orig_lumen_dir
+            secrets_store.SECRETS_PATH = orig_secrets_path
+
+
+class TestContractFromOpaqueManifest:
+    def test_no_manifest_returns_none(self):
+        assert contract_from_opaque_manifest("mod", None) is None
+
+    def test_no_x_lumen_returns_none(self):
+        assert contract_from_opaque_manifest("mod", {"name": "mod"}) is None
+
+    def test_no_manual_setup_returns_none(self):
+        manifest = {"x-lumen": {"runtime": {"env": [{"name": "X"}]}}}
+        assert contract_from_opaque_manifest("mod", manifest) is None
+
+    def test_manual_setup_with_steps(self):
+        manifest = {
+            "name": "my-mod",
+            "display_name": "My Module",
+            "x-lumen": {
+                "runtime": {
+                    "manual_setup": {
+                        "title": "Configure My Module",
+                        "steps": [
+                            "Go to mymod.com and create an API key",
+                            "Paste the key in ~/.mymod/config",
+                        ],
+                        "doc_url": "https://mymod.com/docs",
+                    }
+                }
+            },
+        }
+        contract = contract_from_opaque_manifest("my-mod", manifest)
+        assert contract is not None
+        assert contract.kind == KIND_MANUAL
+        assert contract.artifact_id == "my-mod"
+        assert contract.display_name == "My Module"
+        assert contract.is_manual_only()
+        assert not contract.has_pending_values()
+        assert "Configure My Module" in contract.manual_instructions
+        assert "Go to mymod.com" in contract.manual_instructions
+        assert "https://mymod.com/docs" in contract.manual_instructions
+        assert contract.action_string == "save_artifact_env:manual:my-mod"
+
+    def test_manual_setup_without_doc_url(self):
+        manifest = {
+            "name": "mod",
+            "x-lumen": {
+                "runtime": {
+                    "manual_setup": {
+                        "steps": ["Do thing A", "Do thing B"],
+                    }
+                }
+            },
+        }
+        contract = contract_from_opaque_manifest("mod", manifest)
+        assert contract is not None
+        assert "Do thing A" in contract.manual_instructions
+        assert "Documentación" not in contract.manual_instructions
+
+    def test_manual_setup_empty_steps_returns_contract_with_title_only(self):
+        manifest = {
+            "name": "mod",
+            "x-lumen": {
+                "runtime": {
+                    "manual_setup": {
+                        "title": "Setup required",
+                    }
+                }
+            },
+        }
+        contract = contract_from_opaque_manifest("mod", manifest)
+        assert contract is not None
+        assert "Setup required" in contract.manual_instructions
+
+
+class TestContractFromExternal:
+    def test_no_artifact_id_returns_none(self):
+        assert contract_from_external("") is None
+        assert contract_from_external(None) is None
+
+    def test_no_instructions_no_url_returns_none(self):
+        assert contract_from_external("clawhub-tool") is None
+
+    def test_with_instructions_only(self):
+        contract = contract_from_external(
+            "clawhub-tool",
+            instructions="Run npx clawhub-tool and follow prompts.",
+        )
+        assert contract is not None
+        assert contract.kind == KIND_EXTERNAL
+        assert contract.artifact_id == "clawhub-tool"
+        assert contract.is_manual_only()
+        assert "npx clawhub-tool" in contract.manual_instructions
+
+    def test_with_doc_url_only(self):
+        contract = contract_from_external(
+            "clawhub-tool",
+            doc_url="https://clawhub.ai/tools/clawhub-tool",
+        )
+        assert contract is not None
+        assert "clawhub.ai" in contract.manual_instructions
+
+    def test_with_both(self):
+        contract = contract_from_external(
+            "clawhub-tool",
+            display_name="ClawHub Tool",
+            instructions="Run setup wizard.",
+            doc_url="https://clawhub.ai/tools/clawhub-tool",
+        )
+        assert contract is not None
+        assert contract.display_name == "ClawHub Tool"
+        assert "Run setup wizard." in contract.manual_instructions
+        assert "clawhub.ai" in contract.manual_instructions
+        assert contract.action_string == "save_artifact_env:external:clawhub-tool"
+
+
+class TestManualSetupInCollectFlows:
+    def test_manual_module_produces_flow(self, tmp_path: Path):
+        from lumen.core import secrets_store
+        orig_lumen_dir = secrets_store.LUMEN_DIR
+        orig_secrets_path = secrets_store.SECRETS_PATH
+        secrets_store.configure_paths(lumen_dir=tmp_path)
+        try:
+            modules_dir = tmp_path / "modules" / "manual-mod"
+            modules_dir.mkdir(parents=True)
+            (modules_dir / "module.yaml").write_text(
+                """
+name: manual-mod
+display_name: Manual Module
+x-lumen:
+  runtime:
+    manual_setup:
+      title: Set up Manual Module
+      steps:
+        - Visit example.com
+        - Get API key
+      doc_url: https://example.com/docs
+""".strip(),
+                encoding="utf-8",
+            )
+
+            flows = collect_pending_artifact_setup_flows(tmp_path, {})
+
+            assert len(flows) == 1
+            flow = flows[0]
+            assert flow["kind"] == KIND_MANUAL
+            assert flow["intent"] == "artifact-setup-manual-manual-mod"
+            assert "Visit example.com" in flow.get("manual_instructions", "")
+            assert "setup:manual-mod" in flow["triggers"]
+        finally:
+            secrets_store.LUMEN_DIR = orig_lumen_dir
+            secrets_store.SECRETS_PATH = orig_secrets_path
+
+    def test_env_module_takes_priority_over_manual(self, tmp_path: Path):
+        from lumen.core import secrets_store
+        orig_lumen_dir = secrets_store.LUMEN_DIR
+        orig_secrets_path = secrets_store.SECRETS_PATH
+        secrets_store.configure_paths(lumen_dir=tmp_path)
+        try:
+            modules_dir = tmp_path / "modules" / "hybrid-mod"
+            modules_dir.mkdir(parents=True)
+            (modules_dir / "module.yaml").write_text(
+                """
+name: hybrid-mod
+x-lumen:
+  runtime:
+    env:
+      - name: API_KEY
+    manual_setup:
+      title: Fallback instructions
+      steps:
+        - Do it manually
+""".strip(),
+                encoding="utf-8",
+            )
+
+            flows = collect_pending_artifact_setup_flows(tmp_path, {})
+
+            # Env specs take priority — should get a native flow, not manual
+            assert len(flows) == 1
+            assert flows[0]["intent"] == "module-setup-hybrid-mod"
         finally:
             secrets_store.LUMEN_DIR = orig_lumen_dir
             secrets_store.SECRETS_PATH = orig_secrets_path

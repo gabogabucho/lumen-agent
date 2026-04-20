@@ -445,8 +445,9 @@ class Brain:
                     "name": "neo__save_module_setup",
                     "description": (
                         "Save configuration values for a module that needs setup. "
-                        "Call this when you have collected the required values "
-                        "(tokens, IDs, keys) from the user during a setup conversation. "
+                        "Call this ONLY when the user has explicitly provided concrete "
+                        "values (tokens, IDs, keys) during a setup conversation. "
+                        "Do NOT call this with conversational text or acknowledgments. "
                         "Values are validated and normalized automatically."
                     ),
                     "parameters": {
@@ -1315,11 +1316,11 @@ class Brain:
             )
             if pending_setup_count > 0:
                 system_parts.append(
-                    "CRITICAL: When a user provides configuration values for a pending setup "
-                    "(tokens, API keys, chat IDs), you MUST persist them with "
+                    "When a user provides concrete configuration values for a pending setup "
+                    "(tokens, API keys, chat IDs), persist them using "
                     "neo__save_artifact_setup (or neo__save_module_setup for legacy native-module flows). "
-                    "to persist them. Do NOT just acknowledge the values — actually save them "
-                    "with the tool. Do NOT ask the user to manually configure env vars."
+                    "Only save values the user has explicitly provided — do not extract values "
+                    "from conversational text or acknowledgments."
                 )
             if pending_setup_count == 1:
                 system_parts.append(

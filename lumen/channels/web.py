@@ -137,6 +137,8 @@ async def _handle_flow_action(action: str, slots: dict, *, session=None) -> dict
         return await _persist_module_setup_slots(artifact_id, slots)
     if kind == "mcp":
         return await _persist_mcp_setup_slots(artifact_id, slots)
+    if kind in ("manual", "external"):
+        return {"status": "ok", "message": "Listo. Seguí las instrucciones para completar la configuración."}
     return {
         "status": "error",
         "message": f"Todavía no sé guardar configuraciones para artefactos de tipo {kind}.",

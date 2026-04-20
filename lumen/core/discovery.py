@@ -17,6 +17,7 @@ from typing import Any
 
 from lumen.core.artifact_setup import (
     contract_from_mcp_server,
+    contract_from_opaque_manifest,
     load_mcp_overlay,
     pending_setup_from_contract,
 )
@@ -230,6 +231,19 @@ def _discover_modules(
                 config,
                 module_dir=module_dir,
             )
+
+            # If no env-based pending setup, check for manual setup instructions
+            if pending_setup is None:
+                manual_contract = contract_from_opaque_manifest(name, manifest)
+                if manual_contract and manual_contract.is_manual_only():
+                    pending_setup = {
+                        "kind": "manual",
+                        "artifact_id": name,
+                        "display_name": manual_contract.display_name,
+                        "env_specs": [],
+                        "flow": None,
+                        "manual_instructions": manual_contract.manual_instructions,
+                    }
 
             # Module is installed (it's in modules/ dir) — check if its skill is ready
             has_skill = (module_dir / "SKILL.md").exists()

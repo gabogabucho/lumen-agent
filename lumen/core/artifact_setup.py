@@ -194,6 +194,90 @@ def contract_from_mcp_server(
     )
 
 
+def contract_from_opaque_manifest(
+    module_name: str,
+    manifest: dict | None,
+) -> ArtifactSetupContract | None:
+    """Build a contract for an opaque module with manual setup instructions.
+
+    Reads ``x-lumen.runtime.manual_setup`` from the manifest — a dict with
+    ``title``, ``steps`` (list of strings), and optional ``doc_url``.
+    Returns ``None`` when the manifest has no ``manual_setup`` declaration.
+    The contract has no specs (nothing to capture) and carries the formatted
+    instructions in ``manual_instructions``.
+    """
+    if not isinstance(manifest, dict):
+        return None
+
+    x_lumen = manifest.get("x-lumen") or manifest.get("x_lumen") or {}
+    if not isinstance(x_lumen, dict):
+        return None
+    runtime = x_lumen.get("runtime") or {}
+    if not isinstance(runtime, dict):
+        return None
+    manual = runtime.get("manual_setup")
+    if not isinstance(manual, dict):
+        return None
+
+    display = str(
+        manifest.get("display_name")
+        or manifest.get("name")
+        or module_name
+    ).strip() or module_name
+
+    title = str(manual.get("title") or f"Configurar {display}").strip()
+    steps = manual.get("steps") or []
+    doc_url = str(manual.get("doc_url") or "").strip()
+
+    parts: list[str] = [f"**{title}**\n"]
+    if isinstance(steps, list):
+        for i, step in enumerate(steps, 1):
+            parts.append(f"{i}. {step}")
+    if doc_url:
+        parts.append(f"\nDocumentación: {doc_url}")
+
+    return ArtifactSetupContract(
+        kind=KIND_MANUAL,
+        artifact_id=module_name,
+        display_name=display,
+        manual_instructions="\n".join(parts),
+    )
+
+
+def contract_from_external(
+    artifact_id: str,
+    *,
+    display_name: str | None = None,
+    instructions: str = "",
+    doc_url: str = "",
+) -> ArtifactSetupContract | None:
+    """Build a contract for an external artifact (ClawHub / npx).
+
+    External artifacts own their credential prompts — Lumen shows manual
+    instructions only. Returns ``None`` when there is nothing to show
+    (no instructions and no doc_url).
+    """
+    if not artifact_id:
+        return None
+
+    parts: list[str] = []
+    if instructions:
+        parts.append(instructions)
+    if doc_url:
+        parts.append(f"Documentación: {doc_url}")
+    combined = "\n".join(parts).strip()
+
+    if not combined:
+        return None
+
+    return ArtifactSetupContract(
+        kind=KIND_EXTERNAL,
+        artifact_id=artifact_id,
+        display_name=display_name or artifact_id,
+        manual_instructions=combined,
+    )
+
+
 def load_mcp_overlay(server_id: str, pkg_dir: Path | str | None) -> dict | None:
     """Load an MCP overlay YAML by server id, if one exists.
 
@@ -291,6 +375,20 @@ def collect_pending_artifact_setup_flows(
             flow = build_flow_from_contract(contract) if contract else None
             if flow:
                 flows.append(flow)
+                continue
+            # No env specs — check for manual setup instructions
+            manual = contract_from_opaque_manifest(module_name, manifest)
+            if manual and manual.is_manual_only():
+                flows.append({
+                    "intent": f"artifact-setup-{KIND_MANUAL}-{module_name}",
+                    "triggers": [f"setup:{module_name}", f"setup:manual:{module_name}"],
+                    "display_name": manual.display_name,
+                    "kind": KIND_MANUAL,
+                    "slots": {},
+                    "on_complete": manual.action_string,
+                    "manual_instructions": manual.manual_instructions,
+                    "first_message": manual.manual_instructions,
+                })
 
     mcp_servers = ((config.get("mcp") or {}).get("servers") or {})
     if isinstance(mcp_servers, dict):
