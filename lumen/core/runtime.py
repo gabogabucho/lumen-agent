@@ -20,6 +20,7 @@ from lumen.core.memory import Memory
 from lumen.core.module_runtime import ModuleRuntimeManager
 from lumen.core.marketplace import Marketplace
 from lumen.core.module_manifest import load_module_manifest
+from lumen.core.module_setup import collect_pending_setup_flows
 from lumen.core.personality import Personality
 from lumen.core.registry import Registry
 
@@ -55,6 +56,9 @@ def refresh_runtime_registry(
         connectors=brain.connectors,
         active_channels=active_channels or ["web"],
         model=getattr(brain, "model", None),
+        config=getattr(brain, "module_manager", None).config
+        if getattr(brain, "module_manager", None)
+        else None,
         mcp_config=(
             brain.mcp_manager.discovery_payload()
             if getattr(brain, "mcp_manager", None)
@@ -122,6 +126,7 @@ def reload_runtime_personality_surface(
     onboarding_flow_path = _resolve_module_onboarding_flow(active_personality_module)
     if onboarding_flow_path is not None:
         brain.load_flows(onboarding_flow_path)
+    _load_pending_module_setup_flows(brain, pkg_dir=pkg_dir, config=config)
 
 
 async def bootstrap_runtime(
@@ -174,6 +179,7 @@ async def bootstrap_runtime(
         connectors=connectors,
         active_channels=active_channels,
         model=config.get("model"),
+        config=config,
         mcp_config=mcp_manager.discovery_payload(),
     )
 
@@ -209,6 +215,7 @@ async def bootstrap_runtime(
     onboarding_flow_path = _resolve_module_onboarding_flow(active_personality_module)
     if onboarding_flow_path is not None:
         brain.load_flows(onboarding_flow_path)
+    _load_pending_module_setup_flows(brain, pkg_dir=pkg_dir, config=config)
 
     ui_path = pkg_dir / "locales" / lang / "ui.yaml"
     locale = {}
@@ -296,3 +303,12 @@ def _resolve_module_asset_path(
         return None
 
     return candidate if candidate.exists() else None
+
+
+def _load_pending_module_setup_flows(
+    brain: Brain,
+    *,
+    pkg_dir: Path,
+    config: dict,
+) -> None:
+    brain.flows.extend(collect_pending_setup_flows(pkg_dir / "modules", config))

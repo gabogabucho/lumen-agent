@@ -9,7 +9,7 @@ import yaml
 from lumen.core.connectors import ConnectorRegistry
 from lumen.core.discovery import discover_all
 from lumen.core.installer import Installer
-from lumen.core.registry import CapabilityKind, Registry
+from lumen.core.registry import CapabilityKind, CapabilityStatus, Registry
 
 
 def _write_yaml(path: Path, payload: dict):
@@ -288,6 +288,113 @@ class ModuleManifestResolutionTests(unittest.TestCase):
         self.assertEqual(result["status"], "installed")
         self.assertEqual(len(result["warnings"]), 1)
         self.assertIn("x-lumen-*", result["warnings"][0])
+
+    def test_list_installed_and_install_result_include_pending_setup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg_dir = Path(tmp)
+            installer = Installer(
+                pkg_dir=pkg_dir,
+                connectors=ConnectorRegistry(),
+                memory=None,
+                config={},
+            )
+
+            result = installer.install_from_zip(
+                _zip_bytes(
+                    {
+                        "pending/module.yaml": yaml.dump(
+                            {
+                                "name": "pending-module",
+                                "display_name": "Pending Module",
+                                "description": "Needs setup first",
+                                "x-lumen": {
+                                    "runtime": {
+                                        "env": [
+                                            {"name": "DEMO_TOKEN", "secret": True},
+                                            "DEMO_CHAT_ID",
+                                        ]
+                                    }
+                                },
+                            },
+                            sort_keys=False,
+                        ),
+                        "pending/SKILL.md": "# Pending Module\n",
+                    }
+                )
+            )
+
+            installed = installer.list_installed()
+
+        self.assertEqual(result["status"], "installed")
+        self.assertIn("pending_setup", result)
+        self.assertEqual(
+            [spec["name"] for spec in result["pending_setup"]["env_specs"]],
+            ["DEMO_TOKEN", "DEMO_CHAT_ID"],
+        )
+        self.assertEqual(installed[0]["name"], "pending-module")
+        self.assertIn("pending_setup", installed[0])
+
+    def test_pending_setup_respects_saved_config_and_discovery_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg_dir = Path(tmp)
+            module_dir = pkg_dir / "modules" / "pending-module"
+            module_dir.mkdir(parents=True)
+            (module_dir / "SKILL.md").write_text("# Pending skill\n", encoding="utf-8")
+            _write_yaml(
+                module_dir / "module.yaml",
+                {
+                    "name": "pending-module",
+                    "display_name": "Pending Module",
+                    "description": "Needs setup first",
+                    "x-lumen": {
+                        "runtime": {
+                            "env": [
+                                {"name": "DEMO_TOKEN", "secret": True},
+                                "DEMO_CHAT_ID",
+                            ]
+                        }
+                    },
+                },
+            )
+
+            without_config = Installer(
+                pkg_dir=pkg_dir,
+                connectors=ConnectorRegistry(),
+                memory=None,
+                config={},
+            )
+            with_config = Installer(
+                pkg_dir=pkg_dir,
+                connectors=ConnectorRegistry(),
+                memory=None,
+                config={
+                    "secrets": {
+                        "pending-module": {
+                            "DEMO_TOKEN": "token",
+                            "DEMO_CHAT_ID": "chat-1",
+                        }
+                    }
+                },
+            )
+
+            registry = Registry()
+            discover_all(
+                registry=registry,
+                pkg_dir=pkg_dir,
+                connectors=ConnectorRegistry(),
+                active_channels=[],
+                config=with_config.config,
+            )
+
+            installed_without = without_config.list_installed()
+            installed_with = with_config.list_installed()
+            discovered = registry.get(CapabilityKind.MODULE, "pending-module")
+
+        self.assertIn("pending_setup", installed_without[0])
+        self.assertNotIn("pending_setup", installed_with[0])
+        self.assertIsNotNone(discovered)
+        self.assertEqual(discovered.status, CapabilityStatus.READY)
+        self.assertIsNone(discovered.metadata.get("pending_setup"))
 
 
 if __name__ == "__main__":
