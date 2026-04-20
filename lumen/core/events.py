@@ -51,6 +51,21 @@ class CapabilityEvent:
         return classify_capability(self.capability)
 
     def announce_text(self) -> str | None:
+        pending_setup = self.details.get("pending_setup") or self.capability.metadata.get(
+            "pending_setup"
+        )
+        if pending_setup and self.capability.kind.value == "module":
+            module_label = self.capability.metadata.get("display_name") or self.capability.name
+            missing = _pending_setup_names(pending_setup)
+            if missing:
+                return (
+                    f"{module_label} is installed, but it still needs configuration "
+                    f"before it can work (missing: {missing})."
+                )
+            count = len(pending_setup.get("env_specs") or [])
+            if count == 1:
+                return f"{module_label} is installed, but it still needs one setup value before it can work."
+            return f"{module_label} is installed, but it still needs {count} setup values before it can work."
         return self.details.get("announce_text") or self.classification().get("announce_text")
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,6 +85,14 @@ class CapabilityEvent:
         note = awareness_interoperability_note(cap)
         if self.kind == "capability_discovered":
             summary = f"+ discovered {cap.name} ({cap.kind.value}, {lens}): {cap.description}"
+            pending_setup = self.details.get("pending_setup") or cap.metadata.get("pending_setup")
+            if pending_setup and cap.kind.value == "module":
+                missing = _pending_setup_names(pending_setup)
+                if missing:
+                    summary = f"{summary} [installed but not ready: missing {missing}]"
+                else:
+                    count = len(pending_setup.get("env_specs") or [])
+                    summary = f"{summary} [setup required: {count} env]"
             return _append_interoperability_summary(summary, note)
         if self.kind == "capability_connected":
             return _append_interoperability_summary(
@@ -120,3 +143,9 @@ def _append_interoperability_summary(
     if not note:
         return base
     return f"{base} — {note['summary']}"
+
+
+def _pending_setup_names(pending_setup: dict[str, Any] | None) -> str:
+    specs = (pending_setup or {}).get("env_specs") or []
+    names = [str(spec.get("name") or "").strip() for spec in specs if spec.get("name")]
+    return ", ".join(names)

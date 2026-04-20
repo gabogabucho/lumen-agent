@@ -176,6 +176,35 @@ def test_awareness_mentions_external_adoption_level_for_adapted_capabilities():
     assert summary["pending"] == 0
 
 
+def test_awareness_surfaces_pending_module_setup_state():
+    registry = Registry()
+    awareness = CapabilityAwareness(registry)
+    registry.register(
+        Capability(
+            kind=CapabilityKind.MODULE,
+            name="pending-module",
+            description="Needs secrets",
+            status=CapabilityStatus.AVAILABLE,
+            metadata={
+                "display_name": "Pending Module",
+                "pending_setup": {
+                    "module": "pending-module",
+                    "env_specs": [{"name": "DEMO_TOKEN", "secret": True}],
+                },
+            },
+        )
+    )
+
+    proactive = awareness.format_for_proactive()
+    prompt = awareness.format_for_prompt()
+
+    assert proactive is not None
+    assert "still needs 1 setup value" in proactive
+    assert prompt is not None
+    assert "installed but not ready" in prompt
+    assert "DEMO_TOKEN" in prompt
+
+
 def test_consciousness_defaults_plain_runtime_capabilities_to_native_interoperability():
     classification = classify_capability(
         Capability(

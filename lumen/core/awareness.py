@@ -73,7 +73,16 @@ class CapabilityAwareness:
     def _generate_internal_thought(self, event: CapabilityEvent) -> str | None:
         """Translate a capability event into an internal impression."""
         cap = event.capability
+        pending_setup = event.details.get("pending_setup") or cap.metadata.get(
+            "pending_setup"
+        )
         if event.kind == "capability_discovered":
+            if pending_setup and cap.kind.value == "module":
+                missing = len(pending_setup.get("env_specs") or [])
+                return (
+                    f"I sensed {cap.name}. It is with me now, but it still needs "
+                    f"{missing} setup value{'s' if missing != 1 else ''} before I can use it fully."
+                )
             announce = event.announce_text()
             if announce:
                 return f"I sensed {cap.name}. I know I can work with it now. {announce}"

@@ -211,10 +211,14 @@ class Registry:
         all_gaps = self.gaps()
 
         lines = [
-            "## Body (my active capabilities)",
+            "## Body (my capabilities and readiness right now)",
             "",
-            "IMPORTANT: Everything below under 'What I CAN do' is READY and "
-            "ACTIVE. I do NOT need to install anything for these.",
+            "IMPORTANT: Only capabilities listed under 'What I CAN do' are READY "
+            "and usable right now.",
+            "Installed or present is NOT the same as ready.",
+            "Anything under 'Installed but NOT ready yet' already exists in my "
+            "body, but I must describe it truthfully as unavailable until its "
+            "setup, dependencies, or errors are resolved.",
         ]
 
         # Ready capabilities — name + description + one-line action hint
@@ -245,21 +249,82 @@ class Registry:
 
                 lines.append(f"- **{c.name}** ({c.kind.value}): {c.description}{hint}")
 
-        # Gaps — things that need extension
+        # Installed but not ready — discovered, but cannot be used yet
         if all_gaps:
-            lines.append("\n### What I CANNOT do yet (needs extension)")
-            for gap in all_gaps:
-                reason = gap.status.value.replace("_", " ")
-                detail = ""
-                if gap.kind == CapabilityKind.MCP and gap.metadata.get("error"):
-                    detail = f" — {gap.metadata['error']}"
-                lines.append(f"- {gap.name}: {gap.description} [{reason}]{detail}")
+            lines.append("\n### Installed but NOT ready yet (do not present as usable)")
             lines.append(
-                "\nFor these, explain what's missing and suggest "
-                "installing a module from the catalog."
+                "These capabilities exist in my body, but I must NOT claim I can use "
+                "them right now. I should explain the blocker instead."
+            )
+            has_pending_setup = any(
+                (gap.metadata.get("pending_setup") or {}).get("env_specs")
+                for gap in all_gaps
+            )
+            if has_pending_setup:
+                lines.append(
+                    "IMPORTANT: When a user provides configuration values (tokens, keys, IDs) "
+                    "for any of these, I MUST call the neo__save_module_setup tool to persist "
+                    "them. I should NEVER ask the user to manually set env vars — I do it myself "
+                    "via the tool. After saving, confirm to the user that the module is now configured."
+                )
+            for gap in all_gaps:
+                lines.append(self._format_not_ready_context_line(gap))
+            lines.append(
+                "\nFor these, say the capability exists but is not ready yet. "
+                "Explain the missing setup or problem, and invite the user to "
+                "configure/fix it instead of talking as if it already works."
             )
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_not_ready_context_line(capability: Capability) -> str:
+        label = capability.metadata.get("display_name") or capability.name
+        detail = capability.description
+        status_label = _format_status_label(capability.status)
+        blocker = _describe_not_ready_blocker(capability)
+        return (
+            f"- **{label}** ({capability.kind.value}): present in my body, but NOT READY "
+            f"[{status_label}] — {blocker}. {detail}"
+        )
+
+
+def _format_env_spec_name(spec: dict[str, Any]) -> str:
+    name = str(spec.get("name") or "").strip()
+    label = str(spec.get("label") or "").strip()
+    if name and label and label.lower() != name.lower():
+        return f"{name} ({label})"
+    return name or label or "unknown"
+
+
+def _format_status_label(status: CapabilityStatus) -> str:
+    return status.value.replace("_", " ")
+
+
+def _describe_not_ready_blocker(capability: Capability) -> str:
+    pending_setup = capability.metadata.get("pending_setup") or {}
+    env_specs = pending_setup.get("env_specs") or []
+    if env_specs:
+        missing = ", ".join(_format_env_spec_name(spec) for spec in env_specs)
+        return f"needs setup/configuration before use: {missing}"
+
+    error = str(capability.metadata.get("error") or "").strip()
+    if error:
+        return f"currently failing with an error: {error}"
+
+    if capability.status == CapabilityStatus.ERROR:
+        return "currently failing and cannot be used"
+
+    if capability.status == CapabilityStatus.MISSING_DEPS:
+        return "missing required dependencies before it can work"
+
+    if capability.status == CapabilityStatus.MISSING_HANDLER:
+        return "missing its runtime handler before it can work"
+
+    if capability.status == CapabilityStatus.AVAILABLE:
+        return "discovered, but not configured or activated yet"
+
+    return "not ready for use yet"
 
 
 def diff_capability_snapshots(
