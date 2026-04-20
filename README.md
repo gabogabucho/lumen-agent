@@ -238,7 +238,7 @@ Built-in handlers for `task`, `note`, and `memory`. Anything else plugs in via M
 - **Catalog taxonomy** &mdash; kits reshape Lumen, modules add concrete capabilities, skills teach the model how to think/use them
 - **Bilingual** &mdash; English and Spanish locale packs out of the box
 - **Self-aware** &mdash; knows its capabilities, gaps, and recommended LLM tiers
-- **Model-agnostic** &mdash; DeepSeek, OpenAI, Anthropic, OpenRouter (OAuth + free tier curated), Ollama via LiteLLM
+- **Model-agnostic** &mdash; any LiteLLM provider (DeepSeek, OpenAI, Anthropic, Google, Ollama, local models, OpenAI-compatible APIs) + OpenRouter OAuth with free tier
 - **Persistent memory** &mdash; SQLite + FTS5 for tasks, notes, and facts
 - **Live runtime** &mdash; FastAPI + WebSocket with heartbeat and session pruning
 - **MCP runtime** &mdash; load MCP servers declared by modules
@@ -339,13 +339,41 @@ If you're authoring a new module, start from `lumen/modules/_template/module.yam
 
 ## Supported Models
 
-| Provider | Model | Tier |
-|----------|-------|------|
-| OpenRouter (OAuth) | curated free models (Llama 3.3, DeepSeek, Mistral, Gemma 3) | tier-1 / tier-2 |
-| DeepSeek | deepseek-chat | tier-2 (recommended) |
-| OpenAI | gpt-4o-mini | tier-2 |
-| Anthropic | claude-sonnet-4 | tier-3 |
-| Ollama | llama3 (local) | tier-1 |
+Lumen uses [LiteLLM](https://docs.litellm.ai/) as its model abstraction layer — any provider it supports works out of the box. Configure your model in `~/.lumen/config.yaml` or pick one during setup.
+
+### Capability Tiers
+
+Models are classified into tiers based on their reasoning ability. Modules declare a minimum tier; Lumen warns you if your model might not handle a module well.
+
+| Tier | Capability Level | Examples |
+|------|-----------------|----------|
+| **tier-1** | Basic — simple tasks, straightforward conversation | DeepSeek, Ollama/Llama 3, small local models |
+| **tier-2** | Enhanced — complex reasoning, tool use, multi-step | GPT-4o-mini, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.3 70B |
+| **tier-3** | Advanced — demanding reasoning, sophisticated tool orchestration | Claude Sonnet 4, GPT-4o, GPT-4.1, o3/o4, Gemini 2.5 Pro |
+
+### Providers
+
+| Provider | How to connect | Notes |
+|----------|---------------|-------|
+| **OpenRouter** (OAuth) | Built-in OAuth flow — one click from setup | Free tier: GPT-OSS 120B, Qwen 3 Coder, Gemma 3 27B, Hermes 3 405B |
+| **DeepSeek** | API key | `deepseek-chat` |
+| **OpenAI** | API key | GPT-4o-mini, GPT-4o, GPT-4.1, o3, o4 |
+| **Anthropic** | API key | Claude Sonnet 4, Claude 3.7 Sonnet, Claude 3.5 Sonnet |
+| **Google** | API key | Gemini 2.5 Pro, Gemini 1.5 Pro |
+| **Ollama** | Local — no key needed | Any model you pull (`ollama/llama3`, `ollama/mistral`, etc.) |
+| **Any OpenAI-compatible** | Custom `api_base` + `api_key` | LM Studio, vLLM, text-generation-webui, local models |
+
+### Local models
+
+Any model running behind an OpenAI-compatible API works. Point Lumen to your local server:
+
+```yaml
+model: openai/your-model-name
+api_base: http://localhost:11434/v1   # Ollama
+# api_base: http://localhost:1234/v1  # LM Studio
+# api_base: http://localhost:8000/v1  # vLLM
+api_key: "fake"
+```
 
 ## Roadmap
 
