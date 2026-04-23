@@ -50,8 +50,13 @@ class SkillInterpolationRuntimeTests(unittest.TestCase):
         save_module(
             "otto-tiendanube",
             {
-                "SCRIPTS_DIR": "/srv/otto/shared/capabilities/tiendanube",
-                "INSTANCE_ID": "otto-003",
+                "public": {
+                    "SCRIPTS_DIR": "/srv/otto/shared/capabilities/tiendanube",
+                    "INSTANCE_ID": "otto-003",
+                },
+                "secret": {
+                    "TIENDANUBE_API_TOKEN": "sk-secret-abc",
+                },
             },
         )
 

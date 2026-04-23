@@ -626,7 +626,7 @@ class Brain:
             return {"error": f"Cannot read skill '{skill_name}': {e}"}
 
     def _interpolate_skill_content(self, content: str, cap) -> str:
-        """Replace {KEY} placeholders with module config/secrets when available."""
+        """Replace {KEY} placeholders with safe public module config only."""
         metadata = getattr(cap, "metadata", {}) or {}
         module_name = metadata.get("module_name")
 
@@ -638,17 +638,38 @@ class Brain:
                     values[str(key)] = str(value)
 
             if module_name:
-                secrets = (cfg.get("secrets") or {}).get(module_name) or {}
-                if isinstance(secrets, dict):
-                    for key, value in secrets.items():
-                        if isinstance(value, (str, int, float, bool)):
-                            values[str(key)] = str(value)
+                module_cfg = (cfg.get("secrets") or {}).get(module_name) or {}
+                if isinstance(module_cfg, dict):
+                    public_values = module_cfg.get("public")
+                    if isinstance(public_values, dict):
+                        for key, value in public_values.items():
+                            if isinstance(value, (str, int, float, bool)):
+                                values[str(key)] = str(value)
+                    else:
+                        # Legacy flat module config: interpolate only clearly non-sensitive keys.
+                        for key, value in module_cfg.items():
+                            if self._is_safe_public_skill_value(key, value):
+                                values[str(key)] = str(value)
 
         def replace(match):
             key = match.group(1)
             return values.get(key, match.group(0))
 
         return re.sub(r"\{([A-Z0-9_]+)\}", replace, content)
+
+    def _is_safe_public_skill_value(self, key: str, value) -> bool:
+        if not isinstance(value, (str, int, float, bool)):
+            return False
+        key_upper = str(key).upper()
+        sensitive_markers = (
+            "_TOKEN",
+            "_KEY",
+            "_SECRET",
+            "PASSWORD",
+            "BEARER",
+            "CLIENT_SECRET",
+        )
+        return not any(marker in key_upper for marker in sensitive_markers)
 
     def _search_modules(self, arguments: str) -> dict:
         """Search the module catalog for modules that fill a capability gap."""

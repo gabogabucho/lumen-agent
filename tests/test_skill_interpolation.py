@@ -31,8 +31,13 @@ class SkillInterpolationTests(unittest.TestCase):
                 "instance_id": "otto-003",
                 "secrets": {
                     "tiendanube-kit": {
-                        "SCRIPTS_DIR": "/srv/otto/shared/capabilities/tiendanube",
-                        "INSTANCE_ID": "otto-003",
+                        "public": {
+                            "SCRIPTS_DIR": "/srv/otto/shared/capabilities/tiendanube",
+                            "INSTANCE_ID": "otto-003",
+                        },
+                        "secret": {
+                            "TIENDANUBE_API_TOKEN": "sk-secret-123",
+                        },
                     }
                 },
             },
@@ -79,6 +84,52 @@ class SkillInterpolationTests(unittest.TestCase):
         )
         result = self.brain._read_skill(json.dumps({"skill_name": "demo"}))
         self.assertIn("{DOES_NOT_EXIST}", result["content"])
+
+    def test_read_skill_never_interpolates_secret_namespace(self):
+        skill_path = self.root / "skill-secret.md"
+        skill_path.write_text(
+            "---\nname: secret-demo\ndescription: demo\n---\nToken={TIENDANUBE_API_TOKEN} Dir={SCRIPTS_DIR}",
+            encoding="utf-8",
+        )
+        self.registry.register(
+            Capability(
+                kind=CapabilityKind.SKILL,
+                name="secret-demo",
+                description="demo",
+                status=CapabilityStatus.READY,
+                metadata={"path": str(skill_path), "module_name": "tiendanube-kit"},
+            )
+        )
+        result = self.brain._read_skill(json.dumps({"skill_name": "secret-demo"}))
+        self.assertIn("Dir=/srv/otto/shared/capabilities/tiendanube", result["content"])
+        self.assertIn("{TIENDANUBE_API_TOKEN}", result["content"])
+        self.assertNotIn("sk-secret-123", result["content"])
+
+    def test_read_skill_supports_legacy_flat_public_values_but_filters_sensitive_names(self):
+        self.brain.config["secrets"]["legacy-kit"] = {
+            "SCRIPTS_DIR": "/srv/legacy",
+            "INSTANCE_ID": "legacy-001",
+            "API_TOKEN": "should-not-show",
+        }
+        skill_path = self.root / "skill-legacy.md"
+        skill_path.write_text(
+            "---\nname: legacy-demo\ndescription: demo\n---\n{SCRIPTS_DIR} {INSTANCE_ID} {API_TOKEN}",
+            encoding="utf-8",
+        )
+        self.registry.register(
+            Capability(
+                kind=CapabilityKind.SKILL,
+                name="legacy-demo",
+                description="demo",
+                status=CapabilityStatus.READY,
+                metadata={"path": str(skill_path), "module_name": "legacy-kit"},
+            )
+        )
+        result = self.brain._read_skill(json.dumps({"skill_name": "legacy-demo"}))
+        self.assertIn("/srv/legacy", result["content"])
+        self.assertIn("legacy-001", result["content"])
+        self.assertIn("{API_TOKEN}", result["content"])
+        self.assertNotIn("should-not-show", result["content"])
 
     def test_read_skill_accepts_module_alias(self):
         skill_path = self.root / "skill3.md"

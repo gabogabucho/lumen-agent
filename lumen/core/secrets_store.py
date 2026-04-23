@@ -54,9 +54,18 @@ def save_module(module_name: str, values: dict[str, str]) -> None:
     bucket = all_secrets.get(module_name)
     if not isinstance(bucket, dict):
         bucket = {}
-    bucket.update({k: str(v) for k, v in values.items() if v is not None})
+    bucket.update({k: _stringify_nested(v) for k, v in values.items() if v is not None})
     all_secrets[module_name] = bucket
     _write(all_secrets)
+
+
+def _stringify_nested(value):
+    """Preserve nested dict structure while stringifying scalar leaves."""
+    if isinstance(value, dict):
+        return {str(k): _stringify_nested(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_stringify_nested(v) for v in value if v is not None]
+    return str(value)
 
 
 def delete_module(module_name: str) -> None:
