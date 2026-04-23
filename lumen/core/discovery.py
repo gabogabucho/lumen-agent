@@ -15,6 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from lumen.core.artifact_setup import (
     contract_from_mcp_server,
     contract_from_opaque_manifest,
@@ -50,7 +52,8 @@ def discover_all(
     # Built-in skills
     _discover_skills(registry, pkg_dir / "skills")
 
-    # Skills inside installed modules (each module can have a SKILL.md)
+    # Skills inside installed modules (each module can have a SKILL.md
+    # and/or declare additional skill files in module.yaml -> skills: [...])
     modules_dir = pkg_dir / "modules"
     if modules_dir.exists():
         for module_dir in modules_dir.iterdir():
@@ -58,10 +61,12 @@ def discover_all(
                 skill_file = module_dir / "SKILL.md"
                 if skill_file.exists():
                     _discover_skill_file(registry, skill_file, module_dir.name)
+                _discover_declared_module_skills(registry, module_dir)
 
     _discover_connectors(registry, connectors)
     _discover_modules(registry, pkg_dir / "modules", config=config)
     _discover_channels(registry, active_channels or ["web"])
+    _discover_module_channels(registry, pkg_dir / "modules")
 
     if mcp_config:
         _discover_mcps(registry, mcp_config, pkg_dir=pkg_dir)
@@ -155,6 +160,25 @@ def _discover_skills(registry: Registry, skills_dir: Path):
             )
 
 
+def _discover_declared_module_skills(registry: Registry, module_dir: Path):
+    """Discover skill markdown files declared in module.yaml -> skills: [...]."""
+    try:
+        manifest_path, manifest = load_module_manifest(module_dir)
+        if manifest_path is None or not isinstance(manifest, dict):
+            return
+        declared = manifest.get("skills", [])
+        if not isinstance(declared, list):
+            return
+        for rel_path in declared:
+            if not rel_path or not isinstance(rel_path, str):
+                continue
+            skill_file = module_dir / rel_path
+            if skill_file.exists() and skill_file.is_file():
+                _discover_skill_file(registry, skill_file, skill_file.stem)
+    except Exception:
+        pass
+
+
 def _validate_skill_deps(registry: Registry):
     """Check if skills have their required connectors ready.
 
@@ -245,8 +269,15 @@ def _discover_modules(
                         "manual_instructions": manual_contract.manual_instructions,
                     }
 
-            # Module is installed (it's in modules/ dir) — check if its skill is ready
+            # Module is installed — ready if it has a root SKILL.md or declared skills that exist
             has_skill = (module_dir / "SKILL.md").exists()
+            if not has_skill:
+                declared_skills = manifest.get("skills", [])
+                if isinstance(declared_skills, list):
+                    has_skill = any(
+                        isinstance(rel, str) and (module_dir / rel).exists()
+                        for rel in declared_skills
+                    )
             status = (
                 CapabilityStatus.READY
                 if has_skill and not pending_setup
@@ -307,6 +338,68 @@ def _discover_channels(registry: Registry, active_channels: list[str]):
                 status=CapabilityStatus.READY,
             )
         )
+
+
+def _discover_module_channels(registry: Registry, modules_dir: Path):
+    """Register external channels declared by installed modules.
+
+    A module can declare:
+      provides: [channel.web-app]
+      x-lumen:
+        channel:
+          type: web-app
+          auth: rest-api
+          cors: [...]
+    """
+    if not modules_dir.exists():
+        return
+
+    for module_dir in modules_dir.iterdir():
+        if not module_dir.is_dir() or module_dir.name.startswith("_"):
+            continue
+        try:
+            manifest_path, manifest = load_module_manifest(module_dir)
+            if manifest_path is None or not isinstance(manifest, dict):
+                continue
+
+            provides = manifest.get("provides", []) or []
+            x_lumen = manifest.get("x-lumen", {}) or {}
+            channel_meta = x_lumen.get("channel", {}) if isinstance(x_lumen, dict) else {}
+
+            declared_channel = any(
+                isinstance(item, str) and item.startswith("channel.")
+                for item in provides
+            )
+            if not declared_channel or not isinstance(channel_meta, dict):
+                continue
+
+            has_runtime_skill = (module_dir / "SKILL.md").exists()
+            declared_skills = manifest.get("skills", [])
+            if not has_runtime_skill and isinstance(declared_skills, list):
+                has_runtime_skill = any(
+                    isinstance(rel, str) and (module_dir / rel).exists()
+                    for rel in declared_skills
+                )
+
+            registry.register(
+                Capability(
+                    kind=CapabilityKind.CHANNEL,
+                    name=str(manifest.get("name") or module_dir.name),
+                    description=str(manifest.get("description") or f"External channel from {module_dir.name}"),
+                    status=(CapabilityStatus.READY if has_runtime_skill else CapabilityStatus.AVAILABLE),
+                    provides=[str(p) for p in provides if isinstance(p, str) and p.startswith("channel.")],
+                    metadata={
+                        "source_module": str(manifest.get("name") or module_dir.name),
+                        "channel_type": channel_meta.get("type"),
+                        "auth": channel_meta.get("auth"),
+                        "cors": channel_meta.get("cors", []),
+                        "response_format": channel_meta.get("response_format"),
+                        "path": str(module_dir),
+                    },
+                )
+            )
+        except Exception:
+            pass
 
 
 def _discover_mcps(registry: Registry, mcp_config: dict, *, pkg_dir: Path | None = None):

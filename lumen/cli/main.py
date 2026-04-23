@@ -709,6 +709,20 @@ def _parse_github_ref(ref: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _is_local_path(ref: str) -> bool:
+    """Check if a ref refers to a local filesystem path."""
+    if not ref:
+        return False
+    # Absolute paths
+    if ref.startswith("/") or ref.startswith("\\"):
+        return True
+    # Relative paths
+    if ref.startswith("./") or ref.startswith("../") or ref.startswith(".\\") or ref.startswith("..\\"):
+        return True
+    # Check if it's an existing path
+    return Path(ref).exists()
+
+
 module_app = typer.Typer(
     name="module",
     help="Install and manage modules.",
@@ -751,9 +765,13 @@ def module_install(
         config=config,
     )
 
-    # Try GitHub ref first
     owner, repo = _parse_github_ref(ref)
-    if owner and repo:
+
+    # Try local path first
+    if _is_local_path(ref):
+        console.print(f"[dim]Installing from local path: {ref}...[/dim]")
+        result = installer.install_from_local_path(Path(ref))
+    elif owner and repo:
         console.print(f"[dim]Installing from github.com/{owner}/{repo}...[/dim]")
         result = installer.install_from_github_ref(owner, repo)
     else:
