@@ -927,6 +927,26 @@ def _current_dashboard_personality() -> str:
     return "default"
 
 
+def _current_personality_ui() -> dict:
+    """Return UI rendering hints declared by the active personality."""
+    if not _brain or not getattr(_brain, "personality", None):
+        return {"tag": "agent-ui", "surfaces": []}
+
+    raw = (_brain.personality.current() or {}).get("ui") or {}
+    if not isinstance(raw, dict):
+        return {"tag": "agent-ui", "surfaces": []}
+
+    tag = str(raw.get("tag") or "agent-ui").strip() or "agent-ui"
+    surfaces = raw.get("surfaces")
+    if not isinstance(surfaces, list):
+        surfaces = []
+
+    return {
+        "tag": tag,
+        "surfaces": [str(surface) for surface in surfaces if str(surface).strip()],
+    }
+
+
 async def _init_brain_from_config():
     """Lazy brain initialization — runs once after web setup saves config."""
     global _brain, _locale, _config
@@ -1117,7 +1137,7 @@ async def lifespan(app: FastAPI):
         await _brain.memory.close()
 
 
-app = FastAPI(title="Lumen", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Lumen", version=__version__, lifespan=lifespan)
 templates_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(templates_dir))
@@ -1544,7 +1564,8 @@ async def dashboard(request: Request):
             else DEFAULT_OPENROUTER_MODEL,
             "language": _config.get("language", "en"),
             "current_personality": _current_dashboard_personality(),
-            "version": "0.1.0",
+            "personality_ui": _current_personality_ui(),
+            "version": __version__,
             "connectors_count": len(_brain.connectors.list()) if _brain else 0,
             "flows_count": len(_brain.flows) if _brain else 0,
             "mcp_count": len(_brain.registry.list_by_kind(CapabilityKind.MCP))
@@ -2192,9 +2213,10 @@ async def api_status(request: Request):
 
     return {
         "status": "active" if _brain else "not_configured",
-        "version": "0.1.0",
+        "version": __version__,
         "model": _config.get("model", "not configured"),
         "language": _config.get("language", "en"),
+        "personality_ui": _current_personality_ui(),
         "capabilities": capabilities,
         "summary": registry.summary() if registry else {},
         "awareness": (

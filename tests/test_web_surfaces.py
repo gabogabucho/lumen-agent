@@ -188,6 +188,7 @@ class WebSurfaceTests(unittest.TestCase):
                 "version": "0.1.0",
                 "model": "not configured",
                 "language": "en",
+                "personality_ui": {"tag": "agent-ui", "surfaces": []},
                 "capabilities": [],
                 "summary": {},
                 "awareness": {"pending": 0, "counts": {}, "effects": {}, "events": []},

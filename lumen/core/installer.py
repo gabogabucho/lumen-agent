@@ -58,6 +58,15 @@ class Installer:
         self.installed_dir.mkdir(parents=True, exist_ok=True)
         self.config = config if config is not None else {}
 
+    def _persist_config(self) -> None:
+        """Persist installer config back to the instance config.yaml."""
+        config_path = self.lumen_dir / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            yaml.dump(self.config, default_flow_style=False),
+            encoding="utf-8",
+        )
+
     def _detect_pending_setup(self, module_name: str) -> dict | None:
         """Inspect the installed module and return setup info if env vars are missing."""
         module_dir = self.installed_dir / module_name
@@ -174,6 +183,111 @@ class Installer:
         pending = self._detect_pending_setup(name)
         if pending:
             result["pending_setup"] = pending
+        return result
+
+    def install_from_local_path(self, source_path: Path) -> dict:
+        """Install a module from a local directory path.
+
+        Copies all files from source to installed_dir.
+        Merges system requirements (terminal allowlist, env vars).
+        Auto-sets active_personality if module has personality tag.
+        """
+        source = Path(source_path).resolve()
+
+        if not source.exists():
+            return {"status": "error", "error": f"Path does not exist: {source}"}
+
+        if not source.is_dir():
+            return {"status": "error", "error": f"Path is not a directory: {source}"}
+
+        # Look for module.yaml or SKILL.md
+        manifest_path = resolve_module_manifest_path(source)
+        if manifest_path is None:
+            # Check for SKILL.md fallback
+            if not (source / "SKILL.md").exists():
+                return {
+                    "status": "error",
+                    "error": f"No module.yaml or SKILL.md found in {source}",
+                }
+
+        # Determine module name
+        name = source.name
+        manifest_data = {}
+        if manifest_path:
+            manifest_data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+            name = str(manifest_data.get("name") or source.name)
+
+        if self.is_installed(name):
+            return {"status": "already_installed", "name": name}
+
+        # Copy files
+        module_dir = self.installed_dir / name
+        module_dir.mkdir(parents=True, exist_ok=True)
+        for src_file in source.rglob("*"):
+            if src_file.is_file():
+                relative = src_file.relative_to(source)
+                dest = module_dir / relative
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dest)
+
+        result = {
+            "status": "installed",
+            "name": name,
+            "display_name": manifest_data.get("display_name", name),
+            "description": manifest_data.get("description", ""),
+        }
+
+        # #2: Merge system requirements
+        x_lumen = manifest_data.get("x-lumen", {})
+        if isinstance(x_lumen, dict):
+            xl_requires = x_lumen.get("requires", {})
+            if isinstance(xl_requires, dict):
+                # Terminal allowlist
+                terminal_req = xl_requires.get("terminal", {})
+                if isinstance(terminal_req, dict):
+                    allowlist = terminal_req.get("allowlist", [])
+                    if isinstance(allowlist, list) and allowlist:
+                        existing = self.config.setdefault("terminal", {}).setdefault("allowlist", [])
+                        for cmd in allowlist:
+                            if cmd not in existing:
+                                existing.append(cmd)
+
+                # Required env vars — check which are missing
+                env_reqs = xl_requires.get("env", [])
+                if isinstance(env_reqs, list):
+                    import os
+                    missing = [var for var in env_reqs if not os.environ.get(var)]
+                    if missing:
+                        result["missing_env"] = missing
+
+        # #3: Auto-set personality
+        tags = manifest_data.get("tags", [])
+        if isinstance(tags, list) and "personality" in tags:
+            existing_personality = self.config.get("active_personality")
+            if existing_personality and existing_personality != name:
+                result["personality_conflict"] = True
+                result["existing_personality"] = existing_personality
+            else:
+                self.config["active_personality"] = name
+                result["personality_set"] = True
+                result["active_personality"] = name
+
+        # Persist any config changes made by requirements/personality handling
+        self._persist_config()
+
+        # Run install hook
+        run_module_install_hook(
+            name=name,
+            module_dir=module_dir,
+            runtime_root=self.lumen_dir / "modules",
+            config=self.config,
+            lumen_dir=self.lumen_dir,
+        )
+
+        pending = self._detect_pending_setup(name)
+        if pending:
+            result["pending_setup"] = pending
+
         return result
 
     def install_marketplace_item(self, item: dict) -> dict:

@@ -33,6 +33,10 @@ class Personality:
     def knowledge(self) -> dict:
         return self._config.get("knowledge", {})
 
+    @property
+    def ui(self) -> dict:
+        return self._config.get("ui", {})
+
     def current(self) -> dict:
         return self._config
 
