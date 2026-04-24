@@ -65,6 +65,27 @@ def rehydrate_runtime_config(config: dict | None, *, lumen_dir: Path) -> dict:
     return loaded
 
 
+def apply_provider_runtime_env(config: dict | None) -> None:
+    """Apply provider/api_base runtime env in a provider-agnostic way.
+
+    Lumen keeps config explicit and minimal:
+      - provider
+      - model
+      - api_key_env
+      - api_key
+      - api_base
+    """
+    loaded = config or {}
+    if loaded.get("api_key") and loaded.get("api_key_env"):
+        os.environ[loaded["api_key_env"]] = loaded["api_key"]
+
+    api_base = loaded.get("api_base")
+    if api_base:
+        os.environ["OPENAI_API_BASE"] = str(api_base)
+    else:
+        os.environ.pop("OPENAI_API_BASE", None)
+
+
 def refresh_runtime_registry(
     brain: Brain,
     *,
@@ -192,8 +213,7 @@ async def bootstrap_runtime(
                 existing.setdefault(mod_name, {}).update(bucket)
         config["secrets"] = existing
 
-    if config.get("api_key") and config.get("api_key_env"):
-        os.environ[config["api_key_env"]] = config["api_key"]
+    apply_provider_runtime_env(config)
 
     consciousness = Consciousness()
     lang = config.get("language", "en")

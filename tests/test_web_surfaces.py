@@ -630,6 +630,7 @@ class WebSurfaceTests(unittest.TestCase):
                     "model": "gpt-4o-mini",
                     "api_key_env": "LUMEN_TEST_SETTINGS_API_KEY",
                     "api_key": "new-key",
+                    "api_base": "https://llm.example.com/v1",
                 },
             )
 
@@ -641,11 +642,13 @@ class WebSurfaceTests(unittest.TestCase):
         self.assertEqual(saved["model"], "gpt-4o-mini")
         self.assertEqual(saved["api_key_env"], "LUMEN_TEST_SETTINGS_API_KEY")
         self.assertEqual(saved["api_key"], "new-key")
+        self.assertEqual(saved["api_base"], "https://llm.example.com/v1")
         self.assertEqual(saved["mcp"], {"servers": {"local": {"command": "node"}}})
         self.assertEqual(web._config["provider"], "OpenAI")
         self.assertEqual(web._brain.model, "gpt-4o-mini")
         self.assertEqual(web._brain.marketplace.config["provider"], "OpenAI")
         self.assertEqual(os.environ["LUMEN_TEST_SETTINGS_API_KEY"], "new-key")
+        self.assertEqual(os.environ["OPENAI_API_BASE"], "https://llm.example.com/v1")
         refresh_runtime_registry.assert_called_once()
 
     def test_api_settings_requires_owner_auth_in_serve_mode(self):

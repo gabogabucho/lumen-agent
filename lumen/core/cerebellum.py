@@ -8,6 +8,7 @@ deterministic compatibility summaries for discovery/catalog consumers.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from lumen.core.connectors import ConnectorRegistry
@@ -263,7 +264,37 @@ def normalize_requires(payload: dict[str, Any]) -> dict[str, list[str]]:
             *(_normalize_string_list(alias) for alias in aliases),
         )
 
+    if normalized.get("skills"):
+        normalized["skills"] = _merge_unique(
+            *( [normalize_skill_reference(skill)] for skill in normalized["skills"] )
+        )
+
     return {key: value for key, value in normalized.items() if value}
+
+
+def normalize_skill_reference(value: str) -> str:
+    """Normalize skill references into canonical semantic IDs."""
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    if "/" not in raw and "\\" not in raw and not raw.lower().endswith(".md"):
+        return raw
+
+    normalized = raw.replace("\\", "/")
+    path = Path(normalized)
+    stem = path.stem
+    if stem.upper() == "SKILL":
+        parent = path.parent.name
+        if parent and parent not in {".", "skills"}:
+            return parent
+        parts = [part for part in path.parts if part not in {".", "skills"}]
+        if len(parts) >= 2:
+            return parts[-2]
+        if parent:
+            return parent
+    if stem:
+        return stem
+    return raw
 
 
 def build_runtime_surface(
@@ -357,6 +388,7 @@ def build_runtime_surface(
                 "name": cap.name,
                 "status": cap.status.value,
                 "provides": list(cap.provides),
+                "aliases": list((cap.metadata or {}).get("aliases", [])),
             }
             if kind == CapabilityKind.MCP:
                 entry["tools"] = list(cap.metadata.get("tools", []))
@@ -400,6 +432,11 @@ def calculate_compatibility(
 
     for skill_name in artifact.requires.get("skills", []):
         skill = runtime_surface["skills"].get(skill_name)
+        if not skill:
+            for candidate in runtime_surface["skills"].values():
+                if skill_name in (candidate.get("aliases") or []):
+                    skill = candidate
+                    break
         if not skill:
             reasons.append(f"missing skill '{skill_name}'")
             continue

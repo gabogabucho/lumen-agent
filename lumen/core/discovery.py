@@ -27,6 +27,7 @@ from lumen.core.cerebellum import (
     annotate_registry,
     normalize_agent_skill,
     normalize_module_manifest,
+    normalize_skill_reference,
 )
 from lumen.core.connectors import ConnectorRegistry
 from lumen.core.module_manifest import load_module_manifest
@@ -103,6 +104,20 @@ def _discover_skill_file(
         frontmatter = _parse_frontmatter(skill_file)
         normalized = normalize_agent_skill(frontmatter, path=str(skill_file))
         name = normalized.name or fallback_name
+        canonical_name = normalize_skill_reference(name)
+        skill_stem = normalize_skill_reference(skill_file.stem)
+        aliases: list[str] = []
+        for candidate in [fallback_name, skill_stem, canonical_name, name]:
+            candidate = str(candidate or "").strip()
+            if candidate and candidate != name and candidate not in aliases:
+                aliases.append(candidate)
+        if module_name:
+            for candidate in [name, canonical_name, skill_stem, fallback_name]:
+                candidate = str(candidate or "").strip()
+                if candidate:
+                    alias = f"{module_name}/{candidate}"
+                    if alias not in aliases:
+                        aliases.append(alias)
 
         # Don't register if already exists (built-in takes priority)
         if registry.get(CapabilityKind.SKILL, name):
@@ -121,7 +136,8 @@ def _discover_skill_file(
                     "level": normalized.metadata.get("level", 1),
                     "path": str(skill_file),
                     "module_name": module_name,
-                    "aliases": ([f"{module_name}/{name}"] if module_name else []),
+                    "canonical_name": canonical_name,
+                    "aliases": aliases,
                     "interoperability": normalized.metadata.get("interoperability"),
                 },
             )

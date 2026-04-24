@@ -56,6 +56,7 @@ class ConnectorRegistry:
         self._tool_schemas: dict[str, dict] = {}
         self._explicit_tools: dict[str, dict[str, Any]] = {}
         self._tool_name_map: dict[str, str] = {}
+        self._tool_alias_map: dict[str, tuple[str, str]] = {}
         self.runtime_config: dict[str, Any] | None = None
 
     def set_runtime_config(self, config: dict[str, Any] | None):
@@ -132,6 +133,7 @@ class ConnectorRegistry:
         dots are mapped to double-underscore variants transparently.
         """
         self._tool_name_map = {}
+        self._tool_alias_map = {}
         tools = []
         for connector in self._connectors.values():
             for action in connector.actions:
@@ -150,6 +152,41 @@ class ConnectorRegistry:
                             },
                         }
                     )
+
+                # Alias form for single-action connectors: terminal -> terminal__execute
+                if len(connector.actions) == 1:
+                    alias_name = connector.name
+                    self._tool_alias_map[alias_name] = (connector.name, action)
+                    if custom:
+                        tools.append(
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": alias_name,
+                                    "description": custom["description"],
+                                    "parameters": custom["parameters"],
+                                },
+                            }
+                        )
+                    else:
+                        tools.append(
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": alias_name,
+                                    "description": (f"{connector.description} — {action}"),
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "input": {
+                                                "type": "string",
+                                                "description": f"Input for {connector.name}.{action}",
+                                            }
+                                        },
+                                    },
+                                },
+                            }
+                        )
                 else:
                     tools.append(
                         {
@@ -206,6 +243,8 @@ class ConnectorRegistry:
 
     def parse_tool_name(self, tool_name: str) -> tuple[str, str]:
         """Parse 'connector__action' back into (connector_name, action)."""
+        if tool_name in self._tool_alias_map:
+            return self._tool_alias_map[tool_name]
         parts = tool_name.split("__", 1)
         if len(parts) != 2:
             raise ValueError(f"Invalid tool name format: {tool_name}")

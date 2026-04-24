@@ -38,6 +38,7 @@ from lumen.core.secrets_store import load_module as load_secrets_for_module
 from lumen.core.secrets_store import save_module as save_secrets_for_module
 from lumen.core.registry import CapabilityKind
 from lumen.core.runtime import (
+    apply_provider_runtime_env,
     bootstrap_runtime,
     refresh_runtime_registry,
     rehydrate_runtime_config,
@@ -145,6 +146,8 @@ async def _perform_runtime_reload() -> None:
     _config = rehydrate_runtime_config(_config, lumen_dir=LUMEN_DIR)
     if getattr(_brain, "config", None) is not None:
         _brain.config = _config
+    if getattr(_brain, "connectors", None) is not None and hasattr(_brain.connectors, "set_runtime_config"):
+        _brain.connectors.set_runtime_config(_config)
     await sync_runtime_modules(_brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR)
     refresh_runtime_registry(_brain, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR, active_channels=["web"])
     reload_runtime_personality_surface(_brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR)
@@ -708,6 +711,13 @@ def _apply_config_api_key_env(config: dict, previous_config: dict | None = None)
 
     if current_env and current_key:
         os.environ[current_env] = current_key
+
+    previous_api_base = _normalize_optional_text(previous.get("api_base"))
+    current_api_base = _normalize_optional_text(config.get("api_base"))
+    if previous_api_base and previous_api_base != current_api_base and os.environ.get("OPENAI_API_BASE") == previous_api_base:
+        os.environ.pop("OPENAI_API_BASE", None)
+    if current_api_base:
+        os.environ["OPENAI_API_BASE"] = current_api_base
 
 
 async def _refresh_runtime_from_config(previous_config: dict | None = None) -> bool:
@@ -1670,6 +1680,12 @@ async def api_settings(request: Request):
     if api_key:
         updates["api_key"] = api_key
 
+    api_base = _normalize_optional_text(body.get("api_base"))
+    if api_base:
+        updates["api_base"] = api_base
+    elif "api_base" in body:
+        removals.add("api_base")
+
     _config = _merge_save_config(updates, removals=removals)
     await _refresh_runtime_from_config(loaded)
 
@@ -1679,6 +1695,7 @@ async def api_settings(request: Request):
             "provider": _infer_provider_name(_config),
             "model": _config.get("model", ""),
             "api_key_env": _config.get("api_key_env", ""),
+            "api_base": _config.get("api_base", ""),
             "has_api_key": bool(_config.get("api_key")),
         },
     }

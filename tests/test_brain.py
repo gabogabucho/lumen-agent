@@ -160,6 +160,33 @@ class TestThinkHappyPath:
         assert "follow the user's actual language" in system_msg
         assert "Respond in Spanish" in system_msg
         assert "Default locale hint: Respond in English." in system_msg
+        assert "Use tools to act" in system_msg
+        assert "Do NOT end with a plan" in system_msg
+
+    def test_tool_enforcement_prompt_changes_by_model_family(self):
+        context = {
+            "consciousness": "I am Lumen",
+            "personality": "assistant",
+            "body": "capabilities",
+            "catalog": "",
+            "active_flow": None,
+            "filled_slots": {},
+            "pending_slots": [],
+            "memories": [],
+            "available_flows": [],
+        }
+
+        openai_brain = _make_brain(model="gpt-4o-mini")
+        gemini_brain = _make_brain(model="gemini-1.5-pro")
+        generic_brain = _make_brain(model="deepseek-chat")
+
+        openai_msg = openai_brain._build_prompt(context, "hello", Session())[0]["content"]
+        gemini_msg = gemini_brain._build_prompt(context, "hello", Session())[0]["content"]
+        generic_msg = generic_brain._build_prompt(context, "hello", Session())[0]["content"]
+
+        assert "Be persistent with tools" in openai_msg
+        assert "absolute paths" in gemini_msg
+        assert "Tool use is mandatory" in generic_msg
 
     @pytest.mark.asyncio
     async def test_think_returns_message_and_empty_tool_calls(self):
@@ -338,6 +365,45 @@ class TestToolUseLoop:
 
         # Should stop after max_iterations (3) tool calls
         assert len(result["tool_calls"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_empty_final_response_triggers_last_no_tools_retry(self):
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+
+        tool_call = _mock_tool_call("test_conn__run", '{"input": "test"}')
+        first_response = _mock_llm_response(tool_calls=[tool_call])
+        empty_final = _mock_llm_response(content="")
+        recovered_final = _mock_llm_response(content="Recovered answer")
+
+        with patch("lumen.core.brain.acompletion") as mock_llm:
+            mock_llm.side_effect = [first_response, empty_final, recovered_final]
+            result = await brain.think("run the test", Session())
+
+        assert result["message"] == "Recovered answer"
+        assert len(result["tool_calls"]) == 1
+        assert mock_llm.call_count == 3
+        # Last retry should not offer tools again
+        assert mock_llm.call_args_list[-1].kwargs["tools"] is None
+
+    @pytest.mark.asyncio
+    async def test_max_iterations_empty_response_falls_back_to_tool_summary(self):
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+
+        tool_call = _mock_tool_call("test_conn__run", '{"input": "loop"}')
+        looping_response = _mock_llm_response(content="", tool_calls=[tool_call])
+        empty_final = _mock_llm_response(content="")
+
+        with patch("lumen.core.brain.acompletion") as mock_llm:
+            mock_llm.side_effect = [looping_response, looping_response, looping_response, empty_final]
+            result = await brain.think("keep running", Session())
+
+        assert len(result["tool_calls"]) == 3
+        assert result["message"]
+        assert "test_conn" in result["message"] or "run" in result["message"]
 
 
 # ── _coerce_args ─────────────────────────────────────────────────────

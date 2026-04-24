@@ -60,6 +60,7 @@ class ModuleSkillsDiscoveryTests(unittest.TestCase):
 
         assert skill1 is not None
         assert skill2 is not None
+        assert "shop-kit/ecommerce-ops" in skill1.metadata.get("aliases", [])
         assert skill1.metadata.get("path", "").endswith("skills\\ecommerce-ops.md") or skill1.metadata.get("path", "").endswith("skills/ecommerce-ops.md")
         assert module is not None
         assert module.status == CapabilityStatus.READY

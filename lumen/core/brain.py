@@ -1302,6 +1302,14 @@ class Brain:
             "verify it against your live Registry. Do NOT rely on memory or assumptions. "
             "This is NOT needed for capabilities you have already used successfully "
             "in the current conversation.",
+            "11. When a tool can perform the user's requested action, USE THE TOOL — do not merely describe what you would do.",
+            "12. If you say you are going to check, inspect, search, execute, save, read, or configure something — perform that action with a tool in the same turn.",
+            "13. Do NOT end with a plan when the required capability is READY and a tool exists. Act now.",
+            "14. Do NOT claim 'I don't have access', 'I can't execute', or similar if a matching READY capability/tool exists.",
+            "15. If a tool result is partial, empty, or recoverable, try again with a better query/argument strategy before giving up.",
+            "16. Prefer concrete execution over speculation. Verify with tools instead of answering from memory when tools are available.",
+            "",
+            self._tool_enforcement_directive(),
             "",
             # 1. CONSCIOUSNESS — the soul (never changes)
             context["consciousness"],
@@ -1407,6 +1415,44 @@ class Brain:
 
         return messages
 
+    def _tool_enforcement_directive(self) -> str:
+        """Return model-aware tool discipline instructions.
+
+        Keep this compact and explicit — enough to steer weaker models without
+        turning Lumen into a brittle prompt framework.
+        """
+        model = (self.model or "").lower()
+        base = [
+            "## Tool Execution Discipline",
+            "- Use tools to act; do not only describe tool usage.",
+            "- If a connector/tool is available for the task, prefer it over guessing.",
+            "- After tool results arrive, synthesize the answer clearly for the user.",
+        ]
+
+        if any(token in model for token in ["gpt", "openai", "o4", "codex"]):
+            base.extend(
+                [
+                    "- Be persistent with tools: verify, inspect, and execute before saying something is unavailable.",
+                    "- Do not answer operational requests from memory when a tool can verify the real state.",
+                ]
+            )
+        elif any(token in model for token in ["gemini", "gemma"]):
+            base.extend(
+                [
+                    "- Prefer explicit absolute paths and verified arguments when using tools.",
+                    "- Double-check the target capability with tools before refusing.",
+                ]
+            )
+        else:
+            base.extend(
+                [
+                    "- Tool use is mandatory for actions, checks, searches, and execution.",
+                    "- If your first attempt fails, retry with a better tool call or clearer arguments.",
+                ]
+            )
+
+        return "\n".join(base)
+
     @staticmethod
     def _coerce_args(params: dict, tool_name: str, tools: list[dict] | None) -> dict:
         """Coerce LLM arguments to match the declared schema types.
@@ -1465,15 +1511,22 @@ class Brain:
         Without this loop, tool results are lost and the user gets no response.
         """
         all_tool_calls = []
+        partial_text = ""
 
         for _ in range(max_iterations):
             choice = response.choices[0]
             msg = choice.message
+            if msg.content:
+                partial_text = msg.content
 
             # No tool calls — we have the final text response
             if not msg.tool_calls:
+                final_message = msg.content or ""
+                if not final_message and all_tool_calls:
+                    recovered = await self._retry_final_response_without_tools(messages)
+                    final_message = recovered or partial_text or self._summarize_tool_results(all_tool_calls)
                 return {
-                    "message": msg.content or "",
+                    "message": final_message,
                     "tool_calls": all_tool_calls,
                 }
 
@@ -1566,7 +1619,39 @@ class Brain:
 
         # Max iterations reached — return what we have
         final_msg = response.choices[0].message.content or ""
+        if not final_msg and all_tool_calls:
+            recovered = await self._retry_final_response_without_tools(messages)
+            final_msg = recovered or partial_text or self._summarize_tool_results(all_tool_calls)
         return {"message": final_msg, "tool_calls": all_tool_calls}
+
+    async def _retry_final_response_without_tools(self, messages: list[dict]) -> str:
+        """Ask the model for one last synthesis pass without tools."""
+        try:
+            response = await acompletion(
+                model=self._resolved_model(),
+                messages=messages,
+                tools=None,
+                temperature=0.7,
+                max_tokens=1024,
+            )
+            return response.choices[0].message.content or ""
+        except Exception:
+            return ""
+
+    def _summarize_tool_results(self, all_tool_calls: list[dict]) -> str:
+        """Fallback summary when the model never produces final text."""
+        if not all_tool_calls:
+            return ""
+        last = all_tool_calls[-1]
+        if last.get("error"):
+            return f"Tool execution failed: {last['error']}"
+        if last.get("name"):
+            return f"Completed tool {last['name']}."
+        connector = last.get("connector")
+        action = last.get("action")
+        if connector and action:
+            return f"Completed {connector}.{action}."
+        return "Completed the requested action."
 
     def load_flows(self, flows_dir: str | Path):
         """Load flow definitions from a YAML file or directory."""

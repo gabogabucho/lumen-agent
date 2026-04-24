@@ -11,6 +11,7 @@ from lumen.core.cerebellum import (
     match_declared_tools,
     normalize_module_manifest,
     normalize_openclaw_metadata,
+    normalize_skill_reference,
 )
 from lumen.core.connectors import Connector, ConnectorRegistry
 from lumen.core.model_tiers import (
@@ -222,6 +223,33 @@ class CerebellumTests(unittest.TestCase):
         )
 
         self.assertEqual(compatibility["warnings"], [])
+
+    def test_normalize_skill_reference_handles_paths(self):
+        self.assertEqual(normalize_skill_reference("skills/ecommerce-ops.md"), "ecommerce-ops")
+        self.assertEqual(normalize_skill_reference("otto-tiendanube/skills/SKILL.md"), "otto-tiendanube")
+        self.assertEqual(normalize_skill_reference("whatsapp-responder"), "whatsapp-responder")
+
+    def test_requires_skills_can_match_runtime_skill_aliases(self):
+        connectors = ConnectorRegistry()
+        registry = Registry()
+        registry.register(
+            Capability(
+                kind=CapabilityKind.SKILL,
+                name="otto-tiendanube",
+                description="Main TiendaNube skill",
+                status=CapabilityStatus.READY,
+                metadata={"aliases": ["otto-tiendanube/otto-tiendanube", "otto-tiendanube/skills/SKILL.md"]},
+            )
+        )
+        artifact = normalize_module_manifest(
+            {
+                "name": "needs-tn",
+                "description": "Depends on TN skill",
+                "requires": {"skills": ["otto-tiendanube/skills/SKILL.md"]},
+            }
+        )
+        compatibility = calculate_compatibility(artifact, build_runtime_surface(connectors, registry))
+        self.assertEqual(compatibility["status"], COMPAT_INSTALLABLE)
 
 
 if __name__ == "__main__":

@@ -180,6 +180,73 @@ class TerminalExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         assert _MAX_OUTPUT_BYTES == 10240  # 10KB
 
+    async def test_public_env_injection_is_explicit(self):
+        """Terminal subprocess receives only explicitly allowed public env vars."""
+        from lumen.core.handlers import terminal_execute
+
+        cmd = "python" if sys.platform == "win32" else "python3"
+        config = {
+            "terminal": {
+                "allowlist": [cmd],
+                "env": {
+                    "public": ["INSTANCE_ID", "SCRIPTS_DIR"],
+                    "modules": ["otto-tiendanube"],
+                },
+            },
+            "secrets": {
+                "otto-tiendanube": {
+                    "public": {
+                        "INSTANCE_ID": "otto-003",
+                        "SCRIPTS_DIR": "/srv/otto/shared/capabilities/tiendanube",
+                    },
+                    "secret": {
+                        "TIENDANUBE_API_TOKEN": "sk-secret",
+                    },
+                }
+            },
+        }
+        script = Path(tempfile.gettempdir()) / "lumen_env_public_test.py"
+        script.write_text(
+            'import os\nprint(os.environ.get("INSTANCE_ID", ""))\nprint(os.environ.get("SCRIPTS_DIR", ""))\nprint(os.environ.get("TIENDANUBE_API_TOKEN", ""))\n',
+            encoding="utf-8",
+        )
+        result = await terminal_execute(command=f'{cmd} "{script}"', config=config)
+        assert result["exit_code"] == 0
+        lines = [line.strip() for line in result["stdout"].splitlines()]
+        assert "otto-003" in lines
+        assert "/srv/otto/shared/capabilities/tiendanube" in lines
+        assert "sk-secret" not in result["stdout"]
+
+    async def test_secret_env_injection_requires_explicit_opt_in(self):
+        """Secret env vars are injected only when explicitly listed."""
+        from lumen.core.handlers import terminal_execute
+
+        cmd = "python" if sys.platform == "win32" else "python3"
+        config = {
+            "terminal": {
+                "allowlist": [cmd],
+                "env": {
+                    "public": ["INSTANCE_ID"],
+                    "secret": ["TIENDANUBE_API_TOKEN"],
+                    "modules": ["otto-tiendanube"],
+                },
+            },
+            "secrets": {
+                "otto-tiendanube": {
+                    "public": {"INSTANCE_ID": "otto-003"},
+                    "secret": {"TIENDANUBE_API_TOKEN": "sk-secret"},
+                }
+            },
+        }
+        script = Path(tempfile.gettempdir()) / "lumen_env_secret_test.py"
+        script.write_text(
+            'import os\nprint(os.environ.get("TIENDANUBE_API_TOKEN", ""))\n',
+            encoding="utf-8",
+        )
+        result = await terminal_execute(command=f'{cmd} "{script}"', config=config)
+        assert result["exit_code"] == 0
+        assert "sk-secret" in result["stdout"]
+
 
 class TerminalToolSchemaTests(unittest.TestCase):
     """Verify terminal connector appears in tool schemas and registry."""
@@ -204,6 +271,30 @@ class TerminalToolSchemaTests(unittest.TestCase):
         assert schema is not None
         assert "command" in schema["parameters"]["properties"]
         assert "command" in schema["parameters"]["required"]
+
+    def test_terminal_alias_tool_exposed(self):
+        """Single-action connectors expose a simple alias tool name."""
+        registry = ConnectorRegistry()
+        pkg_dir = Path(__file__).parent.parent / "lumen"
+        built_in_path = pkg_dir / "connectors" / "built-in.yaml"
+        registry.load(built_in_path)
+        register_builtin_handlers(registry, Memory(":memory:"))
+
+        tool_names = [tool["function"]["name"] for tool in registry.as_tools()]
+        assert "terminal__execute" in tool_names
+        assert "terminal" in tool_names
+
+    def test_terminal_alias_parses_to_execute(self):
+        registry = ConnectorRegistry()
+        pkg_dir = Path(__file__).parent.parent / "lumen"
+        built_in_path = pkg_dir / "connectors" / "built-in.yaml"
+        registry.load(built_in_path)
+        register_builtin_handlers(registry, Memory(":memory:"))
+        registry.as_tools()  # populate alias map
+
+        connector, action = registry.parse_tool_name("terminal")
+        assert connector == "terminal"
+        assert action == "execute"
 
     def test_connector_registry_injects_runtime_config_into_terminal_handler(self):
         """Terminal connector receives runtime config automatically through registry.execute."""

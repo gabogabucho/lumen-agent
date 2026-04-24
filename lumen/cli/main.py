@@ -18,7 +18,7 @@ from rich.prompt import Prompt
 from lumen import __version__
 from lumen.core.paths import resolve_lumen_dir
 from lumen.core.registry import CapabilityKind
-from lumen.core.runtime import bootstrap_runtime, refresh_runtime_registry, rehydrate_runtime_config, reload_runtime_personality_surface, sync_runtime_modules
+from lumen.core.runtime import apply_provider_runtime_env, bootstrap_runtime, refresh_runtime_registry, rehydrate_runtime_config, reload_runtime_personality_surface, sync_runtime_modules
 
 BRAND = "#3d3d6d"
 BRAND_DIM = "#6b6baa"
@@ -106,8 +106,7 @@ def _prepare_runtime_if_configured(
     if not _is_runtime_configured(loaded):
         return None, loaded
 
-    if loaded.get("api_key") and loaded.get("api_key_env"):
-        os.environ[loaded["api_key_env"]] = loaded["api_key"]
+    apply_provider_runtime_env(loaded)
 
     resolved_lumen_dir = lumen_dir or LUMEN_DIR
     runtime = asyncio.run(
@@ -690,6 +689,8 @@ def reload(
     runtime.config = config
     if getattr(brain, "config", None) is not None:
         brain.config = config
+    if getattr(brain, "connectors", None) is not None and hasattr(brain.connectors, "set_runtime_config"):
+        brain.connectors.set_runtime_config(config)
 
     try:
         asyncio.run(

@@ -5,6 +5,7 @@ real actions: saving tasks to memory, listing notes, searching, etc.
 """
 
 import asyncio
+import os
 import json
 import shlex
 import time
@@ -219,6 +220,60 @@ def _truncate_output(data: bytes, max_bytes: int = _MAX_OUTPUT_BYTES) -> tuple[s
     return data.decode("utf-8", errors="replace"), truncated
 
 
+def _build_terminal_env(config: dict) -> dict[str, str] | None:
+    """Build explicit env injection for terminal subprocesses.
+
+    Policy:
+      terminal:
+        env:
+          public: ["INSTANCE_ID", "SCRIPTS_DIR"]
+          secret: ["TIENDANUBE_API_TOKEN"]
+          modules: ["otto-tiendanube"]
+    """
+    terminal_config = config.get("terminal", {})
+    if not isinstance(terminal_config, dict):
+        return None
+    env_policy = terminal_config.get("env", {})
+    if not isinstance(env_policy, dict):
+        return None
+
+    public_keys = env_policy.get("public", [])
+    secret_keys = env_policy.get("secret", [])
+    modules = env_policy.get("modules", [])
+    if not isinstance(public_keys, list):
+        public_keys = []
+    if not isinstance(secret_keys, list):
+        secret_keys = []
+    if not isinstance(modules, list):
+        modules = []
+
+    merged: dict[str, str] = dict(os.environ)
+    secrets = config.get("secrets", {})
+    if not isinstance(secrets, dict):
+        return merged
+
+    source_modules = modules or list(secrets.keys())
+    for module_name in source_modules:
+        module_cfg = secrets.get(module_name, {})
+        if not isinstance(module_cfg, dict):
+            continue
+        public_values = module_cfg.get("public") if isinstance(module_cfg.get("public"), dict) else {}
+        secret_values = module_cfg.get("secret") if isinstance(module_cfg.get("secret"), dict) else {}
+
+        # Legacy flat config treated as public only for keys explicitly allowed in public list
+        if not public_values and not secret_values:
+            public_values = {k: v for k, v in module_cfg.items() if k in public_keys}
+
+        for key in public_keys:
+            if key in public_values:
+                merged[str(key)] = str(public_values[key])
+        for key in secret_keys:
+            if key in secret_values:
+                merged[str(key)] = str(secret_values[key])
+
+    return merged
+
+
 async def terminal_execute(
     command: str = "",
     timeout: int = 30,
@@ -249,11 +304,13 @@ async def terminal_execute(
         }
 
     try:
+        proc_env = _build_terminal_env(config)
         proc = await asyncio.create_subprocess_exec(
             *parts,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd or None,
+            env=proc_env,
         )
     except FileNotFoundError:
         return {
