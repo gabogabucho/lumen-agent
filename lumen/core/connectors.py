@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any, Callable, Coroutine
 
@@ -21,6 +22,7 @@ class Connector:
         self.description = description
         self.actions = actions
         self._handlers: dict[str, Callable[..., Coroutine]] = {}
+        self.runtime_config: dict[str, Any] | None = None
 
     def register_handler(self, action: str, handler: Callable[..., Coroutine]):
         self._handlers[action] = handler
@@ -30,7 +32,11 @@ class Connector:
             raise ValueError(f"Unknown action '{action}' for connector '{self.name}'")
         handler = self._handlers.get(action)
         if handler:
-            return await handler(**(params or {}))
+            call_params = dict(params or {})
+            signature = inspect.signature(handler)
+            if "config" in signature.parameters:
+                call_params.setdefault("config", self.runtime_config)
+            return await handler(**call_params)
         return {
             "status": "ok",
             "connector": self.name,
@@ -50,6 +56,12 @@ class ConnectorRegistry:
         self._tool_schemas: dict[str, dict] = {}
         self._explicit_tools: dict[str, dict[str, Any]] = {}
         self._tool_name_map: dict[str, str] = {}
+        self.runtime_config: dict[str, Any] | None = None
+
+    def set_runtime_config(self, config: dict[str, Any] | None):
+        self.runtime_config = config
+        for connector in self._connectors.values():
+            connector.runtime_config = config
 
     @staticmethod
     def _sanitize_tool_name(name: str) -> str:
@@ -93,6 +105,7 @@ class ConnectorRegistry:
             self._connectors[config["name"]] = connector
 
     def register(self, connector: Connector):
+        connector.runtime_config = self.runtime_config
         self._connectors[connector.name] = connector
 
     def get(self, name: str) -> Connector | None:
@@ -209,4 +222,8 @@ class ConnectorRegistry:
         tool = self._explicit_tools.get(resolved)
         if not tool:
             raise ValueError(f"Unknown tool: {name}")
-        return await tool["handler"](**(params or {}))
+        call_params = dict(params or {})
+        signature = inspect.signature(tool["handler"])
+        if "config" in signature.parameters:
+            call_params.setdefault("config", self.runtime_config)
+        return await tool["handler"](**call_params)

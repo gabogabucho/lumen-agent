@@ -205,6 +205,26 @@ class TerminalToolSchemaTests(unittest.TestCase):
         assert "command" in schema["parameters"]["properties"]
         assert "command" in schema["parameters"]["required"]
 
+    def test_connector_registry_injects_runtime_config_into_terminal_handler(self):
+        """Terminal connector receives runtime config automatically through registry.execute."""
+        import asyncio
+        import sys
+
+        memory = Memory(":memory:")
+        registry = ConnectorRegistry()
+        pkg_dir = Path(__file__).parent.parent / "lumen"
+        built_in_path = pkg_dir / "connectors" / "built-in.yaml"
+        registry.load(built_in_path)
+        register_builtin_handlers(registry, memory)
+        cmd = "python" if sys.platform == "win32" else "python3"
+        registry.set_runtime_config({"terminal": {"allowlist": [cmd]}})
+
+        result = asyncio.run(
+            registry.execute("terminal", "execute", {"command": f"{cmd} --version", "timeout": 5})
+        )
+        assert result["exit_code"] == 0
+        assert "Python" in result["stdout"] or "python" in result["stdout"]
+
 
 if __name__ == "__main__":
     unittest.main()

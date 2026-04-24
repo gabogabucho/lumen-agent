@@ -212,6 +212,7 @@ async def bootstrap_runtime(
     if built_in_path.exists():
         connectors.load(built_in_path)
     register_builtin_handlers(connectors, memory)
+    connectors.set_runtime_config(config)
 
     mcp_manager = MCPManager(config.get("mcp"), pkg_dir=pkg_dir)
     await mcp_manager.start(connectors.register_tool)

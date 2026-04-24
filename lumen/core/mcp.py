@@ -98,7 +98,7 @@ class StdioMCPServer:
             {
                 "protocolVersion": self.config.get("protocol_version", "2024-11-05"),
                 "capabilities": {},
-                "clientInfo": {"name": "lumen", "version": "0.4.8"},
+                "clientInfo": {"name": "lumen", "version": "0.4.9"},
             },
         )
         if init_result.get("error"):
