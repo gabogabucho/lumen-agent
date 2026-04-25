@@ -1743,7 +1743,7 @@ class Brain:
                     "requires_parser_fallback": True,
                 }
             )
-        elif any(token in model for token in ["qwen", "deepseek", "mistral"]):
+        elif any(token in model for token in ["qwen", "deepseek", "mistral", "minimax"]):
             profile.update(
                 {
                     "family": "openai-compatible",
@@ -1813,6 +1813,68 @@ class Brain:
                 payload = json.loads(match.group(1).strip())
                 if isinstance(payload, dict):
                     _materialize(payload)
+            except Exception:
+                pass
+
+        if parsed:
+            return parsed
+
+        # DeepSeek DSML format
+        # <｜DSML｜invoke name="tool__action">
+        #   <｜DSML｜parameter name="command" string="true">value</｜DSML｜parameter>
+        # </｜DSML｜invoke>
+        dsml_pattern = r'<｜DSML｜invoke name="([^"]+)">(.*?)</｜DSML｜invoke>'
+        for match in re.finditer(dsml_pattern, msg_content, re.DOTALL):
+            try:
+                name = match.group(1)
+                params_block = match.group(2)
+                arguments = {}
+                for param_match in re.finditer(
+                    r'<｜DSML｜parameter name="([^"]+)"[^>]*>(.*?)</｜DSML｜parameter>',
+                    params_block,
+                    re.DOTALL,
+                ):
+                    arguments[param_match.group(1)] = param_match.group(2)
+                _materialize({"name": name, "arguments": arguments})
+            except Exception:
+                pass
+
+        if parsed:
+            return parsed
+
+        # Minimax XML format: invoke with nested parameter tags
+        invoke_pattern = r'<invoke name="([^"]+)">(.*?)</invoke>'
+        for match in re.finditer(invoke_pattern, msg_content, re.DOTALL):
+            try:
+                name = match.group(1)
+                params_block = match.group(2)
+                arguments = {}
+                for param_match in re.finditer(
+                    r'<parameter name="([^"]+)"[^>]*>(.*?)</parameter>',
+                    params_block,
+                    re.DOTALL,
+                ):
+                    arguments[param_match.group(1)] = param_match.group(2)
+                _materialize({"name": name, "arguments": arguments})
+            except Exception:
+                pass
+
+        if parsed:
+            return parsed
+
+        # Mistral/Qwen tagged: [TOOL_CALLS]...[/TOOL_CALLS]
+        for match in re.finditer(
+            r"\[TOOL_CALLS\](.*?)\[/TOOL_CALLS\]", msg_content, re.DOTALL
+        ):
+            try:
+                raw = match.group(1).strip()
+                if raw.startswith("["):
+                    payloads = json.loads(raw)
+                else:
+                    payloads = [json.loads(raw)]
+                for payload in payloads:
+                    if isinstance(payload, dict):
+                        _materialize(payload)
             except Exception:
                 pass
 

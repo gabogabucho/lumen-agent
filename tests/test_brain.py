@@ -467,8 +467,70 @@ class TestToolUseLoop:
         assert result["message"] == "Done!"
         mock_exec.assert_awaited()
 
+    @pytest.mark.asyncio
+    async def test_parser_fallback_handles_deepseek_dsml(self):
+        brain = _make_brain(model="deepseek/deepseek-chat")
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
 
-# ── _coerce_args ─────────────────────────────────────────────────────
+        dsml_content = (
+            '<｜DSML｜invoke name="test_conn">'
+            '<｜DSML｜parameter name="input" string="true">check</｜DSML｜parameter>'
+            '</｜DSML｜invoke>'
+        )
+        fallback_response = _mock_llm_response(content=dsml_content)
+        final_response = _mock_llm_response("Done!")
+
+        with patch("lumen.core.brain.acompletion") as mock_llm:
+            mock_llm.side_effect = [fallback_response, final_response]
+            with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
+                result = await brain.think("check python", Session())
+
+        assert result["message"] == "Done!"
+        mock_exec.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_parser_fallback_handles_minimax_xml(self):
+        brain = _make_brain(model="minimax/abab6.5")
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+
+        minimax_content = (
+            '<invoke name="test_conn">'
+            '<parameter name="input">check</parameter>'
+            '</invoke>'
+        )
+        fallback_response = _mock_llm_response(content=minimax_content)
+        final_response = _mock_llm_response("Done!")
+
+        with patch("lumen.core.brain.acompletion") as mock_llm:
+            mock_llm.side_effect = [fallback_response, final_response]
+            with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
+                result = await brain.think("check python", Session())
+
+        assert result["message"] == "Done!"
+        mock_exec.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_parser_fallback_handles_mistral_tool_calls_tag(self):
+        brain = _make_brain(model="mistral/mistral-large")
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+
+        mistral_content = '[TOOL_CALLS]{"name":"test_conn","arguments":{"input":"check"}}[/TOOL_CALLS]'
+        fallback_response = _mock_llm_response(content=mistral_content)
+        final_response = _mock_llm_response("Done!")
+
+        with patch("lumen.core.brain.acompletion") as mock_llm:
+            mock_llm.side_effect = [fallback_response, final_response]
+            with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
+                result = await brain.think("check python", Session())
+
+        assert result["message"] == "Done!"
+        mock_exec.assert_awaited()
+
+
+# ---- _coerce_args ------------------------------------------------------------
 
 
 class TestCoerceArgs:
