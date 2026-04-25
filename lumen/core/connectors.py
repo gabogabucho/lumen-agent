@@ -187,7 +187,7 @@ class ConnectorRegistry:
                                 },
                             }
                         )
-                else:
+                elif not custom:
                     tools.append(
                         {
                             "type": "function",
