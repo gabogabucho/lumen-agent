@@ -12,6 +12,7 @@ The brain combines three sources into one prompt:
 """
 
 import json
+import logging
 import re
 import unicodedata
 import uuid
@@ -31,6 +32,9 @@ from lumen.core.memory import Memory
 from lumen.core.personality import Personality
 from lumen.core.registry import CapabilityKind, Registry
 from lumen.core.session import Session
+
+
+logger = logging.getLogger(__name__)
 
 
 class Brain:
@@ -1893,6 +1897,77 @@ class Brain:
         return parsed
 
     @staticmethod
+    def _has_serialized_tool_call_shape(msg_content: str) -> bool:
+        """Detect known serialized tool-call envelopes before parsing content."""
+        if not isinstance(msg_content, str):
+            return False
+
+        stripped = msg_content.strip()
+        if not stripped:
+            return False
+
+        markers = (
+            "<tool_call>",
+            "<｜DSML｜invoke ",
+            '<invoke name="',
+            "[TOOL_CALLS]",
+        )
+        if any(marker in stripped for marker in markers):
+            return True
+
+        if stripped.startswith("{") and stripped.endswith("}"):
+            has_tool_key = re.search(r'"(?:name|tool|function)"\s*:', stripped)
+            has_args_key = re.search(r'"(?:arguments|args)"\s*:', stripped)
+            return bool(has_tool_key and has_args_key)
+
+        return False
+
+    @staticmethod
+    def _tool_call_name(tool_call: Any) -> str | None:
+        """Return the tool name from native or parsed tool call shapes."""
+        if not tool_call:
+            return None
+
+        function = getattr(tool_call, "function", None)
+        if function is None and isinstance(tool_call, dict):
+            function = tool_call.get("function")
+
+        if isinstance(function, dict):
+            name = function.get("name")
+        else:
+            name = getattr(function, "name", None)
+
+        return name if isinstance(name, str) and name.strip() else None
+
+    @classmethod
+    def _has_usable_tool_calls(cls, tool_calls: list[Any] | None) -> bool:
+        """Treat empty-ish native tool payloads as missing tool calls."""
+        return any(cls._tool_call_name(tool_call) for tool_call in (tool_calls or []))
+
+    def _resolve_tool_calls(self, msg, tools: list[dict] | None) -> list[Any] | None:
+        """Prefer usable native tool calls, with guarded fallback parsing."""
+        native_tool_calls = getattr(msg, "tool_calls", None)
+        native_usable = self._has_usable_tool_calls(native_tool_calls)
+        content = getattr(msg, "content", "") or ""
+
+        if not self._has_serialized_tool_call_shape(content):
+            return native_tool_calls
+
+        logger.debug("serialized tool calls detected in content")
+        parsed_tool_calls = self._extract_fallback_tool_calls(content, tools)
+
+        if native_usable:
+            if parsed_tool_calls:
+                logger.debug("native usable tool calls kept over parsed fallback")
+            return native_tool_calls
+
+        if parsed_tool_calls:
+            logger.debug("native tool calls unusable, using fallback parser")
+            return parsed_tool_calls
+
+        return native_tool_calls
+
+    @staticmethod
     def _coerce_args(params: dict, tool_name: str, tools: list[dict] | None) -> dict:
         """Coerce LLM arguments to match the declared schema types.
 
@@ -1996,9 +2071,7 @@ class Brain:
             if msg.content:
                 partial_text = msg.content
 
-            tool_calls = msg.tool_calls
-            if not tool_calls and self._model_profile().get("requires_parser_fallback"):
-                tool_calls = self._extract_fallback_tool_calls(msg.content or "", tools)
+            tool_calls = self._resolve_tool_calls(msg, tools)
 
             # No tool calls — we have the final text response
             if not tool_calls:

@@ -301,6 +301,50 @@ class TestThinkLLMError:
 
 
 class TestToolUseLoop:
+    def test_resolve_tool_calls_skips_fallback_parser_without_serialized_shape(self):
+        brain = _make_brain()
+        msg = MagicMock()
+        msg.content = "Just a normal assistant reply"
+        msg.tool_calls = None
+
+        with patch.object(brain, "_extract_fallback_tool_calls", return_value=[]) as mock_parse:
+            resolved = brain._resolve_tool_calls(msg, tools=[])
+
+        assert resolved is None
+        mock_parse.assert_not_called()
+
+    def test_resolve_tool_calls_uses_fallback_when_native_unusable_and_shape_detected(self):
+        brain = _make_brain()
+        msg = MagicMock()
+        msg.content = '<tool_call>{"name":"test_conn","arguments":{"input":"parsed"}}</tool_call>'
+
+        emptyish_tool_call = MagicMock()
+        emptyish_tool_call.function.name = ""
+        emptyish_tool_call.function.arguments = "{}"
+        msg.tool_calls = [emptyish_tool_call]
+
+        parsed_tool_call = _mock_tool_call("test_conn", '{"input": "parsed"}')
+        with patch.object(brain, "_extract_fallback_tool_calls", return_value=[parsed_tool_call]) as mock_parse:
+            resolved = brain._resolve_tool_calls(msg, tools=[])
+
+        assert resolved == [parsed_tool_call]
+        mock_parse.assert_called_once()
+
+    def test_resolve_tool_calls_prefers_native_when_serialized_shape_is_also_present(self):
+        brain = _make_brain()
+        msg = MagicMock()
+        msg.content = '<tool_call>{"name":"test_conn","arguments":{"input":"parsed"}}</tool_call>'
+
+        native_tool_call = _mock_tool_call("test_conn", '{"input": "native"}')
+        parsed_tool_call = _mock_tool_call("test_conn", '{"input": "parsed"}')
+        msg.tool_calls = [native_tool_call]
+
+        with patch.object(brain, "_extract_fallback_tool_calls", return_value=[parsed_tool_call]) as mock_parse:
+            resolved = brain._resolve_tool_calls(msg, tools=[])
+
+        assert resolved == [native_tool_call]
+        mock_parse.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_single_tool_call_executed(self):
         brain = _make_brain()
@@ -528,6 +572,55 @@ class TestToolUseLoop:
 
         assert result["message"] == "Done!"
         mock_exec.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_parser_fallback_recovers_when_native_tool_calls_are_emptyish(self):
+        brain = _make_brain(model="deepseek/deepseek-chat")
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+
+        emptyish_tool_call = MagicMock()
+        emptyish_tool_call.function.name = ""
+        emptyish_tool_call.function.arguments = "{}"
+
+        dsml_content = (
+            '<｜DSML｜invoke name="test_conn">'
+            '<｜DSML｜parameter name="input" string="true">check</｜DSML｜parameter>'
+            '</｜DSML｜invoke>'
+        )
+        fallback_response = _mock_llm_response(
+            content=dsml_content, tool_calls=[emptyish_tool_call]
+        )
+        final_response = _mock_llm_response("Done!")
+
+        with patch("lumen.core.brain.acompletion") as mock_llm:
+            mock_llm.side_effect = [fallback_response, final_response]
+            with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
+                result = await brain.think("check python", Session())
+
+        assert result["message"] == "Done!"
+        mock_exec.assert_awaited_once_with("test_conn", "run", {"input": "check"})
+
+    @pytest.mark.asyncio
+    async def test_parser_fallback_does_not_override_usable_native_tool_calls(self):
+        brain = _make_brain(model="gpt-4o-mini")
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+
+        native_tool_call = _mock_tool_call("test_conn", '{"input": "native"}')
+        fallback_response = _mock_llm_response(
+            content='<tool_call>{"name":"test_conn","arguments":{"input":"parsed"}}</tool_call>',
+            tool_calls=[native_tool_call],
+        )
+        final_response = _mock_llm_response("Done!")
+
+        with patch("lumen.core.brain.acompletion") as mock_llm:
+            mock_llm.side_effect = [fallback_response, final_response]
+            with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
+                result = await brain.think("check python", Session())
+
+        assert result["message"] == "Done!"
+        mock_exec.assert_awaited_once_with("test_conn", "run", {"input": "native"})
 
 
 # ---- _coerce_args ------------------------------------------------------------
