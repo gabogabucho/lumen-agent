@@ -18,6 +18,7 @@
   <a href="#manifesto">Manifesto</a> &bull;
   <a href="MANIFESTO.md">Full Manifesto</a> &bull;
   <a href="LUMEN_SPEC.md">Spec</a> &bull;
+  <a href="CHANGELOG.md">Changelog</a> &bull;
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
@@ -368,7 +369,10 @@ Built-in handlers for `task`, `note`, and `memory`. Anything else plugs in via M
 - **Module catalog + uploads** &mdash; install from catalog, marketplace, GitHub, or upload a custom `module.yaml`/zip
 - **skills.sh integration** &mdash; browse and install skills from skills.sh marketplace feed
 - **Structured output** &mdash; `<agent-ui>` tags for rich responses in the dashboard
-- **Tested** &mdash; 440 tests covering brain, memory, web surfaces, marketplace, OAuth, MCP runtime, personality swap, terminal security, REST API, hot reload, API keys, remote install, instance isolation, config CLI, lifecycle hooks, productive kit installs, module-declared skills/channels, and personality UI config (including disk-snapshot guarantees)
+- **Model-robust execution** &mdash; contradiction detection and retry (model self-corrects when it wrongly denies a ready capability), tool-enforcement prompts tuned per model family (OpenAI, Gemini, generic), argument coercion (string→int/bool), XML/JSON parser fallback for non-native-tool models
+- **Tool suggestion engine** &mdash; keyword-based tool recommendations injected into the system prompt (terminal, file, web, message, setup categories)
+- **HTTP-safe dashboard** &mdash; UUID generation works in non-HTTPS contexts (crypto.randomUUID fallback)
+- **Tested** &mdash; 490+ tests covering brain, memory, web surfaces, marketplace, OAuth, MCP runtime, personality swap, terminal security, REST API, hot reload, API keys, remote install, instance isolation, config CLI, lifecycle hooks, productive kit installs, module-declared skills/channels, personality UI config, contradiction retry, model-robust execution, and tool suggestion engine
 
 ## Packaging model
 
@@ -526,7 +530,7 @@ api_key: "fake"
 - [x] Hot reload (`POST /api/reload` + `lumen reload` CLI)
 - [x] Remote module install (`github:owner/repo` + URL support)
 - [x] API key management (generate/revoke/list with SHA-256 hashing)
-- [x] Comprehensive test suite (440 tests)
+- [x] Comprehensive test suite (490+ tests)
 - [x] Local module install (`./my-kit`)
 - [x] Productive kit requirements (`x-lumen.requires`)
 - [x] Auto personality activation for personality modules
@@ -534,6 +538,9 @@ api_key: "fake"
 - [x] External channels declared by modules
 - [x] Personality UI tags / surfaces
 - [x] CONTRIBUTING.md tutorial
+- [x] Model-robust execution (contradiction retry, tool enforcement, argument coercion)
+- [x] Tool suggestion engine (keyword-based recommendations)
+- [x] HTTP-safe dashboard (crypto.randomUUID fallback)
 - [ ] Public module registry / discovery
 - [ ] Docker support
 - [ ] Full hosted documentation
