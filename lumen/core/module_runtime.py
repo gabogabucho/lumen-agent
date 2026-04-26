@@ -85,6 +85,12 @@ class ModuleRuntimeContext:
     brain: Any = None
     registered_tools: list[str] = field(default_factory=list)
     inbox: Any = None
+    _broadcast_callback: Any = None
+
+    async def broadcast_event(self, event_type: str, payload: dict) -> int:
+        if self._broadcast_callback is not None:
+            return await self._broadcast_callback(event_type, payload)
+        return 0
 
     def ensure_runtime_dir(self) -> Path:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -177,6 +183,7 @@ def _build_context(
     lumen_dir: Path | None = None,
     brain: Any = None,
     inbox: Any = None,
+    broadcast_callback: Any = None,
 ) -> ModuleRuntimeContext:
     _, manifest = load_module_manifest(module_dir)
     return ModuleRuntimeContext(
@@ -190,6 +197,7 @@ def _build_context(
         lumen_dir=lumen_dir,
         brain=brain,
         inbox=inbox,
+        _broadcast_callback=broadcast_callback,
     )
 
 
@@ -308,6 +316,7 @@ class ModuleRuntimeManager:
         connectors: ConnectorRegistry,
         memory: Memory,
         brain: Any = None,
+        broadcast_callback: Any = None,
     ):
         self.pkg_dir = pkg_dir
         self.lumen_dir = lumen_dir
@@ -317,7 +326,11 @@ class ModuleRuntimeManager:
         self.connectors = connectors
         self.memory = memory
         self.brain = brain
+        self._broadcast_callback = broadcast_callback
         self._loaded: dict[str, LoadedModuleRuntime] = {}
+
+    def set_broadcast_callback(self, callback) -> None:
+        self._broadcast_callback = callback
 
     async def sync(self) -> None:
         module_roots = [self.runtime_root, self.pkg_dir / "modules"]
@@ -389,6 +402,7 @@ class ModuleRuntimeManager:
             lumen_dir=self.lumen_dir,
             brain=self.brain,
             inbox=getattr(self.brain, "inbox", None) if self.brain else None,
+            broadcast_callback=self._broadcast_callback,
         )
         context.ensure_runtime_dir()
 

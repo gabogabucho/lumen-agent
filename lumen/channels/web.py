@@ -121,6 +121,9 @@ def _attach_brain_runtime_handlers():
     if _brain is not None:
         _brain.flow_action_handler = _handle_flow_action
         _start_inbox_consumer()
+        manager = getattr(_brain, "module_manager", None)
+        if manager and hasattr(manager, "set_broadcast_callback"):
+            manager.set_broadcast_callback(broadcast_event)
 
 
 _inbox_consumer_task = None
@@ -1034,6 +1037,11 @@ async def _init_brain_from_config():
     _awareness = runtime.awareness
     _attach_brain_runtime_handlers()
 
+    # Wire broadcast callback so modules can push real-time events
+    manager = getattr(_brain, "module_manager", None)
+    if manager and hasattr(manager, "set_broadcast_callback"):
+        manager.set_broadcast_callback(broadcast_event)
+
     return True
 
 
@@ -1928,6 +1936,30 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         session_manager.remove(session_id)
     finally:
         _active_websockets.discard(websocket)
+
+
+async def broadcast_event(event_type: str, payload: dict) -> int:
+    """Broadcast a real-time event to all connected WebSocket clients.
+
+    Returns the number of clients that successfully received the event.
+    Stale or disconnected sockets are caught, removed from the active set,
+    and do not count toward the returned total.
+    """
+    if not _active_websockets:
+        return 0
+
+    message = json.dumps({"type": event_type, "payload": payload})
+    stale = []
+    sent = 0
+    for ws in _active_websockets:
+        try:
+            await ws.send_text(message)
+            sent += 1
+        except Exception:
+            stale.append(ws)
+    for ws in stale:
+        _active_websockets.discard(ws)
+    return sent
 
 
 async def broadcast_awareness():
