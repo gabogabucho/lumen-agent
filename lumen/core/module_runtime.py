@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
@@ -18,7 +19,57 @@ from typing import Any
 
 from lumen.core.connectors import ConnectorRegistry
 from lumen.core.memory import Memory
-from lumen.core.module_manifest import load_module_manifest
+from lumen.core.module_manifest import (
+    load_module_manifest,
+    parse_capabilities,
+    resolve_capability_paths,
+)
+
+
+class CapabilityPathInjector:
+    """Context manager that temporarily prepends capability parent dirs to ``sys.path``.
+
+    Capabilities are installed as individual files or packages under a shared
+    root (e.g. ``~/.lumen/capabilities/<name>/``).  To make them importable
+    by their name, the *parent* directory of each capability path is added to
+    ``sys.path``.
+
+    Restores ``sys.path`` in-place on exit to avoid side effects on
+    references held by other modules.  Also removes any capability
+    modules that were imported during the context from ``sys.modules``
+    to enforce isolation between modules.
+    """
+
+    def __init__(self, capability_paths: list[Path]) -> None:
+        self.capability_paths = [str(p.resolve()) for p in capability_paths]
+        self._original_path: list[str] = []
+        self._original_modules: set[str] = set()
+
+    def __enter__(self) -> CapabilityPathInjector:
+        self._original_path = sys.path[:]
+        self._original_modules = set(sys.modules.keys())
+        # Add the parent directory of each capability so the capability
+        # file/package can be imported by its basename.
+        parents = {str(Path(p).parent) for p in self.capability_paths}
+        for p_str in sorted(parents):
+            if p_str not in sys.path:
+                sys.path.insert(0, p_str)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        sys.path[:] = self._original_path
+        # Best-effort cleanup of capability modules from sys.modules
+        new_modules = set(sys.modules.keys()) - self._original_modules
+        for mod_name in list(new_modules):
+            mod = sys.modules.get(mod_name)
+            if mod is None:
+                continue
+            mod_file = getattr(mod, "__file__", None)
+            if mod_file and any(
+                str(mod_file).startswith(p) for p in self.capability_paths
+            ):
+                sys.modules.pop(mod_name, None)
+        return None
 
 
 @dataclass
@@ -93,7 +144,12 @@ class ModuleRuntimeContext:
         self.registered_tools.clear()
 
 
-def _load_runtime_module(module_dir: Path, name: str) -> ModuleType | None:
+def _load_runtime_module(
+    module_dir: Path,
+    name: str,
+    *,
+    capability_paths: list[Path] | None = None,
+) -> ModuleType | None:
     connector_path = module_dir / "connector.py"
     if not connector_path.exists():
         return None
@@ -105,7 +161,8 @@ def _load_runtime_module(module_dir: Path, name: str) -> ModuleType | None:
         return None
 
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with CapabilityPathInjector(capability_paths or []):
+        spec.loader.exec_module(module)
     return module
 
 
@@ -136,6 +193,18 @@ def _build_context(
     )
 
 
+def _resolve_module_capability_paths(
+    module_dir: Path,
+    *,
+    lumen_dir: Path | None = None,
+    pkg_dir: Path | None = None,
+) -> list[Path]:
+    """Resolve capability paths for a single module directory."""
+    _, manifest = load_module_manifest(module_dir)
+    cap_names = parse_capabilities(manifest)
+    return resolve_capability_paths(cap_names, lumen_dir=lumen_dir, pkg_dir=pkg_dir)
+
+
 def run_module_install_hook(
     *,
     name: str,
@@ -144,7 +213,10 @@ def run_module_install_hook(
     config: dict[str, Any] | None = None,
     lumen_dir: Path | None = None,
 ) -> None:
-    module = _load_runtime_module(module_dir, name)
+    caps = _resolve_module_capability_paths(
+        module_dir, lumen_dir=lumen_dir, pkg_dir=None
+    )
+    module = _load_runtime_module(module_dir, name, capability_paths=caps)
     if module is None or not hasattr(module, "install"):
         return
 
@@ -167,7 +239,10 @@ def run_module_uninstall_hook(
     config: dict[str, Any] | None = None,
     lumen_dir: Path | None = None,
 ) -> None:
-    module = _load_runtime_module(module_dir, name)
+    caps = _resolve_module_capability_paths(
+        module_dir, lumen_dir=lumen_dir, pkg_dir=None
+    )
+    module = _load_runtime_module(module_dir, name, capability_paths=caps)
     context = _build_context(
         name=name,
         module_dir=module_dir,
@@ -196,7 +271,10 @@ def run_module_configure_hook(
 
     Errors are logged but do NOT propagate — secrets are still saved.
     """
-    module = _load_runtime_module(module_dir, name)
+    caps = _resolve_module_capability_paths(
+        module_dir, lumen_dir=lumen_dir, pkg_dir=None
+    )
+    module = _load_runtime_module(module_dir, name, capability_paths=caps)
     if module is None or not hasattr(module, "configure"):
         return
 
@@ -270,6 +348,10 @@ class ModuleRuntimeManager:
         if loaded is None:
             return
 
+        # Remove this module's capability paths from runtime config
+        self.config.get("_capability_paths", {}).pop(name, None)
+        self.connectors.set_runtime_config(self.config)
+
         module = loaded.module
         try:
             if hasattr(module, "deactivate"):
@@ -284,7 +366,16 @@ class ModuleRuntimeManager:
             await self.unload(name)
 
     async def _activate(self, name: str, module_dir: Path) -> None:
-        module = _load_runtime_module(module_dir, name)
+        caps = _resolve_module_capability_paths(
+            module_dir, lumen_dir=self.lumen_dir, pkg_dir=self.pkg_dir
+        )
+        if caps:
+            self.config.setdefault("_capability_paths", {})[name] = [
+                str(p) for p in caps
+            ]
+            self.connectors.set_runtime_config(self.config)
+
+        module = _load_runtime_module(module_dir, name, capability_paths=caps)
         if module is None or not hasattr(module, "activate"):
             return
 

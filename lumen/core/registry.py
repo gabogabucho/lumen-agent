@@ -29,6 +29,7 @@ class CapabilityKind(str, Enum):
     MODULE = "module"
     CHANNEL = "channel"
     MCP = "mcp"
+    LIBRARY = "library"
 
 
 class CapabilityStatus(str, Enum):

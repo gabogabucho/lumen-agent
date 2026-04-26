@@ -220,7 +220,9 @@ def _truncate_output(data: bytes, max_bytes: int = _MAX_OUTPUT_BYTES) -> tuple[s
     return data.decode("utf-8", errors="replace"), truncated
 
 
-def _build_terminal_env(config: dict) -> dict[str, str] | None:
+def _build_terminal_env(
+    config: dict, capability_paths: list[str] | None = None
+) -> dict[str, str] | None:
     """Build explicit env injection for terminal subprocesses.
 
     Policy:
@@ -248,6 +250,24 @@ def _build_terminal_env(config: dict) -> dict[str, str] | None:
         modules = []
 
     merged: dict[str, str] = dict(os.environ)
+
+    # Prepend capability paths to PYTHONPATH
+    cap_paths: list[str] = list(capability_paths or [])
+    config_cap_paths = config.get("_capability_paths", {})
+    for paths in config_cap_paths.values():
+        if isinstance(paths, list):
+            for p in paths:
+                p_str = str(p)
+                if p_str and p_str not in cap_paths:
+                    cap_paths.append(p_str)
+
+    if cap_paths:
+        existing_pythonpath = merged.get("PYTHONPATH", "")
+        if existing_pythonpath:
+            merged["PYTHONPATH"] = os.pathsep.join(cap_paths + [existing_pythonpath])
+        else:
+            merged["PYTHONPATH"] = os.pathsep.join(cap_paths)
+
     secrets = config.get("secrets", {})
     if not isinstance(secrets, dict):
         return merged

@@ -21,14 +21,27 @@ class Catalog:
         if catalog_path is None:
             catalog_path = Path(__file__).parent.parent / "catalog" / "index.yaml"
         self._modules: list[dict] = []
+        self._capabilities: list[dict] = []
         if catalog_path.exists():
             with open(catalog_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
                 self._modules = data.get("modules", [])
+                self._capabilities = data.get("capabilities", [])
 
     @property
     def modules(self) -> list[dict]:
         return self._modules
+
+    def list_capabilities(self) -> list[dict]:
+        """Return all capability entries from the catalog."""
+        return list(self._capabilities)
+
+    def get_capability(self, name: str) -> dict | None:
+        """Get a capability by name from the catalog."""
+        for cap in self._capabilities:
+            if cap.get("name") == name:
+                return dict(cap)
+        return None
 
     def search(
         self, query: str, *, registry=None, connectors=None, model=None

@@ -169,21 +169,32 @@ class ConnectorRegistry:
                             }
                         )
                     else:
+                        base_schema = {
+                            "type": "object",
+                            "properties": {
+                                "input": {
+                                    "type": "string",
+                                    "description": f"Input for {connector.name}.{action}",
+                                }
+                            },
+                        }
+                        tools.append(
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "description": (f"{connector.description} — {action}"),
+                                    "parameters": base_schema,
+                                },
+                            }
+                        )
                         tools.append(
                             {
                                 "type": "function",
                                 "function": {
                                     "name": alias_name,
                                     "description": (f"{connector.description} — {action}"),
-                                    "parameters": {
-                                        "type": "object",
-                                        "properties": {
-                                            "input": {
-                                                "type": "string",
-                                                "description": f"Input for {connector.name}.{action}",
-                                            }
-                                        },
-                                    },
+                                    "parameters": base_schema,
                                 },
                             }
                         )

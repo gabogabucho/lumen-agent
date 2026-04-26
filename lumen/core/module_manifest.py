@@ -7,13 +7,123 @@ Preferred manifest order:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
 
+logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAMES = ("module.yaml", "manifest.yaml")
+
+_RESERVED_FILENAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+}
+
+
+def _validate_capability_name(name: str) -> bool:
+    """Validate that a capability name is safe to use as a directory name.
+
+    Rejects path separators, null bytes, reserved filenames, and empty strings.
+    """
+    if not name or not isinstance(name, str):
+        return False
+    if "\x00" in name:
+        return False
+    if any(sep in name for sep in ("/", "\\", "..")):
+        return False
+    if name.upper() in _RESERVED_FILENAMES:
+        return False
+    return True
+
+
+def parse_capabilities(manifest: dict[str, Any]) -> list[str]:
+    """Parse and validate the ``capabilities`` list from a manifest dict.
+
+    Returns a list of non-empty, trimmed capability name strings.
+    Logs warnings for invalid entries but does not raise.
+    """
+    raw = manifest.get("capabilities")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        logger.warning(
+            "capabilities must be a list, got %s", type(raw).__name__
+        )
+        return []
+
+    result: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            logger.warning("capabilities items must be non-empty strings")
+            continue
+        result.append(item.strip())
+    return result
+
+
+def resolve_capability_paths(
+    capability_names: list[str],
+    *,
+    lumen_dir: Path | None = None,
+    pkg_dir: Path | None = None,
+) -> list[Path]:
+    """Resolve capability names to absolute paths.
+
+    Looks in ``~/.lumen/capabilities/`` first, then in
+    ``pkg_dir/capabilities/``.  Logs warnings for missing or invalid
+    names but does not raise.
+    """
+    paths: list[Path] = []
+    seen: set[str] = set()
+
+    for name in capability_names:
+        if not _validate_capability_name(name):
+            logger.warning("Invalid capability name: %r", name)
+            continue
+
+        if name in seen:
+            continue
+        seen.add(name)
+
+        resolved: Path | None = None
+        if lumen_dir is not None:
+            global_path = (lumen_dir / "capabilities" / name).resolve()
+            if global_path.exists():
+                resolved = global_path
+
+        if resolved is None and pkg_dir is not None:
+            pkg_path = (pkg_dir / "capabilities" / name).resolve()
+            if pkg_path.exists():
+                resolved = pkg_path
+
+        if resolved is not None:
+            paths.append(resolved)
+        else:
+            logger.warning("Capability not found: %s", name)
+
+    return paths
 
 
 def resolve_module_manifest_path(module_dir: Path) -> Path | None:

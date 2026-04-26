@@ -465,78 +465,15 @@ class Brain:
             return "en"
         return None
 
-    async def think(self, message: str, session: Session) -> dict:
-        """Receive message -> assemble context -> LLM decides -> response."""
+    async def _prepare_think_context(self, message: str, session: Session):
+        """Prepare context, messages, and tools for the LLM call.
 
-        offer_result = await self._maybe_handle_pending_setup_offer(message, session)
-        if offer_result is not None:
-            return await self._finalize_turn(session, message, offer_result)
-
-        flow_result = await self._maybe_handle_runtime_flow(message, session)
-        if flow_result is not None:
-            return await self._finalize_turn(session, message, flow_result)
-
+        Returns (context, messages, tools) tuple.
+        """
         # 1. Recall relevant memories
         memories = await self.memory.recall(message, limit=5)
 
-        # 2. Check for flow triggers if no active flow
-        if not session.active_flow:
-            triggered = self._match_flow_trigger(message)
-            if triggered:
-                session.start_flow(triggered)
-                flow_result = await self._maybe_handle_runtime_flow(message, session)
-                if flow_result is not None:
-                    return await self._finalize_turn(session, message, flow_result)
-
-            # 2b. Natural-language setup: if the user mentions a module that
-            # has pending setup (by alias), start the flow directly. This
-            # prevents the LLM from trying to handle setup conversationally
-            # and failing to persist values.
-            setup_match = self._match_natural_setup(message)
-            if setup_match is not None:
-                session.start_flow(setup_match)
-                flow_result = await self._maybe_handle_runtime_flow(message, session)
-                if flow_result is not None:
-                    return await self._finalize_turn(session, message, flow_result)
-
-            # 2c. User explicitly requests setup ("configurémolo", "setup")
-            # and there's exactly one pending flow — start it without making
-            # the user name the module.
-            if self._message_requests_setup(message):
-                setup_flows = [
-                    f for f in self.flows if self._supports_runtime_flow(f)
-                ]
-                if len(setup_flows) == 1:
-                    session.start_flow(setup_flows[0])
-                    flow_result = await self._maybe_handle_runtime_flow(
-                        message, session
-                    )
-                    if flow_result is not None:
-                        return await self._finalize_turn(session, message, flow_result)
-                elif len(setup_flows) > 1:
-                    # Multiple flows — ask which one, don't guess
-                    artifacts = []
-                    for flow in setup_flows:
-                        aid = self._flow_artifact_id(flow)
-                        if aid:
-                            artifacts.append({
-                                "id": aid,
-                                "display_name": str(
-                                    flow.get("display_name") or aid
-                                ),
-                                "kind": str(flow.get("kind") or "native"),
-                            })
-                    return await self._finalize_turn(
-                        session,
-                        message,
-                        {
-                            "message": self._render_setup_offer_clarification(
-                                artifacts
-                            ),
-                        },
-                    )
-
-        # 3. Build context — Consciousness + Personality + Body + Catalog + State
+        # 2. Build context — Consciousness + Personality + Body + Catalog + State
         context = {
             "consciousness": self.consciousness.as_context(),
             "personality": self.personality.as_context(),
@@ -555,12 +492,10 @@ class Brain:
             "available_flows": self.flows,
         }
 
-        # 4. Build prompt
-        # 5. LLM decides everything — connectors as tools + introspection
+        # 3. Build tools
         tools = self.connectors.as_tools() or []
 
         # Add read_skill tool — progressive disclosure (from OpenClaw pattern)
-        # The Body lists skill names/descriptions. This tool loads the full content.
         tools.append(
             {
                 "type": "function",
@@ -714,8 +649,80 @@ class Brain:
 
         tools = tools if tools else None
 
+        return context, messages, tools
+
+    async def think(self, message: str, session: Session) -> dict:
+        """Receive message -> assemble context -> LLM decides -> response."""
+
+        offer_result = await self._maybe_handle_pending_setup_offer(message, session)
+        if offer_result is not None:
+            return await self._finalize_turn(session, message, offer_result)
+
+        flow_result = await self._maybe_handle_runtime_flow(message, session)
+        if flow_result is not None:
+            return await self._finalize_turn(session, message, flow_result)
+
+        # 2. Check for flow triggers if no active flow
+        if not session.active_flow:
+            triggered = self._match_flow_trigger(message)
+            if triggered:
+                session.start_flow(triggered)
+                flow_result = await self._maybe_handle_runtime_flow(message, session)
+                if flow_result is not None:
+                    return await self._finalize_turn(session, message, flow_result)
+
+            # 2b. Natural-language setup: if the user mentions a module that
+            # has pending setup (by alias), start the flow directly. This
+            # prevents the LLM from trying to handle setup conversationally
+            # and failing to persist values.
+            setup_match = self._match_natural_setup(message)
+            if setup_match is not None:
+                session.start_flow(setup_match)
+                flow_result = await self._maybe_handle_runtime_flow(message, session)
+                if flow_result is not None:
+                    return await self._finalize_turn(session, message, flow_result)
+
+            # 2c. User explicitly requests setup ("configurémolo", "setup")
+            # and there's exactly one pending flow — start it without making
+            # the user name the module.
+            if self._message_requests_setup(message):
+                setup_flows = [
+                    f for f in self.flows if self._supports_runtime_flow(f)
+                ]
+                if len(setup_flows) == 1:
+                    session.start_flow(setup_flows[0])
+                    flow_result = await self._maybe_handle_runtime_flow(
+                        message, session
+                    )
+                    if flow_result is not None:
+                        return await self._finalize_turn(session, message, flow_result)
+                elif len(setup_flows) > 1:
+                    # Multiple flows — ask which one, don't guess
+                    artifacts = []
+                    for flow in setup_flows:
+                        aid = self._flow_artifact_id(flow)
+                        if aid:
+                            artifacts.append({
+                                "id": aid,
+                                "display_name": str(
+                                    flow.get("display_name") or aid
+                                ),
+                                "kind": str(flow.get("kind") or "native"),
+                            })
+                    return await self._finalize_turn(
+                        session,
+                        message,
+                        {
+                            "message": self._render_setup_offer_clarification(
+                                artifacts
+                            ),
+                        },
+                    )
+
+        context, messages, tools = await self._prepare_think_context(message, session)
+
         try:
-            options = self._completion_options(purpose="main", tools=tools if tools else None)
+            options = self._completion_options(purpose="main", tools=tools)
             response = await acompletion(
                 model=options["model"],
                 messages=messages,
@@ -730,6 +737,186 @@ class Brain:
         result = await self._tool_use_loop(response, messages, tools)
 
         return await self._finalize_turn(session, message, result)
+
+    def _build_synthetic_response(self, content: str, buffered_tool_calls: list[dict]):
+        """Build a synthetic response object from streamed tool call fragments."""
+        from types import SimpleNamespace
+
+        tool_calls = []
+        for tc in buffered_tool_calls:
+            if tc["function"]["name"]:
+                func = SimpleNamespace(
+                    name=tc["function"]["name"],
+                    arguments=tc["function"]["arguments"],
+                )
+                tool_calls.append(
+                    SimpleNamespace(
+                        id=tc["id"] or f"stream-{uuid.uuid4()}",
+                        type="function",
+                        function=func,
+                    )
+                )
+
+        msg = SimpleNamespace(
+            content=content,
+            tool_calls=tool_calls if tool_calls else None,
+            model_dump=lambda: {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+                if tool_calls
+                else None,
+            },
+        )
+
+        choice = SimpleNamespace(message=msg)
+        return SimpleNamespace(choices=[choice])
+
+    async def think_stream(self, message: str, session: Session):
+        """Stream LLM response as an async generator."""
+
+        offer_result = await self._maybe_handle_pending_setup_offer(message, session)
+        if offer_result is not None:
+            result = await self._finalize_turn(session, message, offer_result)
+            yield {"type": "delta", "content": result.get("message", "")}
+            return
+
+        flow_result = await self._maybe_handle_runtime_flow(message, session)
+        if flow_result is not None:
+            result = await self._finalize_turn(session, message, flow_result)
+            yield {"type": "delta", "content": result.get("message", "")}
+            return
+
+        # Check for flow triggers if no active flow
+        if not session.active_flow:
+            triggered = self._match_flow_trigger(message)
+            if triggered:
+                session.start_flow(triggered)
+                flow_result = await self._maybe_handle_runtime_flow(message, session)
+                if flow_result is not None:
+                    result = await self._finalize_turn(session, message, flow_result)
+                    yield {"type": "delta", "content": result.get("message", "")}
+                    return
+
+            setup_match = self._match_natural_setup(message)
+            if setup_match is not None:
+                session.start_flow(setup_match)
+                flow_result = await self._maybe_handle_runtime_flow(message, session)
+                if flow_result is not None:
+                    result = await self._finalize_turn(session, message, flow_result)
+                    yield {"type": "delta", "content": result.get("message", "")}
+                    return
+
+            if self._message_requests_setup(message):
+                setup_flows = [
+                    f for f in self.flows if self._supports_runtime_flow(f)
+                ]
+                if len(setup_flows) == 1:
+                    session.start_flow(setup_flows[0])
+                    flow_result = await self._maybe_handle_runtime_flow(
+                        message, session
+                    )
+                    if flow_result is not None:
+                        result = await self._finalize_turn(session, message, flow_result)
+                        yield {"type": "delta", "content": result.get("message", "")}
+                        return
+                elif len(setup_flows) > 1:
+                    artifacts = []
+                    for flow in setup_flows:
+                        aid = self._flow_artifact_id(flow)
+                        if aid:
+                            artifacts.append({
+                                "id": aid,
+                                "display_name": str(
+                                    flow.get("display_name") or aid
+                                ),
+                                "kind": str(flow.get("kind") or "native"),
+                            })
+                    result = await self._finalize_turn(
+                        session,
+                        message,
+                        {
+                            "message": self._render_setup_offer_clarification(
+                                artifacts
+                            ),
+                        },
+                    )
+                    yield {"type": "delta", "content": result.get("message", "")}
+                    return
+
+        context, messages, tools = await self._prepare_think_context(message, session)
+
+        try:
+            options = self._completion_options(purpose="main", tools=tools, stream=True)
+            response = await acompletion(
+                model=options["model"],
+                messages=messages,
+                tools=options.get("tools"),
+                temperature=options["temperature"],
+                max_tokens=options["max_tokens"],
+                stream=True,
+            )
+        except Exception as e:
+            yield {"type": "error", "content": f"I had trouble thinking: {e}"}
+            return
+
+        # Stream processing
+        full_content = ""
+        buffered_tool_calls = []
+        has_tool_calls = False
+
+        async for chunk in response:
+            choice = chunk.choices[0]
+            delta = choice.delta
+            finish_reason = choice.finish_reason
+
+            if delta.content:
+                full_content += delta.content
+                yield {"type": "delta", "content": delta.content}
+
+            if delta.tool_calls:
+                has_tool_calls = True
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    while len(buffered_tool_calls) <= idx:
+                        buffered_tool_calls.append(
+                            {"id": "", "function": {"name": "", "arguments": ""}}
+                        )
+                    if getattr(tc, "id", None):
+                        buffered_tool_calls[idx]["id"] = tc.id
+                    func = getattr(tc, "function", None)
+                    if func:
+                        if getattr(func, "name", None):
+                            buffered_tool_calls[idx]["function"]["name"] = func.name
+                        if getattr(func, "arguments", None):
+                            buffered_tool_calls[idx]["function"]["arguments"] += func.arguments
+
+            if finish_reason == "tool_calls":
+                has_tool_calls = True
+
+        if has_tool_calls and buffered_tool_calls:
+            # Build synthetic response and run tool use loop
+            synthetic_response = self._build_synthetic_response(
+                full_content, buffered_tool_calls
+            )
+            result = await self._tool_use_loop(synthetic_response, messages, tools)
+            if result.get("message"):
+                yield {"type": "delta", "content": result["message"]}
+        else:
+            result = {"message": full_content, "tool_calls": []}
+
+        # Finalize turn
+        await self._finalize_turn(session, message, result)
 
     async def think_proactive(self) -> str | None:
         """Generate a proactive announcement when capabilities changed.
@@ -1758,31 +1945,35 @@ class Brain:
             )
         return profile
 
-    def _completion_options(self, *, purpose: str, tools: list[dict] | None = None) -> dict[str, Any]:
+    def _completion_options(self, *, purpose: str, tools: list[dict] | None = None, stream: bool = False) -> dict[str, Any]:
         profile = self._model_profile()
         if purpose == "proactive":
-            return {
+            result = {
                 "model": self._resolved_model(),
                 "messages": None,
                 "max_tokens": profile["proactive_max_tokens"],
                 "temperature": profile["proactive_temperature"],
             }
-        if purpose == "contradiction":
+        elif purpose == "contradiction":
             # Retry with full tool access so the LLM can act on corrected info
-            return {
+            result = {
                 "model": self._resolved_model(),
                 "messages": None,
                 "tools": tools,
                 "max_tokens": profile["completion_max_tokens"] + 256,
                 "temperature": profile["completion_temperature"],
             }
-        return {
-            "model": self._resolved_model(),
-            "messages": None,
-            "tools": tools,
-            "max_tokens": profile["completion_max_tokens"],
-            "temperature": profile["completion_temperature"],
-        }
+        else:
+            result = {
+                "model": self._resolved_model(),
+                "messages": None,
+                "tools": tools,
+                "max_tokens": profile["completion_max_tokens"],
+                "temperature": profile["completion_temperature"],
+            }
+        if stream:
+            result["stream"] = True
+        return result
 
     def _extract_fallback_tool_calls(self, msg_content: str, tools: list[dict] | None) -> list:
         """Parse non-standard tool call formats from plain content.
@@ -2034,9 +2225,15 @@ class Brain:
         """Prefer usable native tool calls, with guarded fallback parsing."""
         native_tool_calls = getattr(msg, "tool_calls", None)
         native_count = len(native_tool_calls or [])
-        native_usable = self._has_usable_tool_calls(native_tool_calls, tools)
         content = getattr(msg, "content", "") or ""
         serialized_detected = self._has_serialized_tool_call_shape(content)
+
+        # Only enforce allowed-names when serialized fallback is available;
+        # otherwise let unknown native names fail at execution so errors are captured.
+        native_usable = self._has_usable_tool_calls(
+            native_tool_calls,
+            tools if serialized_detected else None,
+        )
 
         if not serialized_detected:
             if native_count:

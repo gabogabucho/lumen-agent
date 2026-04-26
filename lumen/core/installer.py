@@ -8,12 +8,17 @@ Uninstall → gone from consciousness, as if it never existed.
 from __future__ import annotations
 
 import io
+import logging
+import os
+import stat
 import subprocess
 import shutil
 import zipfile
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from lumen.core.marketplace import humanize_module_name
 
@@ -23,8 +28,10 @@ from lumen.core.memory import Memory
 from lumen.core.module_manifest import (
     find_module_manifest_in_zip,
     load_module_manifest,
+    parse_capabilities,
     resolve_module_manifest_path,
     zip_manifest_root_prefix,
+    _validate_capability_name,
 )
 from lumen.core.module_runtime import (
     run_module_install_hook,
@@ -35,6 +42,27 @@ from lumen.core.module_setup import pending_setup_for_manifest
 
 # Where installed modules live
 INSTALLED_DIR = Path(__file__).parent.parent / "modules"
+
+
+def _set_readonly(path: Path) -> None:
+    """Recursively set *path* and all its contents to read-only."""
+    for item in path.rglob("*"):
+        mode = item.stat().st_mode
+        new_mode = mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+        item.chmod(new_mode)
+    mode = path.stat().st_mode
+    new_mode = mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+    path.chmod(new_mode)
+
+
+def _rmtree_readonly(path: Path) -> None:
+    """Remove a directory tree that may contain read-only files (Windows-safe)."""
+
+    def _onerror(func, path_str, exc_info):
+        os.chmod(path_str, stat.S_IWUSR)
+        func(path_str)
+
+    shutil.rmtree(path, onerror=_onerror)
 
 
 class Installer:
@@ -86,6 +114,78 @@ class Installer:
             return direct
         legacy = self.pkg_dir / "modules" / name
         return legacy
+
+    def _install_capabilities(
+        self, module_dir: Path, manifest: dict
+    ) -> list[str]:
+        """Copy bundled capabilities to the global capabilities directory.
+
+        Returns the list of capability names that are available after
+        installation (either already present or successfully copied).
+        Missing capabilities log a warning but do not fail installation.
+
+        Installed capabilities are set read-only for security hardening.
+        On reinstall the existing directory is removed and recopied so
+        updates are applied, then read-only is re-applied.
+        """
+        capabilities = parse_capabilities(manifest)
+        if not capabilities:
+            return []
+
+        installed: list[str] = []
+        capabilities_dir = self.lumen_dir / "capabilities"
+        capabilities_dir.mkdir(parents=True, exist_ok=True)
+
+        for name in capabilities:
+            if not _validate_capability_name(name):
+                logger.warning(
+                    "Invalid capability name %r in module %s",
+                    name,
+                    manifest.get("name"),
+                )
+                continue
+
+            global_cap_dir = capabilities_dir / name
+
+            bundled_cap_dir = module_dir / "capabilities" / name
+            if bundled_cap_dir.exists():
+                if global_cap_dir.exists():
+                    _rmtree_readonly(global_cap_dir)
+                shutil.copytree(bundled_cap_dir, global_cap_dir)
+                _set_readonly(global_cap_dir)
+                installed.append(name)
+                logger.debug(
+                    "Installed capability %s from %s", name, bundled_cap_dir
+                )
+                continue
+
+            # Try catalog fallback
+            catalog_cap = self.catalog.get_capability(name)
+            if catalog_cap and catalog_cap.get("path"):
+                catalog_path = Path(catalog_cap["path"])
+                if catalog_path.exists():
+                    if global_cap_dir.exists():
+                        _rmtree_readonly(global_cap_dir)
+                    shutil.copytree(catalog_path, global_cap_dir)
+                    _set_readonly(global_cap_dir)
+                    installed.append(name)
+                    logger.debug(
+                        "Installed capability %s from catalog", name
+                    )
+                    continue
+
+            # If already present from a previous install, count it
+            if global_cap_dir.exists():
+                installed.append(name)
+                continue
+
+            logger.warning(
+                "Capability %s declared by module %s but not found",
+                name,
+                manifest.get("name"),
+            )
+
+        return installed
 
     def list_installed(self) -> list[dict]:
         """List all installed modules."""
@@ -172,6 +272,9 @@ class Installer:
 
             skill_content = self._generate_skill_md(module_info)
             (module_dir / "SKILL.md").write_text(skill_content, encoding="utf-8")
+
+        _, manifest = load_module_manifest(module_dir)
+        self._install_capabilities(module_dir, manifest or {})
 
         run_module_install_hook(
             name=name,
@@ -282,6 +385,9 @@ class Installer:
         # Persist any config changes made by requirements/personality handling
         self._persist_config()
 
+        _, manifest = load_module_manifest(module_dir)
+        self._install_capabilities(module_dir, manifest or {})
+
         # Run install hook
         run_module_install_hook(
             name=name,
@@ -368,6 +474,8 @@ class Installer:
                     else:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         target.write_bytes(zf.read(zip_entry))
+
+                self._install_capabilities(module_dir, manifest or {})
 
                 run_module_install_hook(
                     name=module_name,
@@ -529,6 +637,8 @@ class Installer:
             }
 
         module_name = manifest.get("name", module_dir.name)
+        self._install_capabilities(module_dir, manifest or {})
+
         run_module_install_hook(
             name=module_name,
             module_dir=module_dir,
@@ -772,6 +882,9 @@ class Installer:
             )
 
         zip_file.close()
+
+        _, manifest = load_module_manifest(module_dir)
+        self._install_capabilities(module_dir, manifest or {})
 
         # Run install hook
         run_module_install_hook(

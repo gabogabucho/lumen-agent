@@ -23,7 +23,7 @@ from urllib.request import Request as UrlRequest, urlopen
 
 import yaml
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -1787,8 +1787,8 @@ def _validate_bearer_token(request: Request) -> str | None:
 async def api_chat(request: Request):
     """HTTP REST chat endpoint for external applications.
 
-    Body: {"message": "...", "session_id?": "..."}
-    Response: {"response": "...", "session_id": "..."}
+    Body: {"message": "...", "session_id?": "...", "stream?": false}
+    Response: {"response": "...", "session_id": "..."} or SSE stream
     Auth: Bearer token via LUMEN_API_KEY env or config.api.rest_key
     """
     auth_error = _validate_bearer_token(request)
@@ -1817,17 +1817,42 @@ async def api_chat(request: Request):
     session_id = body.get("session_id")
     session = session_manager.get_or_create(session_id)
 
-    try:
-        result = await _brain.think(message, session)
-    except Exception as e:
-        return JSONResponse(
-            status_code=500, content={"error": str(e)}
-        )
+    # Parse stream flag — only literal True enables streaming
+    stream = body.get("stream") is True
 
-    return {
-        "response": result.get("message", ""),
-        "session_id": session.session_id,
-    }
+    if not stream:
+        try:
+            result = await _brain.think(message, session)
+        except Exception as e:
+            return JSONResponse(
+                status_code=500, content={"error": str(e)}
+            )
+
+        return {
+            "response": result.get("message", ""),
+            "session_id": session.session_id,
+        }
+
+    # Streaming mode
+    async def sse_generator():
+        yield f"event: session\ndata: {json.dumps({'session_id': session.session_id})}\n\n"
+
+        try:
+            async for chunk in _brain.think_stream(message, session):
+                if chunk.get("type") == "delta":
+                    text = chunk.get("content", "")
+                    yield f"event: delta\ndata: {json.dumps({'text': text})}\n\n"
+                elif chunk.get("type") == "error":
+                    error_msg = chunk.get("content", "unknown error")
+                    yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+                    return
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+            return
+
+        yield f"event: done\ndata: [DONE]\n\n"
+
+    return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 
 @app.websocket("/ws/{session_id}")

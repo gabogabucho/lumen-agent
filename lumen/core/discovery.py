@@ -81,6 +81,12 @@ def discover_all(
     _discover_channels(registry, active_channels or ["web"])
     _discover_module_channels_multi(registry, module_roots)
 
+    # Discover shared capabilities
+    capability_roots: list[Path] = []
+    if lumen_dir is not None:
+        capability_roots.append(lumen_dir / "capabilities")
+    _discover_capabilities(registry, capability_roots)
+
     if mcp_config:
         _discover_mcps(registry, mcp_config, pkg_dir=pkg_dir)
 
@@ -536,6 +542,30 @@ def _discover_module_channels_multi(registry: Registry, module_roots: list[Path]
                 continue
             seen.add(module_dir.name)
         _discover_module_channels(registry, modules_dir)
+
+
+def _discover_capabilities(registry: Registry, capability_roots: list[Path]) -> None:
+    """Scan capability directories and register them as LIBRARY capabilities."""
+    seen: set[str] = set()
+    for root in capability_roots:
+        if not root.exists():
+            continue
+        for cap_dir in root.iterdir():
+            if not cap_dir.is_dir() or cap_dir.name.startswith("_"):
+                continue
+            name = cap_dir.name
+            if name in seen:
+                continue
+            seen.add(name)
+            registry.register(
+                Capability(
+                    kind=CapabilityKind.LIBRARY,
+                    name=name,
+                    description=f"Shared capability library: {name}",
+                    status=CapabilityStatus.READY,
+                    metadata={"path": str(cap_dir.resolve())},
+                )
+            )
 
 
 def _discover_mcps(registry: Registry, mcp_config: dict, *, pkg_dir: Path | None = None):
