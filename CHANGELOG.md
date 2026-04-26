@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-26
+
+### Added
+- **Native Module Handlers + WebSocket Event Emission**: Modules can now emit real-time events to the web frontend via WebSocket from within their `activate()` lifecycle hook. `ModuleRuntimeContext.broadcast_event(event_type, payload)` delegates to the web channel, which broadcasts JSON to all connected WebSocket clients. Stale sockets are cleaned up automatically. Purely additive — no breaking changes.
+- **9 new tests** for broadcast callback delegation, stale WebSocket removal, multi-module independence, and wiring.
+
+### Tests
+- **550 tests passing** (was 541)
+
 ## [0.6.0] - 2026-04-26
 
 ### Added
