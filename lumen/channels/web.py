@@ -1748,6 +1748,48 @@ async def page_security(request: Request):
     )
 
 
+@app.get("/settings/channels")
+async def page_channels(request: Request):
+    """Channel gateway status page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "channels.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
+        },
+    )
+
+
+@app.get("/settings/outputs")
+async def page_outputs(request: Request):
+    """Structured output types page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "outputs.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
+        },
+    )
+
+
 @app.get("/agent-status")
 async def page_agent_status(request: Request):
     """Agent diagnostic status page."""
@@ -2726,6 +2768,83 @@ async def api_security_update(request: Request):
     await _refresh_runtime_from_config(loaded)
 
     return {"status": "ok", "updates": updates}
+
+
+# ─── Channel Gateway & Output API ───
+
+
+@app.get("/api/channels")
+async def api_channels_status(request: Request):
+    """Return status of all registered channels."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    # Collect channel info from multiple sources
+    channels = []
+
+    # Web channel (always present)
+    channels.append({
+        "name": "web",
+        "status": "connected",
+        "type": "internal",
+        "message_count": len(_active_websockets),
+    })
+
+    # Module-based channels from config
+    modules = loaded.get("modules", {})
+    if isinstance(modules, dict):
+        for mod_name, mod_cfg in modules.items():
+            if isinstance(mod_cfg, dict) and mod_cfg.get("type") == "channel":
+                channels.append({
+                    "name": mod_name,
+                    "status": "available",
+                    "type": "module",
+                    "display_name": mod_cfg.get("display_name", mod_name),
+                })
+
+    # Live inbox status if available
+    if _brain and hasattr(_brain, "inbox") and _brain.inbox:
+        if hasattr(_brain.inbox, "get_channel_status"):
+            inbox_status = _brain.inbox.get_channel_status()
+            inbox_map = {s["name"]: s for s in inbox_status}
+            for ch in channels:
+                if ch["name"] in inbox_map:
+                    live = inbox_map[ch["name"]]
+                    ch["status"] = live["status"]
+                    ch["message_count"] = live["message_count"]
+                    ch["last_activity"] = live["last_activity"]
+                    ch["error"] = live["error"]
+
+    return {"channels": channels, "count": len(channels)}
+
+
+@app.get("/api/outputs")
+async def api_outputs_list(request: Request, limit: int = 50):
+    """List structured outputs (placeholder — full implementation requires output store).
+
+    For now, returns empty list. The full output store will be implemented
+    when connectors return StructuredOutput objects that are persisted.
+    """
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    from lumen.core.output_types import OutputType
+
+    # TODO: When brain/tools return StructuredOutput, persist them
+    # and serve them from memory.db. For now, return available types.
+    return {
+        "outputs": [],
+        "count": 0,
+        "available_types": [t.value for t in OutputType],
+    }
 
 
 # ─── Agent Status API ───

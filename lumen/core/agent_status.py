@@ -23,6 +23,7 @@ class ChannelStatus:
     message_count: int = 0
     last_activity: str | None = None
     error: str | None = None
+    is_internal: bool = False  # True for web channel (bypasses inbox)
 
 
 @dataclass

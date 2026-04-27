@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="{{ language | default('es') }}" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumen — Outputs</title>
+  <link rel="icon" href="/static/logo.png" type="image/png">
+  {% include "_partials/tokens.html" %}
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      display: flex; overflow: hidden;
+      font-family: var(--lumen-font); color: var(--lumen-ink);
+      background: var(--lumen-paper); font-size: 14px;
+    }
+
+    /* === Sidebar === */
+    aside.sidebar {
+      width: 260px; flex-shrink: 0;
+      background: var(--lumen-paper-2); border-right: 1px solid var(--lumen-line);
+      box-shadow: 10px 0 30px rgba(15,21,69,0.06);
+      display: flex; flex-direction: column; transition: width 0.25s ease;
+      position: relative; z-index: 2;
+    }
+    aside.sidebar.collapsed { width: 64px; }
+    aside.sidebar.collapsed .sidebar-text { display: none; }
+    .sidebar-head {
+      padding: var(--lumen-s-4); display: flex; align-items: center;
+      justify-content: space-between; gap: var(--lumen-s-3);
+      border-bottom: 1px solid var(--lumen-line);
+    }
+    .brand { display: flex; align-items: center; gap: var(--lumen-s-3); overflow: hidden; }
+    .brand img { width: 36px; height: 36px; border-radius: var(--lumen-r-sm); flex-shrink: 0; }
+    .brand-text h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--lumen-ink); }
+    .brand-text p { font-size: 11px; color: var(--lumen-mute); margin-top: 2px; }
+    .icon-btn {
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      padding: 6px; border-radius: var(--lumen-r-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .icon-btn:hover { background: var(--lumen-lavender); color: var(--lumen-ink); }
+    .icon-btn svg { width: 18px; height: 18px; }
+    nav.sidebar-nav {
+      flex: 1; padding: var(--lumen-s-3); display: flex;
+      flex-direction: column; gap: 4px; overflow-y: auto;
+    }
+    .nav-btn {
+      display: flex; align-items: center; gap: var(--lumen-s-3);
+      padding: 10px 12px; border-radius: var(--lumen-r-sm);
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      font: inherit; font-weight: 500; cursor: pointer; width: 100%;
+      text-align: left; text-decoration: none;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .nav-btn:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .nav-btn.active { background: var(--lumen-lavender); color: var(--lumen-blue); }
+    .nav-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .sidebar-foot {
+      padding: var(--lumen-s-3); border-top: 1px solid var(--lumen-line);
+      display: flex; flex-direction: column; gap: var(--lumen-s-2);
+    }
+    .status-pill {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      padding: 6px 10px; font-size: 12px; color: var(--lumen-mute);
+    }
+    .status-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--lumen-success);
+      box-shadow: 0 0 8px rgba(47,158,110,0.4);
+    }
+
+    /* === Main === */
+    main.main {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+      background: var(--lumen-paper);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+    }
+    .topbar {
+      padding: var(--lumen-s-4) var(--lumen-s-5);
+      border-bottom: 1px solid var(--lumen-line);
+      display: flex; align-items: center; justify-content: flex-start;
+      gap: var(--lumen-s-4); background: var(--lumen-paper);
+      box-shadow: 0 8px 24px rgba(15,21,69,0.04);
+    }
+    .topbar h2 { font-size: 18px; font-weight: 600; color: var(--lumen-ink); }
+    .topbar .sub { font-size: 12px; color: var(--lumen-mute); margin-top: 2px; }
+    .panel { flex: 1; overflow-y: auto; padding: var(--lumen-s-5) var(--lumen-s-6); }
+
+    /* === Cards === */
+    .l-card {
+      background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
+      box-shadow: var(--lumen-shadow-sm);
+    }
+    .l-card h3 {
+      font-size: 12px; font-weight: 600; color: var(--lumen-mute);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--lumen-s-3);
+    }
+    .l-card-grid { display: grid; gap: var(--lumen-s-4); }
+    .l-card-grid.cols-3 { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+
+    /* === Output type cards === */
+    .output-type-card {
+      background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-4);
+      box-shadow: var(--lumen-shadow-sm);
+      display: flex; flex-direction: column; gap: var(--lumen-s-2);
+      transition: border-color 0.15s ease;
+    }
+    .output-type-card:hover { border-color: var(--lumen-blue); }
+    .output-type-card .type-icon {
+      width: 40px; height: 40px; border-radius: var(--lumen-r-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; flex-shrink: 0;
+    }
+    .output-type-card h4 {
+      font-size: 14px; font-weight: 600; color: var(--lumen-ink);
+    }
+    .output-type-card p {
+      font-size: 12px; color: var(--lumen-ink-soft); line-height: 1.5;
+    }
+    .output-type-card .type-tag {
+      display: inline-block; padding: 2px 8px;
+      border-radius: var(--lumen-r-pill); font-size: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: var(--lumen-paper-2); color: var(--lumen-mute);
+      border: 1px solid var(--lumen-line);
+    }
+
+    /* === Type icon colors === */
+    .type-icon.text { background: rgba(91,125,255,0.10); color: var(--lumen-blue); }
+    .type-icon.document { background: rgba(47,158,110,0.10); color: var(--lumen-success); }
+    .type-icon.notification { background: rgba(217,146,37,0.10); color: var(--lumen-warn); }
+    .type-icon.web { background: rgba(108,52,148,0.10); color: #8b5cf6; }
+    .type-icon.image { background: rgba(255,138,122,0.12); color: var(--lumen-coral); }
+    .type-icon.plot { background: rgba(217,76,76,0.10); color: var(--lumen-danger); }
+
+    .empty-block {
+      background: var(--lumen-paper-2); border: 1px dashed var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
+      color: var(--lumen-mute); font-size: 13px; text-align: center;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 720px) {
+      aside.sidebar { width: 64px; }
+      aside.sidebar .sidebar-text { display: none; }
+      .panel { padding: var(--lumen-s-4); }
+      .l-card-grid.cols-3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <img src="/static/logo.png" alt="Lumen" />
+        <div class="brand-text sidebar-text">
+          <h1>Lumen</h1>
+          <p>Ajustes</p>
+        </div>
+      </div>
+      <button class="icon-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+        <span class="sidebar-text">Charlas</span>
+      </a>
+      <a href="/dashboard?panel=config" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="sidebar-text">Ajustes</span>
+      </a>
+      <a href="/settings/models" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <span class="sidebar-text">Modelos</span>
+      </a>
+      <a href="/settings/providers" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+        </svg>
+        <span class="sidebar-text">Providers</span>
+      </a>
+      <a href="/settings/tools" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="sidebar-text">Tools</span>
+      </a>
+      <a href="/settings/security" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        </svg>
+        <span class="sidebar-text">Seguridad</span>
+      </a>
+      <a href="/settings/channels" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0"/>
+        </svg>
+        <span class="sidebar-text">Canales</span>
+      </a>
+      <a href="/settings/outputs" class="nav-btn active">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <span class="sidebar-text">Outputs</span>
+      </a>
+      <a href="/agent-status" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+        <span class="sidebar-text">Estado</span>
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="status-pill">
+        <span class="dot"></span>
+        <span class="sidebar-text">Lumen esta activa</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h2>Ajustes &rsaquo; Outputs</h2>
+        <p class="sub">Tipos de salida estructurados disponibles</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <!-- Available output types -->
+      <div class="l-card" style="margin-bottom: var(--lumen-s-5);">
+        <h3>Tipos de output disponibles</h3>
+        <p style="color:var(--lumen-ink-soft);margin-bottom:var(--lumen-s-4);line-height:1.55;">
+          Lumen puede devolver diferentes tipos de salida estructurada segun la herramienta o accion que genero el resultado.
+          Cuando los conectores devuelvan objetos <code>StructuredOutput</code>, se mostraran aca.
+        </p>
+        <div class="l-card-grid cols-3" id="output-types-grid">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Outputs list (empty state) -->
+      <div class="l-card">
+        <h3>Outputs generados</h3>
+        <div id="outputs-list">
+          <div class="empty-block">
+            No hay outputs estructurados todavia.<br>
+            Los outputs aparecern aca cuando las herramientas devuelvan resultados tipados.
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // === Output type metadata ===
+    const OUTPUT_TYPES = {
+      text: {
+        icon: 'T',
+        label: 'Text',
+        description: 'Respuesta de texto plano. El formato por defecto para conversaciones.',
+      },
+      document: {
+        icon: 'D',
+        label: 'Document',
+        description: 'Documento estructurado en Markdown o HTML. Ideal para reportes y documentacion.',
+      },
+      notification: {
+        icon: 'N',
+        label: 'Notification',
+        description: 'Notificacion con nivel (info, warning, error). Para alertas del sistema.',
+      },
+      web: {
+        icon: 'W',
+        label: 'Web',
+        description: 'Contenido HTML renderizable. Para dashboards embebidos y vistas interactivas.',
+      },
+      image: {
+        icon: 'I',
+        label: 'Image',
+        description: 'Imagen generada o recuperada. Soporta URL o base64.',
+      },
+      plot: {
+        icon: 'P',
+        label: 'Plot',
+        description: 'Grafico o chart en formato JSON (matplotlib/plotly). Para visualizaciones de datos.',
+      },
+    };
+
+    // === Render available types ===
+    function renderAvailableTypes(types) {
+      const grid = document.getElementById('output-types-grid');
+      grid.innerHTML = (types || Object.keys(OUTPUT_TYPES)).map(type => {
+        const info = OUTPUT_TYPES[type] || { icon: '?', label: type, description: '' };
+        return `<div class="output-type-card">
+          <div class="type-icon ${type}">${info.icon}</div>
+          <div>
+            <h4>${info.label}</h4>
+            <p>${info.description}</p>
+          </div>
+          <span class="type-tag">${type}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // === Load from API ===
+    async function loadOutputs() {
+      try {
+        const res = await fetch('/api/outputs');
+        if (!res.ok) throw new Error('Error al cargar outputs');
+        const data = await res.json();
+
+        // Render available types from API
+        renderAvailableTypes(data.available_types);
+
+        // Render outputs list
+        const list = document.getElementById('outputs-list');
+        if (data.outputs && data.outputs.length > 0) {
+          list.innerHTML = data.outputs.map(o => {
+            const typeInfo = OUTPUT_TYPES[o.type] || {};
+            return `<div class="output-type-card" style="margin-bottom:var(--lumen-s-3);">
+              <div class="type-icon ${o.type}">${typeInfo.icon || '?'}</div>
+              <div>
+                <h4>${typeInfo.label || o.type}</h4>
+                <p>${o.content || ''}</p>
+              </div>
+              <span class="type-tag">${o.output_id}</span>
+            </div>`;
+          }).join('');
+        } else {
+          list.innerHTML = `<div class="empty-block">
+            No hay outputs estructurados todavia.<br>
+            Los outputs aparecern aca cuando las herramientas devuelvan resultados tipados.
+          </div>`;
+        }
+      } catch (e) {
+        document.getElementById('output-types-grid').innerHTML =
+          `<div class="empty-block">Error: ${e.message}</div>`;
+      }
+    }
+
+    loadOutputs();
+
+    // === Sidebar ===
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('collapsed');
+    }
+
+    // === Theme ===
+    const THEME_KEY = 'lumen-theme';
+    document.documentElement.setAttribute('data-theme', localStorage.getItem(THEME_KEY) || 'light');
+  </script>
+</body>
+</html>

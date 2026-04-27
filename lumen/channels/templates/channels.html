@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="{{ language | default('es') }}" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumen — Canales</title>
+  <link rel="icon" href="/static/logo.png" type="image/png">
+  {% include "_partials/tokens.html" %}
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      display: flex; overflow: hidden;
+      font-family: var(--lumen-font); color: var(--lumen-ink);
+      background: var(--lumen-paper); font-size: 14px;
+    }
+
+    /* === Sidebar === */
+    aside.sidebar {
+      width: 260px; flex-shrink: 0;
+      background: var(--lumen-paper-2); border-right: 1px solid var(--lumen-line);
+      box-shadow: 10px 0 30px rgba(15,21,69,0.06);
+      display: flex; flex-direction: column; transition: width 0.25s ease;
+      position: relative; z-index: 2;
+    }
+    aside.sidebar.collapsed { width: 64px; }
+    aside.sidebar.collapsed .sidebar-text { display: none; }
+    .sidebar-head {
+      padding: var(--lumen-s-4); display: flex; align-items: center;
+      justify-content: space-between; gap: var(--lumen-s-3);
+      border-bottom: 1px solid var(--lumen-line);
+    }
+    .brand { display: flex; align-items: center; gap: var(--lumen-s-3); overflow: hidden; }
+    .brand img { width: 36px; height: 36px; border-radius: var(--lumen-r-sm); flex-shrink: 0; }
+    .brand-text h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--lumen-ink); }
+    .brand-text p { font-size: 11px; color: var(--lumen-mute); margin-top: 2px; }
+    .icon-btn {
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      padding: 6px; border-radius: var(--lumen-r-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .icon-btn:hover { background: var(--lumen-lavender); color: var(--lumen-ink); }
+    .icon-btn svg { width: 18px; height: 18px; }
+    nav.sidebar-nav {
+      flex: 1; padding: var(--lumen-s-3); display: flex;
+      flex-direction: column; gap: 4px; overflow-y: auto;
+    }
+    .nav-btn {
+      display: flex; align-items: center; gap: var(--lumen-s-3);
+      padding: 10px 12px; border-radius: var(--lumen-r-sm);
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      font: inherit; font-weight: 500; cursor: pointer; width: 100%;
+      text-align: left; text-decoration: none;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .nav-btn:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .nav-btn.active { background: var(--lumen-lavender); color: var(--lumen-blue); }
+    .nav-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .sidebar-foot {
+      padding: var(--lumen-s-3); border-top: 1px solid var(--lumen-line);
+      display: flex; flex-direction: column; gap: var(--lumen-s-2);
+    }
+    .status-pill {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      padding: 6px 10px; font-size: 12px; color: var(--lumen-mute);
+    }
+    .status-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--lumen-success);
+      box-shadow: 0 0 8px rgba(47,158,110,0.4);
+    }
+
+    /* === Main === */
+    main.main {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+      background: var(--lumen-paper);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+    }
+    .topbar {
+      padding: var(--lumen-s-4) var(--lumen-s-5);
+      border-bottom: 1px solid var(--lumen-line);
+      display: flex; align-items: center; justify-content: flex-start;
+      gap: var(--lumen-s-4); background: var(--lumen-paper);
+      box-shadow: 0 8px 24px rgba(15,21,69,0.04);
+    }
+    .topbar h2 { font-size: 18px; font-weight: 600; color: var(--lumen-ink); }
+    .topbar .sub { font-size: 12px; color: var(--lumen-mute); margin-top: 2px; }
+    .panel { flex: 1; overflow-y: auto; padding: var(--lumen-s-5) var(--lumen-s-6); }
+
+    /* === Cards === */
+    .l-card {
+      background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
+      box-shadow: var(--lumen-shadow-sm);
+    }
+    .l-card h3 {
+      font-size: 12px; font-weight: 600; color: var(--lumen-mute);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--lumen-s-3);
+    }
+
+    /* === Channel table === */
+    .channel-table {
+      width: 100%; border-collapse: separate; border-spacing: 0;
+      font-size: 13px;
+    }
+    .channel-table thead th {
+      text-align: left; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--lumen-mute); padding: var(--lumen-s-2) var(--lumen-s-3);
+      border-bottom: 1px solid var(--lumen-line);
+    }
+    .channel-table tbody td {
+      padding: var(--lumen-s-3); border-bottom: 1px solid var(--lumen-line);
+      color: var(--lumen-ink-soft); vertical-align: middle;
+    }
+    .channel-table tbody tr:last-child td { border-bottom: none; }
+    .channel-table tbody tr:hover { background: var(--lumen-paper-2); }
+
+    /* === Status badges === */
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 10px; border-radius: var(--lumen-r-pill);
+      font-size: 12px; font-weight: 500; border: 1px solid transparent;
+    }
+    .status-badge.connected { background: rgba(47,158,110,0.10); color: var(--lumen-success); border-color: rgba(47,158,110,0.20); }
+    .status-badge.available { background: rgba(217,146,37,0.10); color: var(--lumen-warn); border-color: rgba(217,146,37,0.20); }
+    .status-badge.disconnected { background: rgba(88,92,108,0.10); color: var(--lumen-mute); border-color: rgba(88,92,108,0.20); }
+    .status-badge.error { background: rgba(217,76,76,0.10); color: var(--lumen-danger); border-color: rgba(217,76,76,0.20); }
+
+    /* === Type badges === */
+    .type-badge {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px; border-radius: var(--lumen-r-pill);
+      font-size: 12px; font-weight: 500; border: 1px solid transparent;
+    }
+    .type-badge.internal { background: rgba(91,125,255,0.10); color: var(--lumen-blue); border-color: rgba(91,125,255,0.18); }
+    .type-badge.module { background: rgba(108,52,148,0.10); color: #8b5cf6; border-color: rgba(108,52,148,0.20); }
+
+    .empty-block {
+      background: var(--lumen-paper-2); border: 1px dashed var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
+      color: var(--lumen-mute); font-size: 13px; text-align: center;
+    }
+
+    /* === Summary row === */
+    .summary-row {
+      display: flex; gap: var(--lumen-s-4); margin-top: var(--lumen-s-4);
+      flex-wrap: wrap;
+    }
+    .summary-chip {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      padding: var(--lumen-s-2) var(--lumen-s-3);
+      background: var(--lumen-paper-2); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-sm); font-size: 12px; color: var(--lumen-mute);
+    }
+    .summary-chip strong { color: var(--lumen-ink); }
+
+    /* === Auto-refresh indicator === */
+    .refresh-indicator {
+      font-size: 11px; color: var(--lumen-mute);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .refresh-indicator .spin {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid var(--lumen-line); border-top-color: var(--lumen-blue);
+      border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+    @media (max-width: 720px) {
+      aside.sidebar { width: 64px; }
+      aside.sidebar .sidebar-text { display: none; }
+      .panel { padding: var(--lumen-s-4); }
+      .channel-table { font-size: 12px; }
+      .channel-table .hide-mobile { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <img src="/static/logo.png" alt="Lumen" />
+        <div class="brand-text sidebar-text">
+          <h1>Lumen</h1>
+          <p>Ajustes</p>
+        </div>
+      </div>
+      <button class="icon-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+        <span class="sidebar-text">Charlas</span>
+      </a>
+      <a href="/dashboard?panel=config" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="sidebar-text">Ajustes</span>
+      </a>
+      <a href="/settings/models" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <span class="sidebar-text">Modelos</span>
+      </a>
+      <a href="/settings/providers" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+        </svg>
+        <span class="sidebar-text">Providers</span>
+      </a>
+      <a href="/settings/tools" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="sidebar-text">Tools</span>
+      </a>
+      <a href="/settings/security" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        </svg>
+        <span class="sidebar-text">Seguridad</span>
+      </a>
+      <a href="/settings/channels" class="nav-btn active">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0"/>
+        </svg>
+        <span class="sidebar-text">Canales</span>
+      </a>
+      <a href="/settings/outputs" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <span class="sidebar-text">Outputs</span>
+      </a>
+      <a href="/agent-status" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+        <span class="sidebar-text">Estado</span>
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="status-pill">
+        <span class="dot"></span>
+        <span class="sidebar-text">Lumen esta activa</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div style="flex:1;">
+        <h2>Ajustes &rsaquo; Canales</h2>
+        <p class="sub">Estado de los canales de comunicacion registrados</p>
+      </div>
+      <div class="refresh-indicator" id="refresh-indicator">
+        <span class="spin"></span>
+        <span>Auto-refresh 15s</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="l-card">
+        <h3>Canales registrados</h3>
+        <div style="overflow-x:auto;">
+          <table class="channel-table" id="channels-table">
+            <thead>
+              <tr>
+                <th>Canal</th>
+                <th>Tipo</th>
+                <th>Estado</th>
+                <th class="hide-mobile">Mensajes</th>
+                <th class="hide-mobile">Ultima actividad</th>
+                <th class="hide-mobile">Error</th>
+              </tr>
+            </thead>
+            <tbody id="channels-body">
+              <tr><td colspan="6"><div class="empty-block">Cargando canales...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div class="summary-row" id="summary-row">
+        <div class="summary-chip">Total: <strong id="summary-total">--</strong></div>
+        <div class="summary-chip">Conectados: <strong id="summary-connected">--</strong></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // === Helpers ===
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
+    }
+
+    const statusLabels = {
+      connected: 'Conectado',
+      available: 'Disponible',
+      disconnected: 'Desconectado',
+      error: 'Error',
+    };
+
+    const typeLabels = {
+      internal: 'Interno',
+      module: 'Modulo',
+    };
+
+    function formatTime(ts) {
+      if (!ts) return '--';
+      const d = new Date(ts * 1000);
+      return d.toLocaleTimeString();
+    }
+
+    // === Render ===
+    function renderChannels(channels) {
+      const body = document.getElementById('channels-body');
+
+      if (!channels || channels.length === 0) {
+        body.innerHTML = '<tr><td colspan="6"><div class="empty-block">No hay canales registrados.</div></td></tr>';
+        document.getElementById('summary-total').textContent = '0';
+        document.getElementById('summary-connected').textContent = '0';
+        return;
+      }
+
+      body.innerHTML = channels.map(ch => {
+        const displayName = escapeHtml(ch.display_name || ch.name);
+        const statusBadge = `<span class="status-badge ${ch.status}">${statusLabels[ch.status] || ch.status}</span>`;
+        const typeBadge = `<span class="type-badge ${ch.type}">${typeLabels[ch.type] || ch.type}</span>`;
+        const msgCount = ch.message_count != null ? ch.message_count : '--';
+        const lastActivity = formatTime(ch.last_activity);
+        const error = ch.error ? `<span style="color:var(--lumen-danger);">${escapeHtml(ch.error)}</span>` : '--';
+
+        return `<tr>
+          <td style="font-weight:600;color:var(--lumen-ink);" class="mono">${displayName}</td>
+          <td>${typeBadge}</td>
+          <td>${statusBadge}</td>
+          <td class="hide-mobile">${msgCount}</td>
+          <td class="hide-mobile">${lastActivity}</td>
+          <td class="hide-mobile">${error}</td>
+        </tr>`;
+      }).join('');
+
+      document.getElementById('summary-total').textContent = channels.length;
+      document.getElementById('summary-connected').textContent = channels.filter(c => c.status === 'connected').length;
+    }
+
+    // === Load ===
+    async function loadChannels() {
+      try {
+        const res = await fetch('/api/channels');
+        if (!res.ok) throw new Error('Error al cargar canales');
+        const data = await res.json();
+        renderChannels(data.channels);
+      } catch (e) {
+        document.getElementById('channels-body').innerHTML =
+          `<tr><td colspan="6"><div class="empty-block">Error: ${escapeHtml(e.message)}</div></td></tr>`;
+      }
+    }
+
+    // === Auto-refresh every 15s ===
+    loadChannels();
+    setInterval(loadChannels, 15000);
+
+    // === Sidebar ===
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('collapsed');
+    }
+
+    // === Theme ===
+    const THEME_KEY = 'lumen-theme';
+    document.documentElement.setAttribute('data-theme', localStorage.getItem(THEME_KEY) || 'light');
+  </script>
+</body>
+</html>

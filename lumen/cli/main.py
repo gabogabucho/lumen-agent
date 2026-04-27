@@ -1059,6 +1059,43 @@ def apikey_revoke(
         console.print(f"[dim]No key found with prefix '{prefix}'.[/dim]")
 
 
+@app.command("channels")
+def channels_list():
+    """Show status of all registered communication channels."""
+    console.print("\n[bold]Channels[/bold]\n")
+
+    # Try to get status from live inbox if brain is running
+    # Since CLI is standalone, show from config + static info
+    config = _load_persisted_config() if _is_runtime_configured() else {}
+
+    # Known built-in channels
+    known_channels = [
+        ("web", "Web Dashboard", "internal"),
+    ]
+
+    # Check for module-based channels from config
+    modules = config.get("modules", {})
+    module_channels = []
+    if isinstance(modules, dict):
+        for mod_name, mod_cfg in modules.items():
+            if isinstance(mod_cfg, dict) and mod_cfg.get("type") == "channel":
+                module_channels.append((mod_name, mod_cfg.get("display_name", mod_name), "external"))
+
+    all_channels = known_channels + module_channels
+
+    if not all_channels:
+        console.print("  [dim]No channels configured.[/dim]\n")
+        return
+
+    for name, display, ctype in all_channels:
+        status = "[green]connected[/green]" if ctype == "internal" else "[yellow]available[/yellow]"
+        type_label = "[dim](internal)[/dim]" if ctype == "internal" else "[dim](module)[/dim]"
+        console.print(f"  {status}  {display or name:20s} {type_label}")
+
+    console.print(f"\n  [dim]Total: {len(all_channels)} channels ({len(known_channels)} internal, {len(module_channels)} module)[/dim]")
+    console.print("  [dim]Module channels are registered as gateway modules via lumen module install.[/dim]\n")
+
+
 @app.command()
 def doctor():
     """Diagnose issues and attempt automatic fixes."""

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-04-27
+
+### Added
+- **Structured Output Types** (`output_types.py`): Type system for agent responses beyond plain text. 6 output types: text, document, notification, web, image, plot. `StructuredOutput` dataclass with factory methods (`text()`, `document()`, `notification()`, `web()`, `image()`, `plot()`), JSON serialization, and roundtrip support.
+- **Channel Gateway** (extended `inbox.py`): Runtime channel status tracking with `ChannelStatus` dataclass. Tracks connected/disconnected/error state, message count, last activity, and internal vs external distinction. Unified `get_channel_status()` API across all channels.
+- **1 new CLI command**: `lumen channels` — shows all registered channels (web internal + module-based) with status.
+- **2 new API endpoints**: `GET /api/channels` (live channel status with WebSocket count), `GET /api/outputs` (structured output store placeholder + available types).
+- **2 new UI pages**: Canales (`/settings/channels` — channel table with auto-refresh), Outputs (`/settings/outputs` — output type cards).
+
+### Tests
+- **28 new tests** (15 output_types + 13 inbox). 241 total new tests across all 4 phases.
+
 ## [0.10.0] - 2026-04-27
 
 ### Added
