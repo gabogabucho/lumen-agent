@@ -175,5 +175,49 @@ class BuildContextBroadcastTests(unittest.TestCase):
         assert result == 7
 
 
+class BuildTerminalEnvNamespacedTests(unittest.TestCase):
+    """Tests for _build_terminal_env namespacing and cross-section lookup."""
+
+    def test_build_terminal_env_no_overwrite(self):
+        """Module-prefixed keys prevent silent overwrites between modules."""
+        from lumen.core.handlers import _build_terminal_env
+
+        config = {
+            "secrets": {
+                "module-a": {"public": {"SCRIPTS_DIR": "/a/scripts", "X": "1"}},
+                "module-b": {"public": {"SCRIPTS_DIR": "/b/scripts", "Y": "2"}},
+            },
+            "terminal": {"env": {
+                "public": ["SCRIPTS_DIR", "X", "Y"],
+                "secret": [],
+                "modules": ["module-a", "module-b"],
+            }},
+        }
+        env = _build_terminal_env(config)
+        # Module-prefixed: no overwrite
+        assert env["MODULE_A_SCRIPTS_DIR"] == "/a/scripts"
+        assert env["MODULE_B_SCRIPTS_DIR"] == "/b/scripts"
+        # Cross-section: X from module-a, Y from module-b
+        assert env["MODULE_A_X"] == "1"
+        assert env["MODULE_B_Y"] == "2"
+
+    def test_build_terminal_env_cross_section(self):
+        """Keys in terminal.env.public can live in module's secret section."""
+        from lumen.core.handlers import _build_terminal_env
+
+        config = {
+            "secrets": {
+                "tn": {"secret": {"API_TOKEN": "tok123"}},
+            },
+            "terminal": {"env": {
+                "public": ["API_TOKEN"],  # listed as public...
+                "secret": [],
+                "modules": ["tn"],
+            }},
+        }
+        env = _build_terminal_env(config)
+        assert env["API_TOKEN"] == "tok123"  # ...but found in secret section
+
+
 if __name__ == "__main__":
     unittest.main()

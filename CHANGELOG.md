@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-04-27
+
+### Fixed
+- **`_build_terminal_env` overwrite & cross-section bugs**: When multiple modules defined the same env key (e.g. `SCRIPTS_DIR`), the second silently overwrote the first. Now module-prefixed env vars are injected (e.g. `MODULE_A_SCRIPTS_DIR`, `MODULE_B_SCRIPTS_DIR`) to prevent data loss. Unprefixed versions kept for backward compat (last module wins). Also fixed: keys listed in `terminal.env.public` that lived in a module's `secret` section were never found — now cross-section lookup searches both.
+
+### Tests
+- **2 new tests**: `test_build_terminal_env_no_overwrite`, `test_build_terminal_env_cross_section`
+
 ## [0.7.0] - 2026-04-26
 
 ### Added

@@ -7,6 +7,7 @@ real actions: saving tasks to memory, listing notes, searching, etc.
 import asyncio
 import os
 import json
+import re
 import shlex
 import time
 from pathlib import Path
@@ -225,6 +226,14 @@ def _build_terminal_env(
 ) -> dict[str, str] | None:
     """Build explicit env injection for terminal subprocesses.
 
+    When multiple modules define the same key (e.g. SCRIPTS_DIR), the
+    unprefixed value is set to the last module processed (backward compat).
+    Module-prefixed versions (e.g. OTTO_TIENDANUBE_SCRIPTS_DIR) are always
+    injected to prevent silent overwrites.
+
+    Keys listed in terminal.env.public or terminal.env.secret are looked up
+    in BOTH the module's public and secret sections (cross-section lookup).
+
     Policy:
       terminal:
         env:
@@ -273,6 +282,12 @@ def _build_terminal_env(
         return merged
 
     source_modules = modules or list(secrets.keys())
+
+    def _module_env_prefix(name: str) -> str:
+        return re.sub(r"[^A-Za-z0-9]", "_", name).upper()
+
+    all_requested_keys = set(public_keys) | set(secret_keys)
+
     for module_name in source_modules:
         module_cfg = secrets.get(module_name, {})
         if not isinstance(module_cfg, dict):
@@ -284,12 +299,23 @@ def _build_terminal_env(
         if not public_values and not secret_values:
             public_values = {k: v for k, v in module_cfg.items() if k in public_keys}
 
+        # FIX 1: Cross-section — merge both sections so any requested key is found
+        all_module_values = {**public_values, **secret_values}
+
+        # FIX 2: Module-prefixed env vars to prevent overwrites
+        # e.g. OTTO_TIENDANUBE_SCRIPTS_DIR, OTTO_MERCADOLIBRE_SCRIPTS_DIR
+        prefix = _module_env_prefix(module_name)
+        for key in all_requested_keys:
+            if key in all_module_values:
+                merged[f"{prefix}_{key}"] = str(all_module_values[key])
+
+        # Unprefixed versions (last module wins, backward compat)
         for key in public_keys:
-            if key in public_values:
-                merged[str(key)] = str(public_values[key])
+            if key in all_module_values:
+                merged[str(key)] = str(all_module_values[key])
         for key in secret_keys:
-            if key in secret_values:
-                merged[str(key)] = str(secret_values[key])
+            if key in all_module_values:
+                merged[str(key)] = str(all_module_values[key])
 
     return merged
 
