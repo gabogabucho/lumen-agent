@@ -86,6 +86,20 @@ class Memory:
             CREATE INDEX IF NOT EXISTS idx_session_facts_category ON session_facts(category);
             CREATE INDEX IF NOT EXISTS idx_lessons_category ON lessons(category);
             CREATE INDEX IF NOT EXISTS idx_lessons_pinned ON lessons(pinned);
+
+            CREATE TABLE IF NOT EXISTS outputs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                output_id TEXT UNIQUE NOT NULL,
+                session_id TEXT DEFAULT '',
+                type TEXT NOT NULL DEFAULT 'text',
+                content TEXT DEFAULT '',
+                metadata TEXT DEFAULT '{}',
+                created_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_outputs_session ON outputs(session_id);
+            CREATE INDEX IF NOT EXISTS idx_outputs_type ON outputs(type);
+            CREATE INDEX IF NOT EXISTS idx_outputs_created ON outputs(created_at);
             """
         )
         await self._db.commit()
@@ -355,6 +369,84 @@ class Memory:
             params,
         )
         await self._db.commit()
+
+    # ─── Structured Outputs ───
+
+    async def save_output(self, output: "StructuredOutput") -> int:
+        """Persist a structured output. Returns the row ID."""
+        from lumen.core.output_types import StructuredOutput
+
+        cursor = await self._db.execute(
+            "INSERT OR REPLACE INTO outputs (output_id, session_id, type, content, metadata, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                output.output_id,
+                output.session_id,
+                output.type.value,
+                output.content,
+                json.dumps(output.metadata),
+                output.timestamp,
+            ),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def get_outputs(
+        self,
+        session_id: str | None = None,
+        output_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Retrieve structured outputs, optionally filtered."""
+        conditions = []
+        params: list = []
+
+        if session_id:
+            conditions.append("session_id = ?")
+            params.append(session_id)
+        if output_type:
+            conditions.append("type = ?")
+            params.append(output_type)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.extend([limit, offset])
+
+        rows = await self._db.execute_fetchall(
+            f"SELECT id, output_id, session_id, type, content, metadata, created_at "
+            f"FROM outputs {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params,
+        )
+        return [
+            {
+                "id": r[0],
+                "output_id": r[1],
+                "session_id": r[2],
+                "type": r[3],
+                "content": r[4],
+                "metadata": json.loads(r[5]) if r[5] else {},
+                "created_at": r[6],
+            }
+            for r in rows
+        ]
+
+    async def count_outputs(self, session_id: str | None = None) -> int:
+        """Count outputs, optionally filtered by session."""
+        if session_id:
+            row = await self._db.execute_fetchall(
+                "SELECT COUNT(*) FROM outputs WHERE session_id = ?", (session_id,)
+            )
+        else:
+            row = await self._db.execute_fetchall("SELECT COUNT(*) FROM outputs")
+        return row[0][0] if row else 0
+
+    async def delete_output(self, output_id: str) -> bool:
+        """Delete an output by its output_id. Returns True if deleted."""
+        cursor = await self._db.execute(
+            "DELETE FROM outputs WHERE output_id = ?", (output_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
 
     async def get_stats(self) -> dict:
         """Get memory system statistics."""

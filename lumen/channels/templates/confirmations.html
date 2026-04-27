@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="{{ language | default('es') }}" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumen — Confirmaciones de Herramientas</title>
+  <link rel="icon" href="/static/logo.png" type="image/png">
+  {% include "_partials/tokens.html" %}
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      display: flex; overflow: hidden;
+      font-family: var(--lumen-font); color: var(--lumen-ink);
+      background: var(--lumen-paper); font-size: 14px;
+    }
+
+    /* === Sidebar (same as other pages) === */
+    aside.sidebar {
+      width: 260px; flex-shrink: 0;
+      background: var(--lumen-paper-2); border-right: 1px solid var(--lumen-line);
+      box-shadow: 10px 0 30px rgba(15,21,69,0.06);
+      display: flex; flex-direction: column; transition: width 0.25s ease;
+      position: relative; z-index: 2;
+    }
+    aside.sidebar.collapsed { width: 64px; }
+    aside.sidebar.collapsed .sidebar-text { display: none; }
+    .sidebar-head {
+      padding: var(--lumen-s-4); display: flex; align-items: center;
+      justify-content: space-between; gap: var(--lumen-s-3);
+      border-bottom: 1px solid var(--lumen-line);
+    }
+    .brand { display: flex; align-items: center; gap: var(--lumen-s-3); overflow: hidden; }
+    .brand img { width: 36px; height: 36px; border-radius: var(--lumen-r-sm); flex-shrink: 0; }
+    .brand-text h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--lumen-ink); }
+    .brand-text p { font-size: 11px; color: var(--lumen-mute); margin-top: 2px; }
+    .icon-btn {
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      padding: 6px; border-radius: var(--lumen-r-sm); cursor: pointer;
+    }
+    .icon-btn:hover { color: var(--lumen-ink); background: rgba(0,0,0,0.04); }
+    .nav { flex: 1; overflow-y: auto; padding: var(--lumen-s-3) 0; }
+    .nav a {
+      display: flex; align-items: center; gap: var(--lumen-s-3);
+      padding: 10px var(--lumen-s-4); color: var(--lumen-ink-soft);
+      text-decoration: none; border-radius: var(--lumen-r-sm);
+      margin: 0 var(--lumen-s-3); transition: background 0.15s, color 0.15s;
+    }
+    .nav a:hover { background: var(--lumen-paper); color: var(--lumen-ink); }
+    .nav a.active { background: var(--lumen-paper); color: var(--lumen-primary); font-weight: 500; }
+
+    /* === Main === */
+    main { flex: 1; overflow-y: auto; padding: var(--lumen-s-5) var(--lumen-s-6); }
+    .page-header { margin-bottom: var(--lumen-s-5); }
+    .page-header h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .page-header p { color: var(--lumen-mute); font-size: 13px; }
+
+    /* === Sections === */
+    .section { background: var(--lumen-paper-2); border-radius: var(--lumen-r); border: 1px solid var(--lumen-line); margin-bottom: var(--lumen-s-4); overflow: hidden; }
+    .section-header { padding: var(--lumen-s-4); border-bottom: 1px solid var(--lumen-line); display: flex; justify-content: space-between; align-items: center; }
+    .section-header h3 { font-size: 14px; font-weight: 600; }
+    .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+    .badge-warn { background: var(--lumen-warn-bg); color: var(--lumen-warn); }
+    .badge-ok { background: var(--lumen-ok-bg); color: var(--lumen-ok); }
+
+    /* === Table === */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px var(--lumen-s-4); text-align: left; }
+    th { font-weight: 600; color: var(--lumen-ink-soft); border-bottom: 1px solid var(--lumen-line); }
+    td { border-bottom: 1px solid var(--lumen-line-2); }
+    tr:last-child td { border-bottom: none; }
+    .risk-read_only { color: var(--lumen-ok); }
+    .risk-mutating { color: var(--lumen-warn); }
+    .risk-destructive { color: var(--lumen-err); }
+    .risk-privileged { color: var(--lumen-err); font-weight: 600; }
+    .empty-state { padding: var(--lumen-s-6); text-align: center; color: var(--lumen-mute); }
+  </style>
+</head>
+<body>
+  {% include "_partials/sidebar.html" %}
+
+  <main>
+    <div class="page-header">
+      <h2>{{ locale.confirmations_title | default('Confirmaciones de Herramientas') }}</h2>
+      <p>{{ locale.confirmations_subtitle | default('Revisa decisiones de aprobacion pendientes e historial') }}</p>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h3>{{ locale.pending_title | default('Pendientes') }}</h3>
+        <span id="pending-badge" class="badge badge-warn">0</span>
+      </div>
+      <div id="pending-list" class="empty-state">
+        {{ locale.no_pending | default('No hay confirmaciones pendientes') }}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h3>{{ locale.history_title | default('Historial') }}</h3>
+      </div>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>{{ locale.th_tool | default('Herramienta') }}</th>
+              <th>{{ locale.th_risk | default('Riesgo') }}</th>
+              <th>{{ locale.th_decision | default('Decision') }}</th>
+              <th>{{ locale.th_time | default('Hora') }}</th>
+            </tr>
+          </thead>
+          <tbody id="history-body">
+            <tr><td colspan="4" class="empty-state">{{ locale.no_history | default('Sin historial') }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    async function loadConfirmations() {
+      try {
+        const resp = await fetch('/api/tools/confirmations');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        // Pending
+        const pendingList = document.getElementById('pending-list');
+        const pendingBadge = document.getElementById('pending-badge');
+        pendingBadge.textContent = data.pending_count || 0;
+        if (data.pending && data.pending.length > 0) {
+          pendingList.innerHTML = '';
+          pendingList.classList.remove('empty-state');
+          data.pending.forEach(id => {
+            pendingList.innerHTML += `<div style="padding: var(--lumen-s-4); border-bottom: 1px solid var(--lumen-line-2); display: flex; justify-content: space-between; align-items: center;">
+              <code>${id}</code>
+            </div>`;
+          });
+        } else {
+          pendingList.innerHTML = '{{ locale.no_pending | default("No hay confirmaciones pendientes") }}';
+          pendingList.classList.add('empty-state');
+        }
+
+        // History
+        const tbody = document.getElementById('history-body');
+        if (data.history && data.history.length > 0) {
+          tbody.innerHTML = data.history.map(h => `
+            <tr>
+              <td><code>${h.tool_name}${h.action ? '__' + h.action : ''}</code></td>
+              <td class="risk-${h.risk}">${h.risk}</td>
+              <td><span class="badge ${h.decision === 'approved' || h.decision === 'auto_approved' ? 'badge-ok' : 'badge-warn'}">${h.decision}</span></td>
+              <td>${new Date(h.timestamp * 1000).toLocaleString()}</td>
+            </tr>
+          `).join('');
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    loadConfirmations();
+    setInterval(loadConfirmations, 5000);
+  </script>
+</body>
+</html>

@@ -104,6 +104,11 @@ _oauth_state_store: dict[str, dict] = {}
 _oauth_state_lock = threading.Lock()
 _agent_status_collector: AgentStatusCollector | None = None
 
+# Pending tool confirmations: call_id -> asyncio.Future
+_pending_confirmations: dict[str, asyncio.Future] = {}
+# SSE confirm event queues: one per active SSE stream
+_sse_confirm_queues: list[asyncio.Queue] = []
+
 
 def configure(brain, locale: dict, config: dict, awareness=None, *, lumen_dir: Path | None = None):
     """Configure the web channel (called by CLI when config exists).
@@ -120,6 +125,9 @@ def configure(brain, locale: dict, config: dict, awareness=None, *, lumen_dir: P
     _config = config
     _awareness = awareness
     _attach_brain_runtime_handlers()
+    # Set up confirmation handler for web channel
+    if _brain:
+        _brain.confirmation_gate.set_handler(_web_confirm_handler)
 
 
 def _attach_brain_runtime_handlers():
@@ -1047,6 +1055,12 @@ async def _init_brain_from_config():
     if manager and hasattr(manager, "set_broadcast_callback"):
         manager.set_broadcast_callback(broadcast_event)
 
+    # Pre-load lessons for prompt injection
+    await _brain.load_lessons()
+
+    # Set up confirmation handler for web channel
+    _brain.confirmation_gate.set_handler(_web_confirm_handler)
+
     return True
 
 
@@ -1790,6 +1804,28 @@ async def page_outputs(request: Request):
     )
 
 
+@app.get("/settings/confirmations")
+async def page_confirmations(request: Request):
+    """Tool confirmations page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "confirmations.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
+            "locale": _locale.get("confirmations", {}),
+        },
+    )
+
+
 @app.get("/agent-status")
 async def page_agent_status(request: Request):
     """Agent diagnostic status page."""
@@ -2027,31 +2063,78 @@ async def api_chat(request: Request):
 
     # Streaming mode
     async def sse_generator():
-        yield f"event: session\ndata: {json.dumps({'session_id': session.session_id})}\n\n"
-
+        confirm_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
+        _sse_confirm_queues.append(confirm_queue)
         try:
-            async for chunk in _brain.think_stream(message, session):
-                if chunk.get("type") == "delta":
-                    text = chunk.get("content", "")
-                    yield f"event: delta\ndata: {json.dumps({'text': text})}\n\n"
-                elif chunk.get("type") == "error":
-                    error_msg = chunk.get("content", "unknown error")
-                    yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
-                    return
-                elif chunk.get("type") == "tool_progress":
-                    yield f"event: tool_progress\ndata: {json.dumps({'tool': chunk.get('tool'), 'iteration': chunk.get('iteration'), 'total_calls': chunk.get('total_calls')})}\n\n"
-                elif chunk.get("type") == "tool_result":
-                    data = {"tool": chunk.get("tool")}
-                    if chunk.get("error"):
-                        data["error"] = chunk["error"]
-                    else:
-                        data["truncated_result"] = chunk.get("truncated_result", "")
-                    yield f"event: tool_result\ndata: {json.dumps(data)}\n\n"
-                elif chunk.get("type") == "tool_status":
-                    yield f"event: tool_status\ndata: {json.dumps({'iteration': chunk.get('iteration'), 'max_iterations': chunk.get('max_iterations'), 'tools_this_round': chunk.get('tools_this_round'), 'total_so_far': chunk.get('total_so_far')})}\n\n"
+            yield f"event: session\ndata: {json.dumps({'session_id': session.session_id})}\n\n"
+
+            # Create tasks for brain stream and confirm queue
+            brain_stream = _brain.think_stream(message, session)
+
+            async def brain_chunks():
+                async for chunk in brain_stream:
+                    yield chunk
+
+            brain_iter = brain_chunks()
+
+            pending_brain = asyncio.ensure_future(anext(brain_iter, None))
+            pending_confirm = asyncio.ensure_future(confirm_queue.get())
+
+            while True:
+                done, pending = await asyncio.wait(
+                    [pending_brain, pending_confirm],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if pending_brain in done:
+                    chunk = pending_brain.result()
+                    if chunk is None:
+                        # Brain stream finished — drain remaining confirms
+                        break
+
+                    if chunk.get("type") == "delta":
+                        text = chunk.get("content", "")
+                        yield f"event: delta\ndata: {json.dumps({'text': text})}\n\n"
+                    elif chunk.get("type") == "error":
+                        error_msg = chunk.get("content", "unknown error")
+                        yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+                        break
+                    elif chunk.get("type") == "tool_progress":
+                        yield f"event: tool_progress\ndata: {json.dumps({'tool': chunk.get('tool'), 'iteration': chunk.get('iteration'), 'total_calls': chunk.get('total_calls')})}\n\n"
+                    elif chunk.get("type") == "tool_result":
+                        data = {"tool": chunk.get("tool")}
+                        if chunk.get("error"):
+                            data["error"] = chunk["error"]
+                        else:
+                            data["truncated_result"] = chunk.get("truncated_result", "")
+                        yield f"event: tool_result\ndata: {json.dumps(data)}\n\n"
+                    elif chunk.get("type") == "tool_status":
+                        yield f"event: tool_status\ndata: {json.dumps({'iteration': chunk.get('iteration'), 'max_iterations': chunk.get('max_iterations'), 'tools_this_round': chunk.get('tools_this_round'), 'total_so_far': chunk.get('total_so_far')})}\n\n"
+                    elif chunk.get("type") == "tool_confirm_result":
+                        yield f"event: tool_confirm_result\ndata: {json.dumps({'tool': chunk.get('tool'), 'decision': chunk.get('decision'), 'reason': chunk.get('reason', '')})}\n\n"
+
+                    # Schedule next brain chunk
+                    pending_brain = asyncio.ensure_future(anext(brain_iter, None))
+
+                if pending_confirm in done:
+                    confirm_data = pending_confirm.result()
+                    yield f"event: tool_confirm_request\ndata: {json.dumps(confirm_data)}\n\n"
+                    # Schedule next confirm listen
+                    pending_confirm = asyncio.ensure_future(confirm_queue.get())
+
+                # If both done, exit
+                if not pending:
+                    break
+
+            # Cancel any pending tasks
+            for t in [pending_brain, pending_confirm]:
+                if not t.done():
+                    t.cancel()
+
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-            return
+        finally:
+            _sse_confirm_queues.remove(confirm_queue)
 
         yield f"event: done\ndata: [DONE]\n\n"
 
@@ -2104,6 +2187,23 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                     except Exception:
                         pass
                 await websocket.send_text(json.dumps({"type": "pong"}))
+                continue
+
+            # Handle tool confirmation response from WebSocket client
+            if payload.get("type") == "tool_confirm_response":
+                call_id = payload.get("call_id", "")
+                decision_str = payload.get("decision", "").lower()
+                msg = payload.get("message", "")
+                from lumen.core.confirmation_gate import ConfirmDecision, ConfirmResponse
+                try:
+                    decision = ConfirmDecision(decision_str)
+                    future = _pending_confirmations.get(call_id)
+                    if future and not future.done():
+                        future.set_result(
+                            ConfirmResponse(call_id=call_id, decision=decision, message=msg)
+                        )
+                except ValueError:
+                    pass
                 continue
 
             user_text = payload.get("content", "").strip()
@@ -2770,6 +2870,90 @@ async def api_security_update(request: Request):
     return {"status": "ok", "updates": updates}
 
 
+# ─── Tool Confirmation API ───
+
+
+async def _web_confirm_handler(request_obj):
+    """Confirmation handler for web channel.
+
+    Pushes the confirm request to all active SSE streams and WebSocket clients,
+    then waits for the user to resolve via POST /api/tools/confirm.
+    """
+    # Push to SSE streams
+    confirm_data = request_obj.to_dict()
+    for q in list(_sse_confirm_queues):
+        try:
+            q.put_nowait(confirm_data)
+        except asyncio.QueueFull:
+            pass
+
+    # Broadcast to WebSocket clients
+    await broadcast_event("tool_confirm_request", confirm_data)
+
+    # Wait for the user to resolve via POST /api/tools/confirm
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    _pending_confirmations[request_obj.call_id] = future
+
+    try:
+        return await future
+    finally:
+        _pending_confirmations.pop(request_obj.call_id, None)
+
+
+@app.post("/api/tools/{call_id}/confirm")
+async def api_tool_confirm(call_id: str, request: Request):
+    """Resolve a pending tool confirmation (approve or reject)."""
+    from lumen.core.confirmation_gate import ConfirmDecision
+
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    body = await request.json()
+    decision_str = body.get("decision", "").lower()
+    message = body.get("message", "")
+
+    try:
+        decision = ConfirmDecision(decision_str)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": f"Invalid decision: {decision_str}"})
+
+    future = _pending_confirmations.get(call_id)
+    if not future or future.done():
+        return JSONResponse(status_code=404, content={"error": "No pending confirmation for this call_id"})
+
+    from lumen.core.confirmation_gate import ConfirmResponse
+    future.set_result(ConfirmResponse(call_id=call_id, decision=decision, message=message))
+
+    return {"status": "ok", "call_id": call_id, "decision": decision.value}
+
+
+@app.get("/api/tools/confirmations")
+async def api_confirmations_list(request: Request):
+    """List recent confirmation history and any pending confirmations."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    brain = _get_brain()
+    if not brain:
+        return {"pending": [], "history": []}
+
+    gate = brain.confirmation_gate
+    return {
+        "pending": gate.get_pending(),
+        "pending_count": gate.get_pending_count(),
+        "history": gate.get_history(limit=50),
+    }
+
+
 # ─── Channel Gateway & Output API ───
 
 
@@ -2823,12 +3007,8 @@ async def api_channels_status(request: Request):
 
 
 @app.get("/api/outputs")
-async def api_outputs_list(request: Request, limit: int = 50):
-    """List structured outputs (placeholder — full implementation requires output store).
-
-    For now, returns empty list. The full output store will be implemented
-    when connectors return StructuredOutput objects that are persisted.
-    """
+async def api_outputs_list(request: Request, limit: int = 50, session_id: str | None = None, output_type: str | None = None):
+    """List structured outputs persisted from tool executions."""
     loaded = _load_config()
     if not _is_configured(loaded):
         return JSONResponse(status_code=400, content={"error": "not_configured"})
@@ -2838,11 +3018,21 @@ async def api_outputs_list(request: Request, limit: int = 50):
 
     from lumen.core.output_types import OutputType
 
-    # TODO: When brain/tools return StructuredOutput, persist them
-    # and serve them from memory.db. For now, return available types.
+    brain = _get_brain()
+    if not brain or not brain.memory:
+        return {"outputs": [], "count": 0, "available_types": [t.value for t in OutputType]}
+
+    try:
+        outputs = await brain.memory.get_outputs(
+            session_id=session_id, output_type=output_type, limit=limit
+        )
+        total = await brain.memory.count_outputs(session_id=session_id)
+    except Exception:
+        outputs, total = [], 0
+
     return {
-        "outputs": [],
-        "count": 0,
+        "outputs": outputs,
+        "count": total,
         "available_types": [t.value for t in OutputType],
     }
 

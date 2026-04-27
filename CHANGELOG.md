@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-27
+
+### Added
+- **Confirmation Layer** (`confirmation_gate.py`): Runtime tool confirmation gate for `privileged` and `destructive` risk tools. When a tool requires confirmation, the brain yields a `tool_confirm_request` event (SSE/WebSocket) and blocks until the user approves, rejects, or a timeout expires (configurable, default 60s). Auto-approves when no handler is registered (backward compat). New `ConfirmDecision` enum: `approved`, `rejected`, `timeout`, `auto_approved`.
+- **Tool Policy integration in Brain**: Brain now instantiates `ToolPolicy` with defaults + config, and calls `_check_tool_confirmation()` before executing every tool in both `_tool_use_loop` and `_tool_use_loop_streaming()`. Blocked tools report a friendly error to the LLM instead of silently failing.
+- **Web channel confirmation handler** (`web.py`): SSE streams yield `tool_confirm_request` events via a shared queue. WebSocket clients receive confirm requests via `broadcast_event()`. New POST endpoint `/api/tools/{call_id}/confirm` resolves pending confirmations. New GET `/api/tools/confirmations` lists pending + history.
+- **Confirmation UI page** (`/settings/confirmations`): New page showing pending confirmations and decision history with auto-refresh every 5s. Dark theme, sidebar nav, Spanish labels.
+- **Structured Output persistence** (`memory.py`): New `outputs` SQLite table with CRUD methods (`save_output`, `get_outputs`, `count_outputs`, `delete_output`). Brain auto-persists non-trivial tool results (dicts/lists, not simple strings < 20 chars) after execution. `GET /api/outputs` now serves real data instead of placeholder empty list.
+- **Lessons pre-loading on startup** (`web.py`): `_init_brain_from_config()` now calls `await _brain.load_lessons()` so lessons are injected into prompts in serve mode. `configure()` also sets the confirmation handler.
+
+### Fixed
+- **load_lessons() not called at startup in serve mode**: Lessons existed in DB but were never injected into prompts because `load_lessons()` was never called after brain initialization.
+- **`/api/outputs` returning empty list**: Now returns persisted structured outputs from memory.db with filtering by `session_id` and `output_type`.
+
 ## [1.0.1] - 2026-04-27
 
 ### Fixed

@@ -34,6 +34,8 @@ from lumen.core.personality import Personality
 from lumen.core.registry import CapabilityKind, Registry
 from lumen.core.model_router import ModelRouter, ModelRouterConfig
 from lumen.core.provider_health import ProviderHealthTracker
+from lumen.core.tool_policy import ToolPolicy, ToolRisk
+from lumen.core.confirmation_gate import ConfirmationGate, ConfirmDecision
 from lumen.core.session import Session
 
 
@@ -86,9 +88,85 @@ class Brain:
             ModelRouterConfig.from_config(config)
         )
         self.provider_health = provider_health or ProviderHealthTracker.from_config(config)
+        self.tool_policy = ToolPolicy()
+        self.tool_policy.load_defaults()
+        self.tool_policy.load_config(config)
+        self.confirmation_gate = ConfirmationGate()
         self._last_detected_language: str = self.language
         self._current_messages: list[dict] | None = None  # For contradiction retry
         self._cached_lessons_text: str = ""  # Pre-loaded lessons for prompt injection
+
+    async def _persist_tool_output(
+        self, tool_name: str, result: Any, session_id: str = ""
+    ) -> None:
+        """Persist tool results as structured outputs when they look like rich data.
+
+        Only persists results that are non-trivial (dicts with content, lists, etc.)
+        to avoid cluttering the output store with simple status strings.
+        """
+        if not self.memory or not result:
+            return
+
+        # Skip simple status strings and errors
+        if isinstance(result, str) and len(result) < 20:
+            return
+        if isinstance(result, dict) and result.get("error"):
+            return
+
+        from lumen.core.output_types import OutputType, StructuredOutput
+
+        # Detect output type from tool name
+        output_type = OutputType.TEXT
+        metadata = {"source_tool": tool_name}
+
+        if "plot" in tool_name or "chart" in tool_name or "graph" in tool_name:
+            output_type = OutputType.PLOT
+        elif "image" in tool_name or "screenshot" in tool_name:
+            output_type = OutputType.IMAGE
+        elif "web" in tool_name or "html" in tool_name or "render" in tool_name:
+            output_type = OutputType.WEB
+        elif "doc" in tool_name or "report" in tool_name or "pdf" in tool_name:
+            output_type = OutputType.DOCUMENT
+
+        content = json.dumps(result, ensure_ascii=False, default=str) if not isinstance(result, str) else result
+
+        output = StructuredOutput(
+            type=output_type,
+            content=content[:10_000],  # Truncate very large outputs
+            metadata=metadata,
+            session_id=session_id,
+        )
+        try:
+            await self.memory.save_output(output)
+        except Exception as e:
+            logger.debug(f"Failed to persist tool output: {e}")
+
+    async def _check_tool_confirmation(
+        self, tool_name: str, action: str, params: dict | None = None
+    ) -> ConfirmDecision | None:
+        """Check if a tool requires confirmation and ask the user.
+
+        Returns None if no confirmation needed, or the decision if asked.
+        """
+        # Determine the tool key for policy lookup
+        # Try connector.action format first, then standalone tool
+        policy = self.tool_policy.get_policy(tool_name, action)
+        if not self.tool_policy.requires_confirmation(policy):
+            return None
+
+        logger.info(
+            "Tool requires confirmation: %s__%s (risk=%s)",
+            tool_name, action, policy.risk,
+        )
+
+        response = await self.confirmation_gate.ask(
+            tool_name=tool_name,
+            action=action,
+            risk=policy.risk,
+            params=params,
+            description=policy.description,
+        )
+        return response.decision
 
     def _resolved_model(self, role: str = "main") -> str:
         """Route model through OpenRouter when OpenRouter creds are active.
@@ -2569,6 +2647,35 @@ class Brain:
 
             for tool_call in tool_calls:
                 func = tool_call.function
+                tool_name = func.name or "unknown"
+
+                # Check confirmation gate before execution
+                connector_name, action = (None, "")
+                if self.connectors.has_tool(tool_name):
+                    connector_name, action = self.connectors.parse_tool_name(tool_name)
+                if not connector_name and "__" in tool_name:
+                    parts = tool_name.split("__", 1)
+                    connector_name, action = parts[0], parts[1]
+
+                confirm_decision = await self._check_tool_confirmation(
+                    tool_name, action,
+                    json.loads(func.arguments) if func.arguments else {},
+                )
+                if confirm_decision is not None and confirm_decision not in (
+                    ConfirmDecision.APPROVED, ConfirmDecision.AUTO_APPROVED
+                ):
+                    reason = f"Rejected by user ({confirm_decision.value})"
+                    all_tool_calls.append({"name": tool_name, "error": reason})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": reason}),
+                        }
+                    )
+                    logger.info("Tool %s blocked: %s", tool_name, reason)
+                    continue
+
                 try:
                     # Introspection tools (neo__*) are handled by the brain
                     if func.name == "neo__read_skill":
@@ -2625,6 +2732,9 @@ class Brain:
                 except Exception as e:
                     tool_result = {"error": str(e)}
                     all_tool_calls.append({"name": func.name, "error": str(e)})
+                else:
+                    # Persist non-trivial tool results as structured outputs
+                    await self._persist_tool_output(func.name, tool_result)
 
                 # Add tool result to messages for the LLM
                 messages.append(
@@ -2726,6 +2836,44 @@ class Brain:
                 tool_name = func.name or "unknown"
                 tool_error = None
 
+                # Check confirmation gate before execution
+                conn_name, act = (None, "")
+                if self.connectors.has_tool(tool_name):
+                    conn_name, act = self.connectors.parse_tool_name(tool_name)
+                if not conn_name and "__" in tool_name:
+                    parts = tool_name.split("__", 1)
+                    conn_name, act = parts[0], parts[1]
+
+                confirm_decision = await self._check_tool_confirmation(
+                    tool_name, act,
+                    json.loads(func.arguments) if func.arguments else {},
+                )
+
+                if confirm_decision is not None and confirm_decision not in (
+                    ConfirmDecision.APPROVED, ConfirmDecision.AUTO_APPROVED
+                ):
+                    reason = f"Rejected by user ({confirm_decision.value})"
+                    tool_error = reason
+                    all_tool_calls.append({"name": tool_name, "error": reason})
+
+                    # Yield confirm rejection event
+                    yield {
+                        "type": "tool_confirm_result",
+                        "tool": tool_name,
+                        "decision": confirm_decision.value,
+                        "reason": reason,
+                    }
+
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": reason}),
+                        }
+                    )
+                    logger.info("Tool %s blocked: %s", tool_name, reason)
+                    continue
+
                 # Yield progress before execution
                 yield {
                     "type": "tool_progress",
@@ -2765,6 +2913,9 @@ class Brain:
                     all_tool_calls.append(
                         {"name": tool_name, "result": tool_result}
                     )
+
+                    # Persist non-trivial tool results as structured outputs
+                    await self._persist_tool_output(tool_name, tool_result)
 
                     # Yield result after execution
                     result_str = str(tool_result)
