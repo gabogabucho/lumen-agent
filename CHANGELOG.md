@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-04-27
+
+### Added
+- **Tool Policy** (`tool_policy.py`): Risk classification for every tool/action (read_only, mutating, destructive, privileged). 19 default policies for built-in connectors. Config-driven overrides for risk level and confirmation requirements. Tools annotated with risk metadata via `ConnectorRegistry.as_tools()`.
+- **Security Config**: Toggles for confirm_deletions, confirm_terminal, confirm_system_actions, auto_approve_read_only. Configurable confirmation timeout. Privileged tool list.
+- **3 new CLI commands**: `lumen tools` (list with risk filter), `lumen security` (show settings), `lumen security-set` (update settings).
+- **3 new API endpoints**: `GET /api/tools` (all policies), `GET /api/security`, `POST /api/security`.
+- **2 new UI pages**: Tools (`/settings/tools` — risk table with filter), Seguridad (`/settings/security` — toggle switches + timeout). Sidebar navigation updated across all pages.
+
+### Tests
+- **24 new tests** for tool policy (defaults, confirmation logic, security config, overrides, summaries).
+
 ## [0.9.1] - 2026-04-27
 
 ### Fixed

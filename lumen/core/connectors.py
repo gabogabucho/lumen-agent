@@ -58,6 +58,7 @@ class ConnectorRegistry:
         self._tool_name_map: dict[str, str] = {}
         self._tool_alias_map: dict[str, tuple[str, str]] = {}
         self.runtime_config: dict[str, Any] | None = None
+        self.tool_policy = None  # Set externally after creation
 
     def set_runtime_config(self, config: dict[str, Any] | None):
         self.runtime_config = config
@@ -135,6 +136,35 @@ class ConnectorRegistry:
         self._tool_name_map = {}
         self._tool_alias_map = {}
         tools = []
+
+        def _make_tool(name: str, description: str, parameters: dict) -> dict:
+            """Build a tool dict and optionally annotate with risk metadata."""
+            tool = {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
+                },
+            }
+            return tool
+
+        def _annotate(tool: dict, conn_name: str, act: str) -> dict:
+            """Attach risk metadata from tool_policy if available."""
+            if self.tool_policy is not None:
+                entry = self.tool_policy.get_policy(conn_name, act)
+                tool.setdefault("function", {}).setdefault("annotations", {})
+                tool["function"]["annotations"]["risk"] = entry.risk
+                tool["function"]["annotations"]["confirm_required"] = (
+                    self.tool_policy.requires_confirmation(entry)
+                )
+            return tool
+
+        def _add(tool: dict, conn_name: str, act: str) -> None:
+            """Annotate and append a tool to the list."""
+            _annotate(tool, conn_name, act)
+            tools.append(tool)
+
         for connector in self._connectors.values():
             for action in connector.actions:
                 tool_name = f"{connector.name}__{action}"
@@ -142,15 +172,10 @@ class ConnectorRegistry:
                 # Use custom schema if registered, otherwise generic
                 custom = self._tool_schemas.get(tool_name)
                 if custom:
-                    tools.append(
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "description": custom["description"],
-                                "parameters": custom["parameters"],
-                            },
-                        }
+                    _add(
+                        _make_tool(tool_name, custom["description"], custom["parameters"]),
+                        connector.name,
+                        action,
                     )
 
                 # Alias form for single-action connectors: terminal -> terminal__execute
@@ -158,15 +183,10 @@ class ConnectorRegistry:
                     alias_name = connector.name
                     self._tool_alias_map[alias_name] = (connector.name, action)
                     if custom:
-                        tools.append(
-                            {
-                                "type": "function",
-                                "function": {
-                                    "name": alias_name,
-                                    "description": custom["description"],
-                                    "parameters": custom["parameters"],
-                                },
-                            }
+                        _add(
+                            _make_tool(alias_name, custom["description"], custom["parameters"]),
+                            connector.name,
+                            action,
                         )
                     else:
                         base_schema = {
@@ -178,44 +198,33 @@ class ConnectorRegistry:
                                 }
                             },
                         }
-                        tools.append(
-                            {
-                                "type": "function",
-                                "function": {
-                                    "name": tool_name,
-                                    "description": (f"{connector.description} — {action}"),
-                                    "parameters": base_schema,
-                                },
-                            }
+                        _add(
+                            _make_tool(tool_name, f"{connector.description} — {action}", base_schema),
+                            connector.name,
+                            action,
                         )
-                        tools.append(
-                            {
-                                "type": "function",
-                                "function": {
-                                    "name": alias_name,
-                                    "description": (f"{connector.description} — {action}"),
-                                    "parameters": base_schema,
-                                },
-                            }
+                        _add(
+                            _make_tool(alias_name, f"{connector.description} — {action}", base_schema),
+                            connector.name,
+                            action,
                         )
                 elif not custom:
-                    tools.append(
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "description": (f"{connector.description} — {action}"),
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": {
-                                        "input": {
-                                            "type": "string",
-                                            "description": f"Input for {connector.name}.{action}",
-                                        }
-                                    },
+                    _add(
+                        _make_tool(
+                            tool_name,
+                            f"{connector.description} — {action}",
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "input": {
+                                        "type": "string",
+                                        "description": f"Input for {connector.name}.{action}",
+                                    }
                                 },
                             },
-                        }
+                        ),
+                        connector.name,
+                        action,
                     )
         for name, tool in self._explicit_tools.items():
             sanitized = self._sanitize_tool_name(name)

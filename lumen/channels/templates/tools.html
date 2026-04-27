@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lumen — Providers</title>
+  <title>Lumen — Tools</title>
   <link rel="icon" href="/static/logo.png" type="image/png">
   {% include "_partials/tokens.html" %}
   <style>
@@ -100,82 +100,71 @@
       text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--lumen-s-3);
     }
 
-    /* === Degraded banner === */
-    .degraded-banner {
-      display: none;
-      padding: var(--lumen-s-3) var(--lumen-s-4);
-      background: rgba(217,76,76,0.10);
-      border: 1px solid rgba(217,76,76,0.25);
-      border-radius: var(--lumen-r-md);
-      color: var(--lumen-danger);
-      font-size: 13px; font-weight: 500;
+    /* === Filter buttons === */
+    .filter-bar {
+      display: flex; flex-wrap: wrap; gap: var(--lumen-s-2);
       margin-bottom: var(--lumen-s-4);
-      animation: bannerPulse 2s ease-in-out infinite;
     }
-    .degraded-banner.visible { display: flex; align-items: center; gap: var(--lumen-s-2); }
-    @keyframes bannerPulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
+    .filter-btn {
+      padding: 6px 14px; border-radius: var(--lumen-r-pill);
+      border: 1px solid var(--lumen-line); background: transparent;
+      color: var(--lumen-ink-soft); font: inherit; font-size: 12px; font-weight: 500;
+      cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     }
+    .filter-btn:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .filter-btn.active { background: var(--lumen-lavender); color: var(--lumen-blue); border-color: var(--lumen-blue); }
 
-    /* === Provider table === */
-    .provider-table {
+    /* === Tool table === */
+    .tool-table {
       width: 100%; border-collapse: separate; border-spacing: 0;
       font-size: 13px;
     }
-    .provider-table thead th {
+    .tool-table thead th {
       text-align: left; font-size: 11px; font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.06em;
       color: var(--lumen-mute); padding: var(--lumen-s-2) var(--lumen-s-3);
       border-bottom: 1px solid var(--lumen-line);
     }
-    .provider-table tbody td {
+    .tool-table tbody td {
       padding: var(--lumen-s-3); border-bottom: 1px solid var(--lumen-line);
       color: var(--lumen-ink-soft); vertical-align: middle;
     }
-    .provider-table tbody tr:last-child td { border-bottom: none; }
-    .provider-table tbody tr:hover { background: var(--lumen-paper-2); }
+    .tool-table tbody tr:last-child td { border-bottom: none; }
+    .tool-table tbody tr:hover { background: var(--lumen-paper-2); }
 
-    /* === Status badge === */
-    .status-badge {
-      display: inline-flex; align-items: center; gap: 6px;
+    /* === Risk badges === */
+    .risk-badge {
+      display: inline-flex; align-items: center;
       padding: 3px 10px; border-radius: var(--lumen-r-pill);
       font-size: 12px; font-weight: 500; border: 1px solid transparent;
     }
-    .status-badge .dot {
-      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-    }
-    .status-badge.healthy { background: rgba(47,158,110,0.10); color: var(--lumen-success); border-color: rgba(47,158,110,0.20); }
-    .status-badge.healthy .dot { background: var(--lumen-success); box-shadow: 0 0 6px rgba(47,158,110,0.4); }
-    .status-badge.degraded { background: rgba(217,146,37,0.10); color: var(--lumen-warn); border-color: rgba(217,146,37,0.20); }
-    .status-badge.degraded .dot { background: var(--lumen-warn); box-shadow: 0 0 6px rgba(217,146,37,0.4); }
-    .status-badge.down { background: rgba(217,76,76,0.10); color: var(--lumen-danger); border-color: rgba(217,76,76,0.20); }
-    .status-badge.down .dot { background: var(--lumen-danger); box-shadow: 0 0 6px rgba(217,76,76,0.4); }
-    .status-badge.unknown { background: rgba(88,92,108,0.10); color: var(--lumen-mute); border-color: rgba(88,92,108,0.20); }
-    .status-badge.unknown .dot { background: var(--lumen-mute); }
+    .risk-badge.read_only { background: rgba(47,158,110,0.10); color: var(--lumen-success); border-color: rgba(47,158,110,0.20); }
+    .risk-badge.mutating { background: rgba(217,146,37,0.10); color: var(--lumen-warn); border-color: rgba(217,146,37,0.20); }
+    .risk-badge.destructive { background: rgba(217,76,76,0.10); color: var(--lumen-danger); border-color: rgba(217,76,76,0.20); }
+    .risk-badge.privileged { background: rgba(108,52,148,0.10); color: #8b5cf6; border-color: rgba(108,52,148,0.20); }
 
-    /* === Buttons === */
-    .l-btn {
-      display: inline-flex; align-items: center; gap: var(--lumen-s-2);
-      padding: 6px 12px; border-radius: var(--lumen-r-sm);
-      border: 1px solid transparent; background: var(--lumen-ink);
-      color: var(--lumen-paper); font: inherit; font-size: 12px; font-weight: 500;
-      cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    .l-btn:hover { box-shadow: var(--lumen-shadow); transform: translateY(-1px); }
-    .l-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-    .l-btn.ghost {
-      background: transparent; color: var(--lumen-ink-soft);
-      border: 1px solid var(--lumen-line);
-    }
-    .l-btn.ghost:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
-    .l-btn svg { width: 14px; height: 14px; }
+    /* === Confirm badge === */
+    .confirm-yes { color: var(--lumen-warn); font-weight: 500; font-size: 12px; }
+    .confirm-no { color: var(--lumen-mute); font-size: 12px; }
 
     .empty-block {
       background: var(--lumen-paper-2); border: 1px dashed var(--lumen-line);
       border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
       color: var(--lumen-mute); font-size: 13px; text-align: center;
     }
+
+    /* === Summary row === */
+    .summary-row {
+      display: flex; gap: var(--lumen-s-4); margin-top: var(--lumen-s-4);
+      flex-wrap: wrap;
+    }
+    .summary-chip {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      padding: var(--lumen-s-2) var(--lumen-s-3);
+      background: var(--lumen-paper-2); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-sm); font-size: 12px; color: var(--lumen-mute);
+    }
+    .summary-chip strong { color: var(--lumen-ink); }
 
     /* === Auto-refresh indicator === */
     .refresh-indicator {
@@ -189,28 +178,14 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* === Toast === */
-    .toast-container {
-      position: fixed; bottom: var(--lumen-s-5); right: var(--lumen-s-5);
-      z-index: 1000; display: flex; flex-direction: column; gap: var(--lumen-s-2);
-    }
-    .toast {
-      padding: var(--lumen-s-3) var(--lumen-s-4); border-radius: var(--lumen-r-md);
-      font-size: 13px; font-weight: 500; box-shadow: var(--lumen-shadow);
-      animation: toastIn 0.3s ease-out; max-width: 360px;
-    }
-    .toast.success { background: var(--lumen-success); color: white; }
-    .toast.error { background: var(--lumen-danger); color: white; }
-    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 
     @media (max-width: 720px) {
       aside.sidebar { width: 64px; }
       aside.sidebar .sidebar-text { display: none; }
       .panel { padding: var(--lumen-s-4); }
-      .provider-table { font-size: 12px; }
-      .provider-table .hide-mobile { display: none; }
+      .tool-table { font-size: 12px; }
+      .tool-table .hide-mobile { display: none; }
     }
   </style>
 </head>
@@ -252,13 +227,13 @@
         </svg>
         <span class="sidebar-text">Modelos</span>
       </a>
-      <a href="/settings/providers" class="nav-btn active">
+      <a href="/settings/providers" class="nav-btn">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
         </svg>
         <span class="sidebar-text">Providers</span>
       </a>
-      <a href="/settings/tools" class="nav-btn">
+      <a href="/settings/tools" class="nav-btn active">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -290,60 +265,56 @@
   <main class="main">
     <div class="topbar">
       <div style="flex:1;">
-        <h2>Ajustes &rsaquo; Providers</h2>
-        <p class="sub">Estado de salud de los proveedores de modelos</p>
+        <h2>Ajustes &rsaquo; Tools</h2>
+        <p class="sub">Clasificación de riesgo y confirmación de herramientas</p>
       </div>
       <div class="refresh-indicator" id="refresh-indicator">
         <span class="spin"></span>
-        <span>Auto-refresh 10s</span>
+        <span>Auto-refresh 30s</span>
       </div>
     </div>
 
     <div class="panel">
-      <!-- Degraded mode banner -->
-      <div id="degraded-banner" class="degraded-banner">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:18px;height:18px;flex-shrink:0;">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-        </svg>
-        <span>Todos los providers están caídos. Lumen puede tener funcionalidad limitada.</span>
+      <!-- Filter buttons -->
+      <div class="filter-bar" id="filter-bar">
+        <button class="filter-btn active" data-risk="all" onclick="setFilter('all', this)">Todos</button>
+        <button class="filter-btn" data-risk="read_only" onclick="setFilter('read_only', this)">Read Only</button>
+        <button class="filter-btn" data-risk="mutating" onclick="setFilter('mutating', this)">Mutating</button>
+        <button class="filter-btn" data-risk="destructive" onclick="setFilter('destructive', this)">Destructive</button>
+        <button class="filter-btn" data-risk="privileged" onclick="setFilter('privileged', this)">Privileged</button>
       </div>
 
       <div class="l-card">
-        <h3>Providers configurados</h3>
+        <h3>Herramientas registradas</h3>
         <div style="overflow-x:auto;">
-          <table class="provider-table" id="providers-table">
+          <table class="tool-table" id="tools-table">
             <thead>
               <tr>
-                <th>Nombre</th>
-                <th>Modelo</th>
-                <th>Estado</th>
-                <th class="hide-mobile">Latencia</th>
-                <th class="hide-mobile">Requests</th>
-                <th class="hide-mobile">Último error</th>
-                <th>Acción</th>
+                <th>Tool</th>
+                <th>Risk</th>
+                <th>Confirm</th>
+                <th class="hide-mobile">Descripción</th>
               </tr>
             </thead>
-            <tbody id="providers-body">
-              <tr><td colspan="7"><div class="empty-block">Cargando providers…</div></td></tr>
+            <tbody id="tools-body">
+              <tr><td colspan="4"><div class="empty-block">Cargando tools…</div></td></tr>
             </tbody>
           </table>
         </div>
       </div>
+
+      <!-- Summary -->
+      <div class="summary-row" id="summary-row">
+        <div class="summary-chip">Total: <strong id="summary-total">—</strong></div>
+        <div class="summary-chip">Requieren confirmación: <strong id="summary-confirm">—</strong></div>
+      </div>
     </div>
   </main>
 
-  <div class="toast-container" id="toast-container"></div>
-
   <script>
-    // === Toast ===
-    function showToast(message, type = 'success') {
-      const container = document.getElementById('toast-container');
-      const toast = document.createElement('div');
-      toast.className = `toast ${type}`;
-      toast.textContent = message;
-      container.appendChild(toast);
-      setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; setTimeout(() => toast.remove(), 300); }, 3500);
-    }
+    // === State ===
+    let allTools = [];
+    let activeFilter = 'all';
 
     // === Helpers ===
     function escapeHtml(text) {
@@ -352,92 +323,67 @@
       return div.innerHTML;
     }
 
-    function statusClass(status) {
-      if (status === 'healthy') return 'healthy';
-      if (status === 'degraded') return 'degraded';
-      if (status === 'down') return 'down';
-      return 'unknown';
+    const riskLabels = {
+      read_only: 'Read Only',
+      mutating: 'Mutating',
+      destructive: 'Destructive',
+      privileged: 'Privileged',
+    };
+
+    // === Filter ===
+    function setFilter(risk, btn) {
+      activeFilter = risk;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderTools();
     }
 
-    function statusLabel(status) {
-      if (status === 'healthy') return 'Saludable';
-      if (status === 'degraded') return 'Degradado';
-      if (status === 'down') return 'Caído';
-      return 'Desconocido';
-    }
+    // === Render ===
+    function renderTools() {
+      const body = document.getElementById('tools-body');
+      const filtered = activeFilter === 'all'
+        ? allTools
+        : allTools.filter(t => t.risk === activeFilter);
 
-    // === Render providers ===
-    function renderProviders(data) {
-      const body = document.getElementById('providers-body');
-      const banner = document.getElementById('degraded-banner');
-      const providers = data.providers || [];
-
-      if (providers.length === 0) {
-        body.innerHTML = '<tr><td colspan="7"><div class="empty-block">No hay providers configurados.</div></td></tr>';
+      if (filtered.length === 0) {
+        body.innerHTML = '<tr><td colspan="4"><div class="empty-block">No hay herramientas con este filtro.</div></td></tr>';
         return;
       }
 
-      const allDown = providers.every(p => p.status === 'down');
-      banner.classList.toggle('visible', allDown);
-
-      body.innerHTML = providers.map(p => {
-        const sc = statusClass(p.status);
-        const sl = statusLabel(p.status);
-        const latency = p.latency_ms != null ? `${p.latency_ms}ms` : '—';
-        const requests = p.requests != null ? String(p.requests) : '—';
-        const lastError = p.last_error || '—';
-        const canRetry = p.status === 'degraded' || p.status === 'down';
-        const retryBtn = canRetry
-          ? `<button class="l-btn ghost" onclick="retryProvider('${escapeHtml(p.name)}', this)">Reintentar</button>`
-          : '<span style="font-size:11px;color:var(--lumen-mute);">—</span>';
-
+      body.innerHTML = filtered.map(t => {
+        const riskBadge = `<span class="risk-badge ${t.risk}">${riskLabels[t.risk] || t.risk}</span>`;
+        const confirm = t.confirm_required
+          ? '<span class="confirm-yes">Sí</span>'
+          : '<span class="confirm-no">No</span>';
         return `<tr>
-          <td style="font-weight:600;color:var(--lumen-ink);">${escapeHtml(p.name)}</td>
-          <td class="mono">${escapeHtml(p.model || '—')}</td>
-          <td><span class="status-badge ${sc}"><span class="dot"></span>${sl}</span></td>
-          <td class="hide-mobile">${latency}</td>
-          <td class="hide-mobile">${requests}</td>
-          <td class="hide-mobile" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(lastError)}">${escapeHtml(lastError)}</td>
-          <td>${retryBtn}</td>
+          <td style="font-weight:600;color:var(--lumen-ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">${escapeHtml(t.tool)}</td>
+          <td>${riskBadge}</td>
+          <td>${confirm}</td>
+          <td class="hide-mobile" style="color:var(--lumen-mute);">${escapeHtml(t.description || '—')}</td>
         </tr>`;
       }).join('');
     }
 
     // === Load ===
-    async function loadProviders() {
+    async function loadTools() {
       try {
-        const res = await fetch('/api/providers');
-        if (!res.ok) throw new Error('Error al cargar providers');
-        const data = await res.json();
-        renderProviders(data);
+        const res = await fetch('/api/tools');
+        if (!res.ok) throw new Error('Error al cargar tools');
+        allTools = await res.json();
+
+        document.getElementById('summary-total').textContent = allTools.length;
+        document.getElementById('summary-confirm').textContent = allTools.filter(t => t.confirm_required).length;
+
+        renderTools();
       } catch (e) {
-        document.getElementById('providers-body').innerHTML =
-          `<tr><td colspan="7"><div class="empty-block">Error: ${escapeHtml(e.message)}</div></td></tr>`;
+        document.getElementById('tools-body').innerHTML =
+          `<tr><td colspan="4"><div class="empty-block">Error: ${escapeHtml(e.message)}</div></td></tr>`;
       }
     }
 
-    // === Retry ===
-    async function retryProvider(name, btn) {
-      if (btn) { btn.disabled = true; btn.textContent = 'Reintentando…'; }
-      try {
-        const res = await fetch('/api/providers/retry', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Error al reintentar');
-        showToast(`Provider "${name}" reiniciado`, 'success');
-        loadProviders(); // Refresh table
-      } catch (e) {
-        showToast('Error: ' + e.message, 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Reintentar'; }
-      }
-    }
-
-    // === Auto-refresh every 10 seconds ===
-    loadProviders();
-    setInterval(loadProviders, 10000);
+    // === Auto-refresh every 30s ===
+    loadTools();
+    setInterval(loadTools, 30000);
 
     // === Sidebar ===
     function toggleSidebar() {

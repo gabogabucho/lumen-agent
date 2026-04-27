@@ -22,6 +22,7 @@ from lumen.core.provider_health import ProviderHealthTracker
 from lumen.core.registry import CapabilityKind
 from lumen.core.runtime import apply_provider_runtime_env, bootstrap_runtime, refresh_runtime_registry, rehydrate_runtime_config, reload_runtime_personality_surface, sync_runtime_modules
 from lumen.core.lessons import VALID_CATEGORIES
+from lumen.core.tool_policy import ToolPolicy, SecurityConfig, ToolRisk
 
 BRAND = "#3d3d6d"
 BRAND_DIM = "#6b6baa"
@@ -1238,6 +1239,95 @@ def lesson_delete(
     console.print(f"[green]✓[/green] Lesson #{lesson_id} deleted")
 
     asyncio.run(memory.close())
+
+
+# ── tool policy & security commands ──────────────────────────────────────────
+
+
+@app.command("tools")
+def tools_list(
+    risk: str = typer.Option("", help="Filter by risk: read_only, mutating, destructive, privileged"),
+):
+    """List all tools with their risk classification."""
+    config = _load_persisted_config()
+    policy = ToolPolicy()
+    policy.load_defaults()
+    policy.load_config(config)
+
+    all_policies = policy.get_all_policies()
+
+    if risk:
+        all_policies = [p for p in all_policies if p["risk"] == risk]
+
+    console.print("\n[bold]Tools[/bold]\n")
+
+    risk_icons = {
+        "read_only": "[green]RO[/green]",
+        "mutating": "[yellow]MU[/yellow]",
+        "destructive": "[red]DE[/red]",
+        "privileged": "[magenta]PR[/magenta]",
+    }
+
+    for p in all_policies:
+        icon = risk_icons.get(p["risk"], "[dim]?[/dim]")
+        confirm = " [dim](confirm)[/dim]" if p["confirm_required"] else ""
+        console.print(f"  {icon} {p['tool']:30s} {p['risk']:12s}{confirm}")
+
+    summary = policy.get_summary()
+    console.print(f"\n  [dim]Total: {summary['total_tools']} | Need confirmation: {summary['needs_confirmation']}[/dim]\n")
+
+
+@app.command("security")
+def security_show():
+    """Show current security settings."""
+    config = _load_persisted_config()
+    sec = SecurityConfig.from_config(config)
+
+    console.print("\n[bold]Security Settings[/bold]\n")
+
+    toggles = [
+        ("Confirm deletions", sec.confirm_deletions),
+        ("Confirm terminal commands", sec.confirm_terminal),
+        ("Confirm system actions", sec.confirm_system_actions),
+        ("Auto-approve read-only tools", sec.auto_approve_read_only),
+    ]
+
+    for label, value in toggles:
+        status = "[green]ON[/green]" if value else "[red]OFF[/red]"
+        console.print(f"  {status}  {label}")
+
+    console.print(f"\n  Confirmation timeout: {sec.confirmation_timeout}s")
+    console.print(f"  Privileged tools: {', '.join(sec.privileged_tool_names)}\n")
+
+
+@app.command("security-set")
+def security_set(
+    key: str = typer.Argument(help="Setting: confirm_deletions, confirm_terminal, confirm_system_actions, auto_approve_read_only, confirmation_timeout"),
+    value: str = typer.Argument(help="Value: on/off, true/false, or a number (for timeout)"),
+):
+    """Update a security setting."""
+    config = _load_persisted_config()
+    if "security" not in config or not isinstance(config.get("security"), dict):
+        config["security"] = {}
+
+    valid_keys = {"confirm_deletions", "confirm_terminal", "confirm_system_actions", "auto_approve_read_only", "confirmation_timeout"}
+    if key not in valid_keys:
+        console.print(f"[red]Invalid key '{key}'. Valid: {', '.join(sorted(valid_keys))}[/red]")
+        raise typer.Exit(1)
+
+    # Parse value
+    if key == "confirmation_timeout":
+        try:
+            config["security"][key] = int(value)
+        except ValueError:
+            console.print("[red]Timeout must be a number (seconds)[/red]")
+            raise typer.Exit(1)
+    else:
+        config["security"][key] = value.lower() in ("true", "on", "1", "yes")
+
+    _save_persisted_config(config)
+    display = "ON" if config["security"][key] else "OFF" if isinstance(config["security"][key], bool) else config["security"][key]
+    console.print(f"[green]✓[/green] {key} = {display}")
 
 
 if __name__ == "__main__":

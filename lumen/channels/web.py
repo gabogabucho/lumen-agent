@@ -58,6 +58,7 @@ from lumen.core.module_setup import (
 from lumen.core.model_router import ModelRouter, ModelRouterConfig, VALID_ROLES
 from lumen.core.provider_health import ProviderHealthTracker
 from lumen.core.agent_status import AgentStatusCollector
+from lumen.core.tool_policy import ToolPolicy, SecurityConfig
 
 
 # State — initialized lazily after web setup or by CLI
@@ -1705,6 +1706,48 @@ async def page_providers(request: Request):
     )
 
 
+@app.get("/settings/tools")
+async def page_tools(request: Request):
+    """Tool policy settings page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "tools.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
+        },
+    )
+
+
+@app.get("/settings/security")
+async def page_security(request: Request):
+    """Security settings page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "security.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
+        },
+    )
+
+
 @app.get("/agent-status")
 async def page_agent_status(request: Request):
     """Agent diagnostic status page."""
@@ -2617,6 +2660,72 @@ async def api_providers_retry(request: Request):
         return JSONResponse(status_code=404, content={"error": f"Provider '{name}' not found"})
 
     return JSONResponse(status_code=400, content={"error": "No live provider tracker"})
+
+
+# ─── Tool Policy & Security API ───
+
+
+@app.get("/api/tools")
+async def api_tools_list(request: Request):
+    """List all tools with risk classification."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    policy = ToolPolicy()
+    policy.load_defaults()
+    policy.load_config(loaded)
+
+    return policy.get_all_policies()
+
+
+@app.get("/api/security")
+async def api_security_show(request: Request):
+    """Show current security settings."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    sec = SecurityConfig.from_config(loaded)
+    return sec.to_dict()
+
+
+@app.post("/api/security")
+async def api_security_update(request: Request):
+    """Update security settings."""
+    global _config
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    body = await request.json()
+    valid_keys = {"confirm_deletions", "confirm_terminal", "confirm_system_actions", "auto_approve_read_only", "confirmation_timeout"}
+
+    if "security" not in _config or not isinstance(_config.get("security"), dict):
+        _config["security"] = {}
+
+    updates = {}
+    for key, value in body.items():
+        if key in valid_keys:
+            if key == "confirmation_timeout":
+                _config["security"][key] = int(value)
+            else:
+                _config["security"][key] = bool(value)
+            updates[key] = _config["security"][key]
+
+    _merge_save_config(_config)
+    await _refresh_runtime_from_config(loaded)
+
+    return {"status": "ok", "updates": updates}
 
 
 # ─── Agent Status API ───
