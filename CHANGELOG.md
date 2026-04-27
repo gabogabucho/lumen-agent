@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-04-27
+
+### Fixed
+- **Streaming tool use loop — final response lost**: `think_stream()` called blocking `_tool_use_loop()` inside an async generator. During multi-step tool execution (30-90s), no events reached SSE/WebSocket clients, causing silent connection drops and lost final responses. New `_tool_use_loop_streaming()` async generator yields 4 progress event types (`tool_progress`, `tool_result`, `tool_status`, `delta`) keeping the connection alive. SSE handler forwards all new event types.
+
 ## [0.9.0] - 2026-04-27
 
 ### Added
