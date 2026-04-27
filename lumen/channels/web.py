@@ -55,6 +55,9 @@ from lumen.core.module_setup import (
     normalize_module_setup_values,
     pending_setup_for_manifest,
 )
+from lumen.core.model_router import ModelRouter, ModelRouterConfig, VALID_ROLES
+from lumen.core.provider_health import ProviderHealthTracker
+from lumen.core.agent_status import AgentStatusCollector
 
 
 # State — initialized lazily after web setup or by CLI
@@ -98,6 +101,7 @@ PERSONALITY_ENTRY_TAGS = {
 }
 _oauth_state_store: dict[str, dict] = {}
 _oauth_state_lock = threading.Lock()
+_agent_status_collector: AgentStatusCollector | None = None
 
 
 def configure(brain, locale: dict, config: dict, awareness=None, *, lumen_dir: Path | None = None):
@@ -1239,10 +1243,21 @@ async def health_check():
                 if c.is_ready()
             ]
         )
+
+    model = ""
+    provider_status = "unknown"
+    if _brain:
+        model = _brain.model or ""
+        if _brain.provider_health:
+            best = _brain.provider_health.get_best_provider()
+            provider_status = best.status.value if best else "unknown"
+
     return {
         "ok": _brain is not None,
         "version": __version__,
         "modules_ready": modules_ready,
+        "model": model,
+        "provider_status": provider_status,
     }
 
 
@@ -1644,6 +1659,69 @@ async def dashboard(request: Request):
             "mcp_count": len(_brain.registry.list_by_kind(CapabilityKind.MCP))
             if _brain
             else 0,
+        },
+    )
+
+
+@app.get("/settings/models")
+async def page_models(request: Request):
+    """Model routing settings page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "models.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
+        },
+    )
+
+
+@app.get("/settings/providers")
+async def page_providers(request: Request):
+    """Provider health settings page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "providers.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
+        },
+    )
+
+
+@app.get("/agent-status")
+async def page_agent_status(request: Request):
+    """Agent diagnostic status page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "agent-status.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
         },
     )
 
@@ -2386,7 +2464,171 @@ async def api_status(request: Request):
     }
 
 
-# ─── OpenRouter model catalog ───
+# ─── Model Routing API ───
+
+
+@app.get("/api/models")
+async def api_models_list(request: Request):
+    """Return current model routing configuration."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    router_cfg = ModelRouterConfig.from_config(loaded)
+    router = ModelRouter(router_cfg)
+
+    return {
+        "default": router_cfg.default,
+        "fallback": router_cfg.fallback,
+        "use_default_for_all": router_cfg.use_default_for_all,
+        "roles": {k: v for k, v in router_cfg.roles.items()},
+        "all_roles": list(VALID_ROLES),
+        "resolved": {role: router.get_model(role) for role in VALID_ROLES if role != "main"},
+    }
+
+
+@app.post("/api/models")
+async def api_models_update(request: Request):
+    """Update model routing configuration."""
+    global _config
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    body = await request.json()
+
+    # Ensure models section exists
+    if "models" not in _config or not isinstance(_config.get("models"), dict):
+        _config["models"] = {}
+
+    updates: dict = {}
+
+    # Update default
+    default = body.get("default")
+    if default and isinstance(default, str):
+        _config["models"]["default"] = default
+        _config["model"] = default  # Legacy key
+        updates["default"] = default
+
+    # Update fallback
+    fallback = body.get("fallback")
+    if fallback and isinstance(fallback, str):
+        _config["models"]["fallback"] = fallback
+        updates["fallback"] = fallback
+
+    # Update toggle
+    if "use_default_for_all" in body:
+        _config["models"]["use_default_for_all"] = bool(body["use_default_for_all"])
+        updates["use_default_for_all"] = bool(body["use_default_for_all"])
+
+    # Update role-specific
+    roles = body.get("roles")
+    if isinstance(roles, dict):
+        if "roles" not in _config["models"] or not isinstance(_config["models"].get("roles"), dict):
+            _config["models"]["roles"] = {}
+        for role, model in roles.items():
+            if role in VALID_ROLES and isinstance(model, str):
+                _config["models"]["roles"][role] = model
+        updates["roles"] = _config["models"]["roles"]
+
+    _merge_save_config(_config)
+    await _refresh_runtime_from_config(loaded)
+
+    return {"status": "ok", "updates": updates}
+
+
+# ─── Provider Health API ───
+
+
+@app.get("/api/providers")
+async def api_providers_status(request: Request):
+    """Return health status of all configured providers."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    tracker = ProviderHealthTracker.from_config(loaded)
+
+    # If brain has a live tracker, use that instead (has real health data)
+    if _brain and hasattr(_brain, "provider_health") and _brain.provider_health:
+        summary = _brain.provider_health.get_summary()
+    else:
+        summary = tracker.get_summary()
+
+    return summary
+
+
+@app.post("/api/providers/retry")
+async def api_providers_retry(request: Request):
+    """Manually retry a degraded/down provider."""
+    body = await request.json()
+    name = body.get("name", "")
+
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "name is required"})
+
+    if _brain and hasattr(_brain, "provider_health") and _brain.provider_health:
+        if _brain.provider_health.retry_provider(name):
+            return {"status": "ok", "message": f"Provider '{name}' reset"}
+        return JSONResponse(status_code=404, content={"error": f"Provider '{name}' not found"})
+
+    return JSONResponse(status_code=400, content={"error": "No live provider tracker"})
+
+
+# ─── Agent Status API ───
+
+
+@app.get("/api/agent/status")
+async def api_agent_status(request: Request):
+    """Return consolidated agent status snapshot."""
+    global _agent_status_collector
+
+    if _agent_status_collector is None:
+        _agent_status_collector = AgentStatusCollector(version=__version__)
+
+        # Register callbacks if brain is available
+        if _brain:
+            _agent_status_collector.register_model_callback(
+                lambda: _brain.model_router.get_model("main") if _brain.model_router else (_brain.model or "")
+            )
+            _agent_status_collector.register_provider_callback(
+                lambda: _config.get("provider", "unknown") if _config else "unknown"
+            )
+            _agent_status_collector.register_provider_status_callback(
+                lambda: _brain.provider_health.get_best_provider().status.value if _brain.provider_health and _brain.provider_health.get_best_provider() else "unknown"
+            )
+            _agent_status_collector.register_degraded_mode_callback(
+                lambda: _brain.provider_health.is_degraded_mode() if _brain.provider_health else False
+            )
+            _agent_status_collector.register_tools_callback(
+                lambda: list(_brain.connectors.as_tools().keys()) if _brain.connectors else []
+            )
+            if _brain.memory:
+                async def _get_memory_stats():
+                    try:
+                        stats = await _brain.memory.get_stats()
+                        from lumen.core.agent_status import MemoryStats
+                        return MemoryStats(**stats)
+                    except Exception:
+                        from lumen.core.agent_status import MemoryStats
+                        return MemoryStats()
+                mem_stats = await _get_memory_stats()
+                _agent_status_collector.register_memory_callback(lambda: mem_stats)
+
+    snapshot = _agent_status_collector.snapshot()
+    return snapshot.to_dict()
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 _openrouter_models_cache: dict[str, object] = {"fetched_at": 0.0, "items": []}

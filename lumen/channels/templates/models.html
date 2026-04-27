@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="{{ language | default('es') }}" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumen — Modelos</title>
+  <link rel="icon" href="/static/logo.png" type="image/png">
+  {% include "_partials/tokens.html" %}
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      overflow: hidden;
+      font-family: var(--lumen-font);
+      color: var(--lumen-ink);
+      background: var(--lumen-paper);
+      font-size: 14px;
+    }
+
+    /* === Sidebar === */
+    aside.sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      background: var(--lumen-paper-2);
+      border-right: 1px solid var(--lumen-line);
+      box-shadow: 10px 0 30px rgba(15,21,69,0.06);
+      display: flex;
+      flex-direction: column;
+      transition: width 0.25s ease;
+      position: relative;
+      z-index: 2;
+    }
+    aside.sidebar.collapsed { width: 64px; }
+    aside.sidebar.collapsed .sidebar-text { display: none; }
+    .sidebar-head {
+      padding: var(--lumen-s-4);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--lumen-s-3);
+      border-bottom: 1px solid var(--lumen-line);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: var(--lumen-s-3);
+      overflow: hidden;
+    }
+    .brand img { width: 36px; height: 36px; border-radius: var(--lumen-r-sm); flex-shrink: 0; }
+    .brand-text h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--lumen-ink); }
+    .brand-text p { font-size: 11px; color: var(--lumen-mute); margin-top: 2px; }
+    .icon-btn {
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      padding: 6px; border-radius: var(--lumen-r-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .icon-btn:hover { background: var(--lumen-lavender); color: var(--lumen-ink); }
+    .icon-btn svg { width: 18px; height: 18px; }
+
+    nav.sidebar-nav {
+      flex: 1; padding: var(--lumen-s-3); display: flex;
+      flex-direction: column; gap: 4px; overflow-y: auto;
+    }
+    .nav-btn {
+      display: flex; align-items: center; gap: var(--lumen-s-3);
+      padding: 10px 12px; border-radius: var(--lumen-r-sm);
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      font: inherit; font-weight: 500; cursor: pointer; width: 100%;
+      text-align: left; text-decoration: none;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .nav-btn:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .nav-btn.active { background: var(--lumen-lavender); color: var(--lumen-blue); }
+    .nav-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .sidebar-foot {
+      padding: var(--lumen-s-3); border-top: 1px solid var(--lumen-line);
+      display: flex; flex-direction: column; gap: var(--lumen-s-2);
+    }
+    .status-pill {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      padding: 6px 10px; font-size: 12px; color: var(--lumen-mute);
+    }
+    .status-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--lumen-success);
+      box-shadow: 0 0 8px rgba(47,158,110,0.4);
+    }
+
+    /* === Main === */
+    main.main {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+      background: var(--lumen-paper);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+    }
+    .topbar {
+      padding: var(--lumen-s-4) var(--lumen-s-5);
+      border-bottom: 1px solid var(--lumen-line);
+      display: flex; align-items: center; justify-content: flex-start;
+      gap: var(--lumen-s-4); background: var(--lumen-paper);
+      box-shadow: 0 8px 24px rgba(15,21,69,0.04);
+    }
+    .topbar h2 { font-size: 18px; font-weight: 600; color: var(--lumen-ink); }
+    .topbar .sub { font-size: 12px; color: var(--lumen-mute); margin-top: 2px; }
+
+    .panel {
+      flex: 1; overflow-y: auto; padding: var(--lumen-s-5) var(--lumen-s-6);
+    }
+
+    /* === Shared components === */
+    .l-card {
+      background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
+      box-shadow: var(--lumen-shadow-sm);
+    }
+    .l-card h3 {
+      font-size: 12px; font-weight: 600; color: var(--lumen-mute);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--lumen-s-3);
+    }
+    .l-card p { color: var(--lumen-ink-soft); line-height: 1.6; }
+    .l-card-grid { display: grid; gap: var(--lumen-s-4); }
+    .l-card-grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+    .settings-stack { display: grid; gap: var(--lumen-s-4); }
+    .settings-grid {
+      display: grid; gap: var(--lumen-s-3);
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .field { display: grid; gap: 8px; }
+    .field label {
+      font-size: 12px; font-weight: 600; color: var(--lumen-ink-soft);
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .field-hint { font-size: 12px; color: var(--lumen-mute); line-height: 1.5; }
+    .l-input {
+      flex: 1; background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: 12px 14px; font: inherit;
+      font-size: 14px; color: var(--lumen-ink);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .l-input:focus {
+      outline: none; border-color: var(--lumen-blue);
+      box-shadow: 0 0 0 4px var(--lumen-lavender);
+    }
+    .l-input:disabled {
+      opacity: 0.5; cursor: not-allowed;
+    }
+    .l-btn {
+      display: inline-flex; align-items: center; gap: var(--lumen-s-2);
+      padding: 12px 18px; border-radius: var(--lumen-r-md);
+      border: 1px solid transparent; background: var(--lumen-ink);
+      color: var(--lumen-paper); font: inherit; font-weight: 500;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .l-btn:hover { box-shadow: var(--lumen-shadow); transform: translateY(-1px); }
+    .l-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+    .l-btn.ghost {
+      background: transparent; color: var(--lumen-ink-soft);
+      border: 1px solid var(--lumen-line);
+    }
+    .l-btn.ghost:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .l-btn.small { padding: 6px 12px; font-size: 12px; }
+    .settings-actions {
+      display: flex; flex-wrap: wrap; align-items: center; gap: var(--lumen-s-3);
+    }
+    .settings-message { font-size: 12px; color: var(--lumen-mute); }
+    .settings-message.success { color: var(--lumen-success); }
+    .settings-message.error { color: var(--lumen-danger); }
+
+    /* === Toggle switch === */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--lumen-s-3); padding: var(--lumen-s-4) 0;
+    }
+    .toggle-row-label { font-size: 14px; font-weight: 500; color: var(--lumen-ink); }
+    .toggle-row-hint { font-size: 12px; color: var(--lumen-mute); margin-top: 4px; }
+    .toggle-switch {
+      position: relative; width: 48px; height: 26px; flex-shrink: 0;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute; inset: 0; border-radius: 999px;
+      background: var(--lumen-line); cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .toggle-track::after {
+      content: ''; position: absolute; top: 3px; left: 3px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      transition: transform 0.2s ease;
+    }
+    .toggle-switch input:checked + .toggle-track {
+      background: var(--lumen-blue);
+    }
+    .toggle-switch input:checked + .toggle-track::after {
+      transform: translateX(22px);
+    }
+
+    /* === Resolved model chips === */
+    .resolved-grid {
+      display: grid; gap: var(--lumen-s-3);
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      margin-top: var(--lumen-s-4);
+    }
+    .resolved-chip {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: var(--lumen-s-3) var(--lumen-s-4);
+      background: var(--lumen-paper-2); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-sm);
+    }
+    .resolved-chip-label {
+      font-size: 11px; font-weight: 600; color: var(--lumen-mute);
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .resolved-chip-model {
+      font-size: 13px; font-weight: 500; color: var(--lumen-ink);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    /* === Toast === */
+    .toast-container {
+      position: fixed; bottom: var(--lumen-s-5); right: var(--lumen-s-5);
+      z-index: 1000; display: flex; flex-direction: column; gap: var(--lumen-s-2);
+    }
+    .toast {
+      padding: var(--lumen-s-3) var(--lumen-s-4); border-radius: var(--lumen-r-md);
+      font-size: 13px; font-weight: 500; box-shadow: var(--lumen-shadow);
+      animation: toastIn 0.3s ease-out;
+      max-width: 360px;
+    }
+    .toast.success { background: var(--lumen-success); color: white; }
+    .toast.error { background: var(--lumen-danger); color: white; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 720px) {
+      aside.sidebar { width: 64px; }
+      aside.sidebar .sidebar-text { display: none; }
+      .panel { padding: var(--lumen-s-4); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <img src="/static/logo.png" alt="Lumen" />
+        <div class="brand-text sidebar-text">
+          <h1>Lumen</h1>
+          <p>Ajustes</p>
+        </div>
+      </div>
+      <button class="icon-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+        <span class="sidebar-text">Charlas</span>
+      </a>
+      <a href="/dashboard?panel=config" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="sidebar-text">Ajustes</span>
+      </a>
+      <a href="/settings/models" class="nav-btn active">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <span class="sidebar-text">Modelos</span>
+      </a>
+      <a href="/settings/providers" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+        </svg>
+        <span class="sidebar-text">Providers</span>
+      </a>
+      <a href="/agent-status" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+        <span class="sidebar-text">Estado</span>
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="status-pill">
+        <span class="dot"></span>
+        <span class="sidebar-text">Lumen está activa</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h2>Ajustes &rsaquo; Modelos</h2>
+        <p class="sub">Configurá qué modelo usa cada rol del agente</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="settings-stack">
+        <!-- Current config card -->
+        <div class="l-card">
+          <h3>Modelo principal y fallback</h3>
+          <p style="margin-bottom:var(--lumen-s-4);">El modelo principal es el que usa Lumen para todo. El fallback entra si el principal falla.</p>
+          <div class="settings-grid">
+            <div class="field">
+              <label for="model-default">Modelo principal</label>
+              <input id="model-default" name="default" class="l-input" type="text" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="model-fallback">Modelo fallback</label>
+              <input id="model-fallback" name="fallback" class="l-input" type="text" autocomplete="off" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Toggle card -->
+        <div class="l-card">
+          <h3>Enrutamiento por rol</h3>
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-row-label">Usar el mismo modelo para todos los roles</div>
+              <div class="toggle-row-hint">Si está activado, el modelo principal se usa para planificar, ejecutar, resumir y responder.</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-use-default" checked />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <!-- Role selectors (shown when toggle is OFF) -->
+          <div id="role-selectors" style="display:none;">
+            <div class="settings-grid" style="margin-top:var(--lumen-s-4);">
+              <div class="field">
+                <label for="role-planner">Planner</label>
+                <input id="role-planner" name="planner" class="l-input" type="text" placeholder="Modelo para planner" autocomplete="off" />
+                <div class="field-hint">Planifica tareas y descompone problemas</div>
+              </div>
+              <div class="field">
+                <label for="role-executor">Executor</label>
+                <input id="role-executor" name="executor" class="l-input" type="text" placeholder="Modelo para executor" autocomplete="off" />
+                <div class="field-hint">Ejecuta tareas y genera código</div>
+              </div>
+              <div class="field">
+                <label for="role-summarizer">Summarizer</label>
+                <input id="role-summarizer" name="summarizer" class="l-input" type="text" placeholder="Modelo para summarizer" autocomplete="off" />
+                <div class="field-hint">Resume conversaciones y extrae conclusiones</div>
+              </div>
+              <div class="field">
+                <label for="role-responder">Responder</label>
+                <input id="role-responder" name="responder" class="l-input" type="text" placeholder="Modelo para responder" autocomplete="off" />
+                <div class="field-hint">Responde al usuario directamente</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Save -->
+        <div class="settings-actions">
+          <button id="btn-save" type="button" class="l-btn">Guardar cambios</button>
+          <span id="save-message" class="settings-message">Cargando configuración…</span>
+        </div>
+
+        <!-- Resolved models (read-only) -->
+        <div class="l-card">
+          <h3>Modelos resueltos por rol</h3>
+          <p>Modelo que se usa efectivamente para cada rol (después de aplicar la configuración).</p>
+          <div id="resolved-models" class="resolved-grid">
+            <p class="field-hint">Cargando…</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script>
+    // === Toast ===
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; setTimeout(() => toast.remove(), 300); }, 3500);
+    }
+
+    // === Toggle ===
+    const toggle = document.getElementById('toggle-use-default');
+    const roleSelectors = document.getElementById('role-selectors');
+    toggle.addEventListener('change', () => {
+      const useDefault = toggle.checked;
+      roleSelectors.style.display = useDefault ? 'none' : 'block';
+      document.querySelectorAll('#role-selectors .l-input').forEach(input => {
+        input.disabled = useDefault;
+      });
+    });
+
+    // === Save message helper ===
+    function setSaveMessage(text, kind = '') {
+      const el = document.getElementById('save-message');
+      el.textContent = text;
+      el.className = `settings-message ${kind}`.trim();
+    }
+
+    // === Load config ===
+    async function loadModels() {
+      try {
+        const res = await fetch('/api/models');
+        if (!res.ok) throw new Error('No se pudo cargar la configuración');
+        const data = await res.json();
+
+        document.getElementById('model-default').value = data.default || '';
+        document.getElementById('model-fallback').value = data.fallback || '';
+        toggle.checked = !!data.use_default_for_all;
+        toggle.dispatchEvent(new Event('change'));
+
+        if (data.roles) {
+          document.getElementById('role-planner').value = data.roles.planner || '';
+          document.getElementById('role-executor').value = data.roles.executor || '';
+          document.getElementById('role-summarizer').value = data.roles.summarizer || '';
+          document.getElementById('role-responder').value = data.roles.responder || '';
+        }
+
+        renderResolved(data.resolved || {});
+        setSaveMessage('Configuración cargada. Modificá los valores y guardá.');
+      } catch (e) {
+        setSaveMessage('Error al cargar: ' + e.message, 'error');
+      }
+    }
+
+    function renderResolved(resolved) {
+      const container = document.getElementById('resolved-models');
+      const roleLabels = {
+        planner: 'Planner',
+        executor: 'Executor',
+        summarizer: 'Summarizer',
+        responder: 'Responder',
+      };
+      if (!resolved || Object.keys(resolved).length === 0) {
+        container.innerHTML = '<p class="field-hint">No hay modelos resueltos.</p>';
+        return;
+      }
+      container.innerHTML = Object.entries(resolved).map(([role, model]) => `
+        <div class="resolved-chip">
+          <span class="resolved-chip-label">${roleLabels[role] || role}</span>
+          <span class="resolved-chip-model">${model || '—'}</span>
+        </div>
+      `).join('');
+    }
+
+    // === Save ===
+    document.getElementById('btn-save').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-save');
+      btn.disabled = true;
+      setSaveMessage('Guardando…');
+
+      const payload = {
+        default: document.getElementById('model-default').value.trim(),
+        fallback: document.getElementById('model-fallback').value.trim(),
+        use_default_for_all: toggle.checked,
+      };
+
+      if (!toggle.checked) {
+        payload.roles = {
+          planner: document.getElementById('role-planner').value.trim(),
+          executor: document.getElementById('role-executor').value.trim(),
+          summarizer: document.getElementById('role-summarizer').value.trim(),
+          responder: document.getElementById('role-responder').value.trim(),
+        };
+      }
+
+      try {
+        const res = await fetch('/api/models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'ok') throw new Error(data.error || 'Error al guardar');
+
+        setSaveMessage('Configuración guardada correctamente.', 'success');
+        showToast('Modelos actualizados', 'success');
+
+        // Reload to show fresh resolved
+        loadModels();
+      } catch (e) {
+        setSaveMessage('Error: ' + e.message, 'error');
+        showToast('No se pudo guardar', 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // === Sidebar ===
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      sidebar.classList.toggle('collapsed');
+    }
+
+    // === Theme ===
+    const THEME_KEY = 'lumen-theme';
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+    applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+
+    // === Init ===
+    loadModels();
+  </script>
+</body>
+</html>

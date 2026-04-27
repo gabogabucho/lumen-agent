@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-04-27
+
+### Added
+- **Model Router** (`model_router.py`): Role-based model selection (planner, executor, summarizer, responder) with configurable default and guaranteed fallback. Toggle "use default for all" for backward compat. Config-driven — no code edits needed.
+- **Provider Health** (`provider_health.py`): EWMA-based latency tracking, exponential backoff on failures, auto-recovery after cooldown, priority-based fallback chain, degraded mode detection. Inspired by Aiden's self-healing provider routing.
+- **Agent Status** (`agent_status.py`): Consolidated observable state — model, provider health, channels, modules, tools, memory stats, warnings. Callback-based collector for loose coupling. Lightweight `/health` endpoint enrichment.
+- **5 new CLI commands**: `lumen model`, `lumen model-set`, `lumen model-toggle`, `lumen provider`, `lumen provider-retry`. `lumen status` enriched with model routing + provider health.
+- **6 new API endpoints**: `GET/POST /api/models`, `GET /api/providers`, `POST /api/providers/retry`, `GET /api/agent/status`. `/health` now includes model + provider status.
+- **3 new UI pages**: Ajustes > Modelos (role routing config), Ajustes > Providers (health table with auto-refresh), Estado del Agente (diagnostic panel). Sidebar navigation updated.
+
+### Changed
+- **Brain integration**: `_resolved_model()` now accepts role parameter and delegates to `ModelRouter`. `_completion_options()` maps purpose to model role. `think()` records provider health (success latency + failures).
+
+### Tests
+- **153 new tests** (45 model_router + 66 provider_health + 42 agent_status). 334 total ran, zero regressions.
+
 ## [0.7.1] - 2026-04-27
 
 ### Fixed

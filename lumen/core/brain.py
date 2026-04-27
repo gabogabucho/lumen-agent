@@ -14,6 +14,7 @@ The brain combines three sources into one prompt:
 import json
 import logging
 import re
+import time
 import unicodedata
 import uuid
 from pathlib import Path
@@ -31,6 +32,8 @@ from lumen.core.consciousness import Consciousness
 from lumen.core.memory import Memory
 from lumen.core.personality import Personality
 from lumen.core.registry import CapabilityKind, Registry
+from lumen.core.model_router import ModelRouter, ModelRouterConfig
+from lumen.core.provider_health import ProviderHealthTracker
 from lumen.core.session import Session
 
 
@@ -61,6 +64,8 @@ class Brain:
         api_key_env: str | None = None,
         flow_action_handler=None,
         config: dict | None = None,
+        model_router: ModelRouter | None = None,
+        provider_health: ProviderHealthTracker | None = None,
     ):
         self.consciousness = consciousness
         self.personality = personality
@@ -77,15 +82,35 @@ class Brain:
         self.api_key_env = api_key_env
         self.flow_action_handler = flow_action_handler
         self.config = config or {}
+        self.model_router = model_router or ModelRouter(
+            ModelRouterConfig.from_config(config)
+        )
+        self.provider_health = provider_health or ProviderHealthTracker.from_config(config)
         self._last_detected_language: str = self.language
         self._current_messages: list[dict] | None = None  # For contradiction retry
 
-    def _resolved_model(self) -> str:
-        """Route model through OpenRouter when OpenRouter creds are active."""
-        model = self.model or ""
+    def _resolved_model(self, role: str = "main") -> str:
+        """Route model through OpenRouter when OpenRouter creds are active.
+
+        Uses model_router for role-based routing if available.
+        """
+        model = self.model_router.get_model(role) if self.model_router else (self.model or "")
         if self.api_key_env == "OPENROUTER_API_KEY" and not model.startswith("openrouter/"):
             return f"openrouter/{model}"
         return model
+
+    def _infer_current_provider_name(self, model: str) -> str:
+        """Infer provider name from model string for health tracking."""
+        if not self.provider_health or not model:
+            return "unknown"
+        # Check if any registered provider matches this model
+        for name, entry in self.provider_health._providers.items():
+            if entry.model == model:
+                return name
+        # Fallback: extract from model prefix
+        if "/" in model:
+            return model.split("/")[0]
+        return "unknown"
 
     def _guard_capability_claims(self, response: str) -> str:
         """Verify the LLM response doesn't claim capabilities Lumen doesn't have.
@@ -723,6 +748,7 @@ class Brain:
 
         try:
             options = self._completion_options(purpose="main", tools=tools)
+            start_time = time.monotonic()
             response = await acompletion(
                 model=options["model"],
                 messages=messages,
@@ -730,7 +756,18 @@ class Brain:
                 temperature=options["temperature"],
                 max_tokens=options["max_tokens"],
             )
+            elapsed = time.monotonic() - start_time
+            # Record provider health if available
+            if self.provider_health:
+                provider_name = self._infer_current_provider_name(options["model"])
+                self.provider_health.record_success(provider_name, latency=elapsed)
         except Exception as e:
+            # Record failure if provider health is tracking
+            if self.provider_health:
+                provider_name = self._infer_current_provider_name(
+                    self._resolved_model() if hasattr(self, '_resolved_model') else ""
+                )
+                self.provider_health.record_failure(provider_name, error=str(e))
             return {"message": f"I had trouble thinking: {e}", "tool_calls": []}
 
         # 6. Tool use loop — if LLM called tools, execute and send results back
@@ -1947,9 +1984,14 @@ class Brain:
 
     def _completion_options(self, *, purpose: str, tools: list[dict] | None = None, stream: bool = False) -> dict[str, Any]:
         profile = self._model_profile()
+
+        # Map purpose to model routing role
+        role_map = {"main": "main", "proactive": "summarizer", "contradiction": "main"}
+        role = role_map.get(purpose, "main")
+
         if purpose == "proactive":
             result = {
-                "model": self._resolved_model(),
+                "model": self._resolved_model(role=role),
                 "messages": None,
                 "max_tokens": profile["proactive_max_tokens"],
                 "temperature": profile["proactive_temperature"],
@@ -1957,7 +1999,7 @@ class Brain:
         elif purpose == "contradiction":
             # Retry with full tool access so the LLM can act on corrected info
             result = {
-                "model": self._resolved_model(),
+                "model": self._resolved_model(role=role),
                 "messages": None,
                 "tools": tools,
                 "max_tokens": profile["completion_max_tokens"] + 256,
@@ -1965,7 +2007,7 @@ class Brain:
             }
         else:
             result = {
-                "model": self._resolved_model(),
+                "model": self._resolved_model(role=role),
                 "messages": None,
                 "tools": tools,
                 "max_tokens": profile["completion_max_tokens"],

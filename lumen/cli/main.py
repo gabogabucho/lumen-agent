@@ -16,7 +16,9 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 
 from lumen import __version__
+from lumen.core.model_router import ModelRouter, ModelRouterConfig, VALID_ROLES
 from lumen.core.paths import resolve_lumen_dir
+from lumen.core.provider_health import ProviderHealthTracker
 from lumen.core.registry import CapabilityKind
 from lumen.core.runtime import apply_provider_runtime_env, bootstrap_runtime, refresh_runtime_registry, rehydrate_runtime_config, reload_runtime_personality_surface, sync_runtime_modules
 
@@ -69,6 +71,13 @@ def _load_persisted_config(config_path: Path | None = None) -> dict:
         return {}
     loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def _save_persisted_config(config: dict, config_path: Path | None = None) -> None:
+    """Write config dict back to YAML file."""
+    path = config_path or CONFIG_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.dump(config, default_flow_style=False), encoding="utf-8")
 
 
 def _request_live_reload(lumen_dir: Path, timeout: float = 15.0) -> bool:
@@ -432,6 +441,24 @@ def status(
         )
     )
 
+    # Model routing & provider info
+    router_cfg = ModelRouterConfig.from_config(config)
+    tracker = ProviderHealthTracker.from_config(config)
+    summary = tracker.get_summary()
+
+    console.print(f"\n[bold]Model Routing[/bold]")
+    console.print(f"  Default:  {router_cfg.default}")
+    console.print(f"  Fallback: {router_cfg.fallback}")
+    console.print(f"  Role routing: {'off' if router_cfg.use_default_for_all else 'on'}")
+
+    if summary["providers"]:
+        console.print(f"\n[bold]Providers[/bold]")
+        for p in summary["providers"]:
+            status_icon = {"healthy": "🟢", "degraded": "🟡", "down": "🔴"}.get(p["status"], "⚪")
+            console.print(f"  {status_icon} {p['name']:20s} {p['status']:10s} ({p['total_requests']} requests)")
+        if summary["degraded_mode"]:
+            console.print("  [red]⚠ DEGRADED MODE[/red]")
+
 
 @app.command()
 def install():
@@ -704,6 +731,148 @@ def reload(
 
     cap_count = len(brain.registry.all()) if brain.registry else 0
     console.print(f"[green]✓[/green] Runtime reloaded — {cap_count} capabilities active")
+
+
+# ── model commands ────────────────────────────────────────────────────────────
+
+
+@app.command("model")
+def model_list(
+    ctx: typer.Context,
+    role: str = typer.Option("", help="Filter by role (planner, executor, summarizer, responder)"),
+):
+    """Show current model configuration and role assignments."""
+    config = _load_persisted_config()
+    router_cfg = ModelRouterConfig.from_config(config)
+    router = ModelRouter(router_cfg)
+    router.list_roles()
+
+    console.print("\n[bold]Model Configuration[/bold]\n")
+
+    # Default + Fallback
+    console.print(f"  Default:    [cyan]{router_cfg.default}[/cyan]")
+    console.print(f"  Fallback:   [cyan]{router_cfg.fallback}[/cyan]")
+    console.print(f"  Use default for all: {'[green]Yes[/green]' if router_cfg.use_default_for_all else '[yellow]No[/yellow]'}")
+
+    # Role assignments
+    if not router_cfg.use_default_for_all:
+        console.print("\n  [bold]Role Assignments:[/bold]")
+        for r in VALID_ROLES:
+            if r != "main":
+                assigned = router_cfg.roles.get(r, "(uses default)")
+                console.print(f"    {r:12s} → {assigned}")
+    else:
+        console.print("\n  [dim]Role routing disabled (use_default_for_all=True)[/dim]")
+
+    console.print()
+
+
+@app.command("model-set")
+def model_set(
+    ctx: typer.Context,
+    model: str = typer.Argument(help="Model string (e.g., 'deepseek/deepseek-chat')"),
+    role: str = typer.Option("", help="Role to assign (planner, executor, summarizer, responder). Omit for default."),
+):
+    """Set model for a specific role or the default."""
+    config = _load_persisted_config()
+
+    if not config:
+        console.print("[red]No configuration found. Run 'lumen install' first.[/red]")
+        raise typer.Exit(1)
+
+    # Ensure models section exists
+    if "models" not in config or not isinstance(config.get("models"), dict):
+        config["models"] = {}
+
+    if role:
+        if role not in VALID_ROLES:
+            console.print(f"[red]Invalid role '{role}'. Valid: {', '.join(r for r in VALID_ROLES if r != 'main')}[/red]")
+            raise typer.Exit(1)
+        config["models"].setdefault("roles", {})[role] = model
+        console.print(f"[green]✓[/green] {role} → {model}")
+    else:
+        config["models"]["default"] = model
+        config["model"] = model  # Legacy key for backward compat
+        console.print(f"[green]✓[/green] Default → {model}")
+
+    _save_persisted_config(config)
+    console.print("[dim]Restart Lumen or run 'lumen reload' to apply.[/dim]")
+
+
+@app.command("model-toggle")
+def model_toggle(
+    ctx: typer.Context,
+    value: bool = typer.Argument(help="True=use default for all, False=enable role routing"),
+):
+    """Toggle 'use default model for all roles' mode."""
+    config = _load_persisted_config()
+    if not config:
+        console.print("[red]No configuration found.[/red]")
+        raise typer.Exit(1)
+
+    if "models" not in config or not isinstance(config.get("models"), dict):
+        config["models"] = {}
+
+    config["models"]["use_default_for_all"] = value
+    _save_persisted_config(config)
+
+    if value:
+        console.print("[green]✓[/green] Role routing disabled — using default model for everything")
+    else:
+        console.print("[green]✓[/green] Role routing enabled — each role uses its assigned model")
+    console.print("[dim]Restart Lumen or run 'lumen reload' to apply.[/dim]")
+
+
+# ── provider commands ─────────────────────────────────────────────────────────
+
+
+@app.command("provider")
+def provider_status(
+    ctx: typer.Context,
+    name: str = typer.Option("", help="Show details for a specific provider"),
+):
+    """Show provider health status."""
+    config = _load_persisted_config()
+    tracker = ProviderHealthTracker.from_config(config)
+    summary = tracker.get_summary()
+
+    console.print("\n[bold]Provider Status[/bold]\n")
+
+    if not summary["providers"]:
+        console.print("  [dim]No providers configured (using legacy single-model mode)[/dim]\n")
+        return
+
+    for p in summary["providers"]:
+        status_color = {"healthy": "green", "degraded": "yellow", "down": "red"}.get(p["status"], "white")
+        console.print(f"  [{status_color}]{p['name']}[/{status_color}]  {p['model']}")
+        console.print(f"    Status:    [{status_color}]{p['status'].upper()}[/{status_color}]")
+        console.print(f"    Priority:  {p['priority']}")
+        console.print(f"    Latency:   {p['ewma_latency']}s (EWMA)")
+        console.print(f"    Requests:  {p['total_requests']} ({p['success_count']} ok, {p['error_count']} fail)")
+        if p["last_error"]:
+            console.print(f"    Last error: {p['last_error']}")
+        if p["in_backoff"]:
+            console.print(f"    Backoff until: {p['backoff_until']}")
+        console.print()
+
+    if summary["degraded_mode"]:
+        console.print("[red]⚠ DEGRADED MODE — All providers are down[/red]\n")
+
+
+@app.command("provider-retry")
+def provider_retry(
+    ctx: typer.Context,
+    name: str = typer.Argument(help="Provider name to retry"),
+):
+    """Manually retry a degraded/down provider."""
+    config = _load_persisted_config()
+    tracker = ProviderHealthTracker.from_config(config)
+
+    if tracker.retry_provider(name):
+        console.print(f"[green]✓[/green] Provider '{name}' reset — will be tried on next request")
+    else:
+        console.print(f"[red]✗[/red] Provider '{name}' not found")
+        raise typer.Exit(1)
 
 
 # ── module install commands ──────────────────────────────────────────────────
