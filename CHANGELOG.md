@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-04-27
+
+### Added
+- **Session Distillation** (`distiller.py`): After sessions end, LLM extracts 5-15 durable facts from conversations. Facts stored in `session_facts` table with category, importance, and session source. Inspired by Aiden's session-end memory distillation.
+- **Persistent Lessons** (`lessons.py`): Store of learned rules that persist across sessions. Auto-generated when the same error occurs 3+ times. Manual creation via CLI/UI/API. Confidence scoring with decay on violation. Pin/unpin support. Injected into system prompt as "Learned Rules" block.
+- **Memory extension**: 3 new tables (`session_facts`, `session_summaries`, `lessons`) with indexes. 12 new methods on Memory class including `get_stats()` for observability.
+- **6 new CLI commands**: `lumen memory-facts`, `lumen memory-summary`, `lumen lessons`, `lumen lesson-add`, `lumen lesson-pin`, `lumen lesson-delete`.
+- **6 new API endpoints**: `GET /api/memory/facts`, `GET /api/memory/sessions`, `GET /api/lessons`, `POST /api/lessons`, `DELETE /api/lessons/{id}`, `POST /api/lessons/{id}/pin`.
+- **Memoria UI page** (`/memory`): 3 tabs — Hechos (distilled facts with search), Resúmenes (session summaries, expandable), Aprendizajes (lessons CRUD, category filter, pin/delete with confirmation).
+
+### Changed
+- **Brain prompt injection**: Active lessons are pre-loaded at startup and injected into the system prompt after Personality, before Body. Cached for performance (`_cached_lessons_text`).
+
+### Tests
+- **36 new tests** (10 distiller + 26 lessons). 189 total new tests across Fase A+B.
+
 ## [0.8.0] - 2026-04-27
 
 ### Added

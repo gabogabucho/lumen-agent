@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="{{ language | default('es') }}" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumen — Memoria</title>
+  <link rel="icon" href="/static/logo.png" type="image/png">
+  {% include "_partials/tokens.html" %}
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      display: flex; overflow: hidden;
+      font-family: var(--lumen-font); color: var(--lumen-ink);
+      background: var(--lumen-paper); font-size: 14px;
+    }
+
+    /* === Sidebar === */
+    aside.sidebar {
+      width: 260px; flex-shrink: 0;
+      background: var(--lumen-paper-2); border-right: 1px solid var(--lumen-line);
+      box-shadow: 10px 0 30px rgba(15,21,69,0.06);
+      display: flex; flex-direction: column; transition: width 0.25s ease;
+      position: relative; z-index: 2;
+    }
+    aside.sidebar.collapsed { width: 64px; }
+    aside.sidebar.collapsed .sidebar-text { display: none; }
+    .sidebar-head {
+      padding: var(--lumen-s-4); display: flex; align-items: center;
+      justify-content: space-between; gap: var(--lumen-s-3);
+      border-bottom: 1px solid var(--lumen-line);
+    }
+    .brand { display: flex; align-items: center; gap: var(--lumen-s-3); overflow: hidden; }
+    .brand img { width: 36px; height: 36px; border-radius: var(--lumen-r-sm); flex-shrink: 0; }
+    .brand-text h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--lumen-ink); }
+    .brand-text p { font-size: 11px; color: var(--lumen-mute); margin-top: 2px; }
+    .icon-btn {
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      padding: 6px; border-radius: var(--lumen-r-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .icon-btn:hover { background: var(--lumen-lavender); color: var(--lumen-ink); }
+    .icon-btn svg { width: 18px; height: 18px; }
+    nav.sidebar-nav {
+      flex: 1; padding: var(--lumen-s-3); display: flex;
+      flex-direction: column; gap: 4px; overflow-y: auto;
+    }
+    .nav-btn {
+      display: flex; align-items: center; gap: var(--lumen-s-3);
+      padding: 10px 12px; border-radius: var(--lumen-r-sm);
+      background: transparent; border: none; color: var(--lumen-ink-soft);
+      font: inherit; font-weight: 500; cursor: pointer; width: 100%;
+      text-align: left; text-decoration: none;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .nav-btn:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .nav-btn.active { background: var(--lumen-lavender); color: var(--lumen-blue); }
+    .nav-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .sidebar-foot {
+      padding: var(--lumen-s-3); border-top: 1px solid var(--lumen-line);
+      display: flex; flex-direction: column; gap: var(--lumen-s-2);
+    }
+    .status-pill {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      padding: 6px 10px; font-size: 12px; color: var(--lumen-mute);
+    }
+    .status-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--lumen-success);
+      box-shadow: 0 0 8px rgba(47,158,110,0.4);
+    }
+
+    /* === Main === */
+    main.main {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+      background: var(--lumen-paper);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+    }
+    .topbar {
+      padding: var(--lumen-s-4) var(--lumen-s-5);
+      border-bottom: 1px solid var(--lumen-line);
+      display: flex; align-items: center; justify-content: flex-start;
+      gap: var(--lumen-s-4); background: var(--lumen-paper);
+      box-shadow: 0 8px 24px rgba(15,21,69,0.04);
+    }
+    .topbar h2 { font-size: 18px; font-weight: 600; color: var(--lumen-ink); }
+    .topbar .sub { font-size: 12px; color: var(--lumen-mute); margin-top: 2px; }
+    .panel { flex: 1; overflow-y: auto; padding: var(--lumen-s-5) var(--lumen-s-6); }
+
+    /* === Shared components === */
+    .l-card {
+      background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
+      box-shadow: var(--lumen-shadow-sm);
+    }
+    .l-card h3 {
+      font-size: 12px; font-weight: 600; color: var(--lumen-mute);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--lumen-s-3);
+    }
+    .l-card p { color: var(--lumen-ink-soft); line-height: 1.6; }
+    .l-input {
+      flex: 1; background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: 12px 14px; font: inherit;
+      font-size: 14px; color: var(--lumen-ink);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .l-input:focus {
+      outline: none; border-color: var(--lumen-blue);
+      box-shadow: 0 0 0 4px var(--lumen-lavender);
+    }
+    .l-btn {
+      display: inline-flex; align-items: center; gap: var(--lumen-s-2);
+      padding: 10px 16px; border-radius: var(--lumen-r-md);
+      border: 1px solid transparent; background: var(--lumen-ink);
+      color: var(--lumen-paper); font: inherit; font-weight: 500;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .l-btn:hover { box-shadow: var(--lumen-shadow); transform: translateY(-1px); }
+    .l-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+    .l-btn.ghost {
+      background: transparent; color: var(--lumen-ink-soft);
+      border: 1px solid var(--lumen-line);
+    }
+    .l-btn.ghost:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .l-btn.small { padding: 6px 12px; font-size: 12px; }
+    .l-btn.danger { background: var(--lumen-danger); color: white; }
+    .l-btn.danger:hover { box-shadow: 0 4px 12px rgba(217,76,76,0.3); }
+    .l-btn svg { width: 16px; height: 16px; }
+
+    /* === Tab navigation === */
+    .tab-nav {
+      display: flex; gap: var(--lumen-s-2); margin-bottom: var(--lumen-s-5);
+      border-bottom: 1px solid var(--lumen-line);
+      padding-bottom: var(--lumen-s-3);
+    }
+    .tab-btn {
+      padding: 10px 18px; border-radius: var(--lumen-r-md);
+      background: transparent; border: 1px solid transparent;
+      color: var(--lumen-ink-soft); font: inherit; font-weight: 500;
+      font-size: 14px; cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .tab-btn:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .tab-btn.active {
+      background: var(--lumen-lavender); color: var(--lumen-blue);
+      border-color: transparent;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* === Search === */
+    .search-row {
+      display: flex; align-items: center; gap: var(--lumen-s-3);
+      margin-bottom: var(--lumen-s-4);
+    }
+    .search-row .l-input { max-width: 420px; }
+
+    /* === Filter pills === */
+    .pill-row {
+      display: flex; flex-wrap: wrap; gap: var(--lumen-s-2);
+      margin-bottom: var(--lumen-s-4);
+    }
+    .l-pill {
+      padding: 6px 12px; font-size: 12px; font-weight: 500;
+      border-radius: var(--lumen-r-pill);
+      border: 1px solid var(--lumen-line); background: var(--lumen-surface);
+      color: var(--lumen-ink-soft); cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .l-pill:hover { background: var(--lumen-paper-2); }
+    .l-pill.active {
+      background: var(--lumen-lavender); color: var(--lumen-blue);
+      border-color: transparent;
+    }
+
+    /* === Badge === */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: var(--lumen-r-pill);
+      font-size: 11px; font-weight: 500; border: 1px solid transparent;
+    }
+    .badge-category {
+      background: var(--lumen-lavender); color: var(--lumen-blue);
+      border-color: rgba(91,125,255,0.18);
+    }
+    .badge-safety {
+      background: rgba(217,76,76,0.10); color: var(--lumen-danger);
+      border-color: rgba(217,76,76,0.20);
+    }
+    .badge-preference {
+      background: rgba(91,125,255,0.10); color: var(--lumen-blue);
+      border-color: rgba(91,125,255,0.18);
+    }
+    .badge-tool-usage {
+      background: rgba(47,158,110,0.10); color: var(--lumen-success);
+      border-color: rgba(47,158,110,0.20);
+    }
+    .badge-format {
+      background: rgba(217,146,37,0.10); color: var(--lumen-warn);
+      border-color: rgba(217,146,37,0.20);
+    }
+    .badge-default {
+      background: rgba(88,92,108,0.10); color: var(--lumen-mute);
+      border-color: rgba(88,92,108,0.20);
+    }
+
+    /* === Importance dot === */
+    .importance-dot {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; flex-shrink: 0;
+    }
+    .importance-dot.high { background: var(--lumen-success); box-shadow: 0 0 6px rgba(47,158,110,0.4); }
+    .importance-dot.medium { background: var(--lumen-warn); box-shadow: 0 0 6px rgba(217,146,37,0.4); }
+    .importance-dot.low { background: var(--lumen-mute); }
+
+    /* === Fact card === */
+    .fact-card {
+      background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-4);
+      display: flex; flex-direction: column; gap: var(--lumen-s-2);
+      transition: border-color 0.15s ease;
+    }
+    .fact-card:hover { border-color: var(--lumen-ink-soft); }
+    .fact-card-header {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      flex-wrap: wrap;
+    }
+    .fact-card-text {
+      font-size: 14px; color: var(--lumen-ink); line-height: 1.55;
+    }
+    .fact-card-meta {
+      font-size: 11px; color: var(--lumen-mute);
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      flex-wrap: wrap;
+    }
+    .fact-list { display: flex; flex-direction: column; gap: var(--lumen-s-3); }
+
+    /* === Session summary card === */
+    .summary-card {
+      background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); overflow: hidden;
+      transition: border-color 0.15s ease;
+    }
+    .summary-card:hover { border-color: var(--lumen-ink-soft); }
+    .summary-card-header {
+      padding: var(--lumen-s-4); display: flex; align-items: center;
+      justify-content: space-between; gap: var(--lumen-s-3);
+      cursor: pointer; user-select: none;
+    }
+    .summary-card-header:hover { background: var(--lumen-paper-2); }
+    .summary-card-header-left {
+      display: flex; align-items: center; gap: var(--lumen-s-3);
+      min-width: 0;
+    }
+    .summary-card-header h4 {
+      font-size: 14px; font-weight: 600; color: var(--lumen-ink);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .summary-card-meta {
+      font-size: 11px; color: var(--lumen-mute);
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+    }
+    .summary-card-chevron {
+      flex-shrink: 0; color: var(--lumen-mute);
+      transition: transform 0.2s ease;
+    }
+    .summary-card.expanded .summary-card-chevron {
+      transform: rotate(180deg);
+    }
+    .summary-card-body {
+      display: none; padding: 0 var(--lumen-s-4) var(--lumen-s-4);
+      border-top: 1px solid var(--lumen-line);
+    }
+    .summary-card.expanded .summary-card-body { display: block; }
+    .summary-card-body p {
+      font-size: 13px; color: var(--lumen-ink-soft); line-height: 1.6;
+      padding-top: var(--lumen-s-3);
+    }
+    .summary-list { display: flex; flex-direction: column; gap: var(--lumen-s-3); }
+
+    /* === Lesson card === */
+    .lesson-card {
+      background: var(--lumen-surface); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-4);
+      display: flex; flex-direction: column; gap: var(--lumen-s-3);
+      transition: border-color 0.15s ease;
+    }
+    .lesson-card:hover { border-color: var(--lumen-ink-soft); }
+    .lesson-card-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: var(--lumen-s-3);
+    }
+    .lesson-card-header-left {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      flex-wrap: wrap; min-width: 0;
+    }
+    .lesson-card-text {
+      font-size: 14px; color: var(--lumen-ink); line-height: 1.55;
+    }
+    .lesson-card-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--lumen-s-3); flex-wrap: wrap;
+    }
+    .lesson-card-meta {
+      font-size: 11px; color: var(--lumen-mute);
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+    }
+    .lesson-card-actions {
+      display: flex; gap: var(--lumen-s-2); align-items: center;
+    }
+    .pin-indicator {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; color: var(--lumen-warn); font-weight: 500;
+    }
+    .pin-indicator svg { width: 14px; height: 14px; }
+    .lesson-list { display: flex; flex-direction: column; gap: var(--lumen-s-3); }
+
+    /* === Confidence bar === */
+    .confidence-bar {
+      display: flex; align-items: center; gap: var(--lumen-s-2);
+      font-size: 11px; color: var(--lumen-mute);
+    }
+    .confidence-track {
+      width: 80px; height: 6px; border-radius: 3px;
+      background: var(--lumen-line); overflow: hidden;
+    }
+    .confidence-fill {
+      height: 100%; border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .confidence-fill.high { background: var(--lumen-success); }
+    .confidence-fill.medium { background: var(--lumen-warn); }
+    .confidence-fill.low { background: var(--lumen-danger); }
+
+    /* === Add lesson form === */
+    .add-form {
+      display: flex; flex-wrap: wrap; align-items: flex-end;
+      gap: var(--lumen-s-3); margin-bottom: var(--lumen-s-4);
+    }
+    .add-form .field { flex: 1; min-width: 200px; }
+    .add-form .field label {
+      font-size: 12px; font-weight: 600; color: var(--lumen-ink-soft);
+      text-transform: uppercase; letter-spacing: 0.04em;
+      display: block; margin-bottom: 6px;
+    }
+    .add-form select.l-input {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg fill='none' stroke='%23888' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 14px;
+      padding-right: 32px;
+    }
+
+    /* === Empty state === */
+    .empty-block {
+      background: var(--lumen-paper-2); border: 1px dashed var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
+      color: var(--lumen-mute); font-size: 13px; text-align: center;
+    }
+
+    /* === Refresh indicator === */
+    .refresh-indicator {
+      font-size: 11px; color: var(--lumen-mute);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .refresh-indicator .spin {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid var(--lumen-line); border-top-color: var(--lumen-blue);
+      border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* === Toast === */
+    .toast-container {
+      position: fixed; bottom: var(--lumen-s-5); right: var(--lumen-s-5);
+      z-index: 1000; display: flex; flex-direction: column; gap: var(--lumen-s-2);
+    }
+    .toast {
+      padding: var(--lumen-s-3) var(--lumen-s-4); border-radius: var(--lumen-r-md);
+      font-size: 13px; font-weight: 500; box-shadow: var(--lumen-shadow);
+      animation: toastIn 0.3s ease-out; max-width: 360px;
+    }
+    .toast.success { background: var(--lumen-success); color: white; }
+    .toast.error { background: var(--lumen-danger); color: white; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* === Confirm dialog === */
+    .confirm-overlay {
+      position: fixed; inset: 0; z-index: 999;
+      background: rgba(0,0,0,0.45); display: flex;
+      align-items: center; justify-content: center;
+      animation: fadeIn 0.15s ease;
+    }
+    .confirm-dialog {
+      background: var(--lumen-paper); border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md); padding: var(--lumen-s-5);
+      box-shadow: var(--lumen-shadow); max-width: 380px; width: 90%;
+    }
+    .confirm-dialog h3 { font-size: 16px; font-weight: 600; color: var(--lumen-ink); margin-bottom: var(--lumen-s-2); }
+    .confirm-dialog p { font-size: 13px; color: var(--lumen-ink-soft); line-height: 1.5; margin-bottom: var(--lumen-s-4); }
+    .confirm-actions { display: flex; gap: var(--lumen-s-2); justify-content: flex-end; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    @media (max-width: 720px) {
+      aside.sidebar { width: 64px; }
+      aside.sidebar .sidebar-text { display: none; }
+      .panel { padding: var(--lumen-s-4); }
+      .add-form { flex-direction: column; }
+      .add-form .field { min-width: 100%; }
+      .tab-nav { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <img src="/static/logo.png" alt="Lumen" />
+        <div class="brand-text sidebar-text">
+          <h1>Lumen</h1>
+          <p>Ajustes</p>
+        </div>
+      </div>
+      <button class="icon-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+        <span class="sidebar-text">Charlas</span>
+      </a>
+      <a href="/dashboard?panel=config" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="sidebar-text">Ajustes</span>
+      </a>
+      <a href="/settings/models" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <span class="sidebar-text">Modelos</span>
+      </a>
+      <a href="/settings/providers" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+        </svg>
+        <span class="sidebar-text">Providers</span>
+      </a>
+      <a href="/memory" class="nav-btn active">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+        </svg>
+        <span class="sidebar-text">Memoria</span>
+      </a>
+      <a href="/agent-status" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+        <span class="sidebar-text">Estado</span>
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="status-pill">
+        <span class="dot"></span>
+        <span class="sidebar-text">Lumen está activa</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div style="flex:1;">
+        <h2>Memoria</h2>
+        <p class="sub">Hechos, resúmenes de sesión y aprendizajes de Lumen</p>
+      </div>
+      <div class="refresh-indicator" id="refresh-indicator">
+        <span class="spin"></span>
+        <span>Auto-refresh 30s</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <!-- Tab navigation -->
+      <div class="tab-nav">
+        <button type="button" class="tab-btn active" data-tab="facts" onclick="switchTab('facts')">Hechos</button>
+        <button type="button" class="tab-btn" data-tab="summaries" onclick="switchTab('summaries')">Resúmenes</button>
+        <button type="button" class="tab-btn" data-tab="lessons" onclick="switchTab('lessons')">Aprendizajes</button>
+      </div>
+
+      <!-- Hechos tab -->
+      <div id="tab-facts" class="tab-panel active">
+        <div class="search-row">
+          <input id="facts-search" class="l-input" type="search" placeholder="Buscar hechos..." autocomplete="off" />
+        </div>
+        <div id="facts-list" class="fact-list">
+          <div class="empty-block">Cargando hechos…</div>
+        </div>
+      </div>
+
+      <!-- Resúmenes tab -->
+      <div id="tab-summaries" class="tab-panel">
+        <div id="summaries-list" class="summary-list">
+          <div class="empty-block">Cargando resúmenes…</div>
+        </div>
+      </div>
+
+      <!-- Aprendizajes tab -->
+      <div id="tab-lessons" class="tab-panel">
+        <!-- Add lesson form -->
+        <div class="add-form" id="add-lesson-form">
+          <div class="field">
+            <label for="lesson-text">Nuevo aprendizaje</label>
+            <input id="lesson-text" class="l-input" type="text" placeholder="Escribí una regla o aprendizaje..." autocomplete="off" />
+          </div>
+          <div class="field" style="min-width:160px; flex:none;">
+            <label for="lesson-category">Categoría</label>
+            <select id="lesson-category" class="l-input">
+              <option value="safety">Safety</option>
+              <option value="preference">Preference</option>
+              <option value="tool_usage">Tool Usage</option>
+              <option value="format">Format</option>
+            </select>
+          </div>
+          <button type="button" class="l-btn" id="btn-add-lesson" onclick="addLesson()">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Agregar
+          </button>
+        </div>
+
+        <!-- Category filter -->
+        <div class="pill-row" id="lesson-filters">
+          <button type="button" class="l-pill active" data-filter="all" onclick="filterLessons('all')">Todos</button>
+          <button type="button" class="l-pill" data-filter="safety" onclick="filterLessons('safety')">Safety</button>
+          <button type="button" class="l-pill" data-filter="preference" onclick="filterLessons('preference')">Preference</button>
+          <button type="button" class="l-pill" data-filter="tool_usage" onclick="filterLessons('tool_usage')">Tool Usage</button>
+          <button type="button" class="l-pill" data-filter="format" onclick="filterLessons('format')">Format</button>
+        </div>
+
+        <div id="lessons-list" class="lesson-list">
+          <div class="empty-block">Cargando aprendizajes…</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script>
+    // === Toast ===
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast ' + type;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // === Confirm dialog ===
+    function showConfirm(title, message) {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+        overlay.innerHTML = `
+          <div class="confirm-dialog">
+            <h3>${title}</h3>
+            <p>${message}</p>
+            <div class="confirm-actions">
+              <button class="l-btn ghost small" id="confirm-cancel">Cancelar</button>
+              <button class="l-btn danger small" id="confirm-ok">Eliminar</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#confirm-cancel').onclick = () => { overlay.remove(); resolve(false); };
+        overlay.querySelector('#confirm-ok').onclick = () => { overlay.remove(); resolve(true); };
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+      });
+    }
+
+    // === Sidebar ===
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      sidebar.classList.toggle('collapsed');
+    }
+
+    // === Theme ===
+    const THEME_KEY = 'lumen-theme';
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+    applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+
+    // === Tab switching ===
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+      document.querySelector('.tab-btn[data-tab="' + tabName + '"]').classList.add('active');
+      document.getElementById('tab-' + tabName).classList.add('active');
+    }
+
+    // === Category badge helper ===
+    function categoryBadgeClass(cat) {
+      const map = {
+        safety: 'badge-safety',
+        preference: 'badge-preference',
+        tool_usage: 'badge-tool-usage',
+        format: 'badge-format',
+      };
+      return map[cat] || 'badge-default';
+    }
+
+    function categoryLabel(cat) {
+      const map = {
+        safety: 'Safety',
+        preference: 'Preference',
+        tool_usage: 'Tool Usage',
+        format: 'Format',
+      };
+      return map[cat] || cat || '—';
+    }
+
+    // === Importance dot helper ===
+    function importanceClass(imp) {
+      if (imp === 'high') return 'high';
+      if (imp === 'medium') return 'medium';
+      return 'low';
+    }
+
+    // === Confidence bar helper ===
+    function confidenceClass(val) {
+      if (val >= 0.7) return 'high';
+      if (val >= 0.4) return 'medium';
+      return 'low';
+    }
+
+    // === Short session ID ===
+    function shortId(id) {
+      if (!id) return '—';
+      if (id.length <= 12) return id;
+      return id.substring(0, 8) + '…';
+    }
+
+    // === Facts ===
+    let allFacts = [];
+    let searchTimer = null;
+
+    async function loadFacts() {
+      try {
+        const res = await fetch('/api/memory/facts');
+        if (!res.ok) throw new Error('Error al cargar hechos');
+        const data = await res.json();
+        allFacts = Array.isArray(data) ? data : (data.facts || []);
+        renderFacts();
+      } catch (e) {
+        document.getElementById('facts-list').innerHTML =
+          '<div class="empty-block">Error al cargar hechos: ' + e.message + '</div>';
+      }
+    }
+
+    function renderFacts(filter) {
+      const container = document.getElementById('facts-list');
+      let facts = allFacts;
+      if (filter) {
+        const q = filter.toLowerCase();
+        facts = facts.filter(f =>
+          (f.text || '').toLowerCase().includes(q) ||
+          (f.category || '').toLowerCase().includes(q) ||
+          (f.session_id || '').toLowerCase().includes(q)
+        );
+      }
+      if (facts.length === 0) {
+        container.innerHTML = '<div class="empty-block">' +
+          (filter ? 'No se encontraron hechos con ese filtro.' : 'No hay hechos registrados.') +
+          '</div>';
+        return;
+      }
+      container.innerHTML = facts.map(f => {
+        const imp = importanceClass(f.importance);
+        const catClass = categoryBadgeClass(f.category);
+        const catLabel = categoryLabel(f.category);
+        return '<div class="fact-card">' +
+          '<div class="fact-card-header">' +
+            '<span class="importance-dot ' + imp + '" title="Importancia: ' + (f.importance || 'low') + '"></span>' +
+            (f.category ? '<span class="badge ' + catClass + '">' + catLabel + '</span>' : '') +
+          '</div>' +
+          '<div class="fact-card-text">' + escapeHtml(f.text || '') + '</div>' +
+          '<div class="fact-card-meta">' +
+            (f.session_id ? '<span>Sesión: ' + escapeHtml(shortId(f.session_id)) + '</span>' : '') +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    document.getElementById('facts-search').addEventListener('input', function () {
+      clearTimeout(searchTimer);
+      const val = this.value;
+      searchTimer = setTimeout(() => renderFacts(val), 300);
+    });
+
+    // === Summaries ===
+    let allSummaries = [];
+
+    async function loadSummaries() {
+      try {
+        const res = await fetch('/api/memory/sessions');
+        if (!res.ok) throw new Error('Error al cargar resúmenes');
+        const data = await res.json();
+        allSummaries = Array.isArray(data) ? data : (data.sessions || []);
+        renderSummaries();
+      } catch (e) {
+        document.getElementById('summaries-list').innerHTML =
+          '<div class="empty-block">Error al cargar resúmenes: ' + e.message + '</div>';
+      }
+    }
+
+    function renderSummaries() {
+      const container = document.getElementById('summaries-list');
+      if (allSummaries.length === 0) {
+        container.innerHTML = '<div class="empty-block">No hay resúmenes de sesión.</div>';
+        return;
+      }
+      container.innerHTML = allSummaries.map((s, i) => {
+        const id = s.session_id || s.id || ('sesión-' + i);
+        const factCount = s.fact_count !== undefined ? s.fact_count : (s.facts ? s.facts.length : '—');
+        const turnCount = s.turn_count !== undefined ? s.turn_count : '—';
+        const summary = s.summary || s.text || 'Sin resumen.';
+        return '<div class="summary-card" onclick="toggleSummary(this)">' +
+          '<div class="summary-card-header">' +
+            '<div class="summary-card-header-left">' +
+              '<h4>' + escapeHtml(shortId(id)) + '</h4>' +
+            '</div>' +
+            '<div class="summary-card-meta">' +
+              '<span>' + factCount + ' hechos</span>' +
+              '<span>·</span>' +
+              '<span>' + turnCount + ' turnos</span>' +
+              '<svg class="summary-card-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:16px;height:16px;">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>' +
+              '</svg>' +
+            '</div>' +
+          '</div>' +
+          '<div class="summary-card-body">' +
+            '<p>' + escapeHtml(summary) + '</p>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function toggleSummary(card) {
+      card.classList.toggle('expanded');
+    }
+
+    // === Lessons ===
+    let allLessons = [];
+    let currentLessonFilter = 'all';
+
+    async function loadLessons() {
+      try {
+        const res = await fetch('/api/lessons');
+        if (!res.ok) throw new Error('Error al cargar aprendizajes');
+        const data = await res.json();
+        allLessons = Array.isArray(data) ? data : (data.lessons || []);
+        renderLessons();
+      } catch (e) {
+        document.getElementById('lessons-list').innerHTML =
+          '<div class="empty-block">Error al cargar aprendizajes: ' + e.message + '</div>';
+      }
+    }
+
+    function renderLessons() {
+      const container = document.getElementById('lessons-list');
+      let lessons = allLessons;
+      if (currentLessonFilter !== 'all') {
+        lessons = lessons.filter(l => l.category === currentLessonFilter);
+      }
+      if (lessons.length === 0) {
+        container.innerHTML = '<div class="empty-block">' +
+          (currentLessonFilter !== 'all'
+            ? 'No hay aprendizajes en la categoría seleccionada.'
+            : 'No hay aprendizajes registrados. Agregá uno arriba.') +
+          '</div>';
+        return;
+      }
+      container.innerHTML = lessons.map(l => {
+        const id = l.id || l._id;
+        const rule = l.rule || l.text || '';
+        const catClass = categoryBadgeClass(l.category);
+        const catLabel = categoryLabel(l.category);
+        const confidence = typeof l.confidence === 'number' ? l.confidence : (l.confidence ? parseFloat(l.confidence) : 0.5);
+        const confPct = Math.round(confidence * 100);
+        const confClass = confidenceClass(confidence);
+        const pinned = !!l.pinned;
+        const source = l.source || '';
+        return '<div class="lesson-card">' +
+          '<div class="lesson-card-header">' +
+            '<div class="lesson-card-header-left">' +
+              (l.category ? '<span class="badge ' + catClass + '">' + catLabel + '</span>' : '') +
+              (pinned ? '<span class="pin-indicator">' +
+                '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>' +
+                'Fijado</span>' : '') +
+            '</div>' +
+            '<div class="lesson-card-actions">' +
+              '<button class="l-btn ghost small" onclick="togglePin(' + id + ', ' + pinned + ')" title="' + (pinned ? 'Desfijar' : 'Fijar') + '">' +
+                '<svg fill="' + (pinned ? 'currentColor' : 'none') + '" stroke="currentColor" viewBox="0 0 24 24" style="width:14px;height:14px;">' +
+                  '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>' +
+                '</svg>' +
+              '</button>' +
+              '<button class="l-btn ghost small" onclick="deleteLesson(' + id + ')" title="Eliminar">' +
+                '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width:14px;height:14px;">' +
+                  '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>' +
+                '</svg>' +
+              '</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="lesson-card-text">' + escapeHtml(rule) + '</div>' +
+          '<div class="lesson-card-footer">' +
+            '<div class="lesson-card-meta">' +
+              '<div class="confidence-bar">' +
+                '<span>Confianza</span>' +
+                '<div class="confidence-track"><div class="confidence-fill ' + confClass + '" style="width:' + confPct + '%"></div></div>' +
+                '<span>' + confPct + '%</span>' +
+              '</div>' +
+              (source ? '<span>·</span><span>Fuente: ' + escapeHtml(source) + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function filterLessons(filter) {
+      currentLessonFilter = filter;
+      document.querySelectorAll('#lesson-filters .l-pill').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-filter') === filter);
+      });
+      renderLessons();
+    }
+
+    async function addLesson() {
+      const textInput = document.getElementById('lesson-text');
+      const catSelect = document.getElementById('lesson-category');
+      const btn = document.getElementById('btn-add-lesson');
+      const text = textInput.value.trim();
+      if (!text) {
+        showToast('Escribí un aprendizaje primero', 'error');
+        textInput.focus();
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/lessons', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text, category: catSelect.value }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Error al crear aprendizaje');
+        }
+        textInput.value = '';
+        showToast('Aprendizaje agregado', 'success');
+        loadLessons();
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('lesson-text').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); addLesson(); }
+    });
+
+    async function togglePin(id, currentlyPinned) {
+      try {
+        const res = await fetch('/api/lessons/' + id + '/pin', { method: 'POST' });
+        if (!res.ok) throw new Error('Error al cambiar pin');
+        showToast(currentlyPinned ? 'Aprendizaje desfijado' : 'Aprendizaje fijado', 'success');
+        loadLessons();
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    async function deleteLesson(id) {
+      const ok = await showConfirm(
+        'Eliminar aprendizaje',
+        '¿Estás seguro de que querés eliminar este aprendizaje? Esta acción no se puede deshacer.'
+      );
+      if (!ok) return;
+      try {
+        const res = await fetch('/api/lessons/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Error al eliminar');
+        showToast('Aprendizaje eliminado', 'success');
+        loadLessons();
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    // === HTML escape ===
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // === Auto-refresh (30s) ===
+    setInterval(() => {
+      loadFacts();
+      loadLessons();
+    }, 30000);
+
+    // === Init ===
+    loadFacts();
+    loadSummaries();
+    loadLessons();
+  </script>
+</body>
+</html>

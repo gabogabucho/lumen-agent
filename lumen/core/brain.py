@@ -88,6 +88,7 @@ class Brain:
         self.provider_health = provider_health or ProviderHealthTracker.from_config(config)
         self._last_detected_language: str = self.language
         self._current_messages: list[dict] | None = None  # For contradiction retry
+        self._cached_lessons_text: str = ""  # Pre-loaded lessons for prompt injection
 
     def _resolved_model(self, role: str = "main") -> str:
         """Route model through OpenRouter when OpenRouter creds are active.
@@ -1693,6 +1694,27 @@ class Brain:
             return f"[secret:{slot.get('name', 'value')}]"
         return value
 
+    def _get_lessons_injection(self) -> str:
+        """Get formatted lessons for system prompt injection.
+
+        Returns empty string if no lessons or memory not available.
+        Uses sync-safe approach: lessons are loaded from a cached list.
+        """
+        return getattr(self, "_cached_lessons_text", "")
+
+    async def load_lessons(self):
+        """Pre-load lessons for prompt injection (call once at startup)."""
+        if not self.memory:
+            return
+        try:
+            from lumen.core.lessons import LessonStore
+            store = LessonStore(self.memory)
+            lessons = await store.get_active_lessons(limit=20)
+            self._cached_lessons_text = store.format_for_prompt(lessons)
+        except Exception as e:
+            logger.warning(f"Failed to load lessons: {e}")
+            self._cached_lessons_text = ""
+
     def _build_prompt(
         self, context: dict, message: str, session: Session, tools: list[dict] | None = None
     ) -> list[dict]:
@@ -1756,9 +1778,20 @@ class Brain:
             "",
             context["personality"],
             "",
+            # 2b. LESSONS — learned rules (persistent across sessions)
+            # Injected from cache loaded at startup via load_lessons()
+        ]
+
+        # Inject lessons if available
+        lessons_text = self._get_lessons_injection()
+        if lessons_text:
+            system_parts.append("")
+            system_parts.append(lessons_text)
+
+        system_parts.extend([
             # 3. BODY — discovered capabilities (changes per install)
             context["body"],
-        ]
+        ])
 
         # 3b. AWARENESS — what just changed in my body (live feeling)
         if self.capability_awareness:

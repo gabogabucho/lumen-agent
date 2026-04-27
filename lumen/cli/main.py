@@ -21,6 +21,7 @@ from lumen.core.paths import resolve_lumen_dir
 from lumen.core.provider_health import ProviderHealthTracker
 from lumen.core.registry import CapabilityKind
 from lumen.core.runtime import apply_provider_runtime_env, bootstrap_runtime, refresh_runtime_registry, rehydrate_runtime_config, reload_runtime_personality_surface, sync_runtime_modules
+from lumen.core.lessons import VALID_CATEGORIES
 
 BRAND = "#3d3d6d"
 BRAND_DIM = "#6b6baa"
@@ -1063,6 +1064,180 @@ def doctor():
     from lumen.cli.doctor import run_doctor
 
     run_doctor()
+
+
+# ── memory & lessons commands ──────────────────────────────────────────────────
+
+
+@app.command("memory-facts")
+def memory_facts(
+    query: str = typer.Option("", help="Search facts by keyword"),
+    limit: int = typer.Option(10, help="Max facts to show"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data directory"),
+):
+    """Show distilled session facts."""
+    from lumen.core.memory import Memory
+
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    memory = Memory(db_path=lumen_dir / "data" / "memory.db")
+    asyncio.run(memory.init())
+
+    facts = asyncio.run(memory.list_session_facts(query=query, limit=limit))
+
+    if not facts:
+        console.print("\n  [dim]No facts found.[/dim]\n")
+        return
+
+    console.print(f"\n[bold]Session Facts[/bold] ({len(facts)} shown)\n")
+    for f in facts:
+        imp_color = "green" if f["importance"] >= 0.7 else "yellow" if f["importance"] >= 0.4 else "dim"
+        console.print(f"  [{imp_color}]●[/{imp_color}] {f['fact']}")
+        console.print(f"    [dim]session: {f['session_id']} | {f['category']} | importance: {f['importance']}[/dim]")
+    console.print()
+
+    asyncio.run(memory.close())
+
+
+@app.command("memory-summary")
+def memory_summary(
+    session_id: str = typer.Argument("", help="Specific session ID (omit for all)"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data directory"),
+):
+    """Show session summaries."""
+    from lumen.core.memory import Memory
+
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    memory = Memory(db_path=lumen_dir / "data" / "memory.db")
+    asyncio.run(memory.init())
+
+    summaries = asyncio.run(memory.list_session_summaries(limit=20))
+
+    if not summaries:
+        console.print("\n  [dim]No session summaries found.[/dim]\n")
+        return
+
+    if session_id:
+        summaries = [s for s in summaries if s["session_id"] == session_id]
+
+    if not summaries:
+        console.print(f"\n  [dim]No session summaries found for '{session_id}'.[/dim]\n")
+        return
+
+    console.print(f"\n[bold]Session Summaries[/bold] ({len(summaries)} shown)\n")
+    for s in summaries:
+        console.print(f"  [cyan]{s['session_id']}[/cyan]  {s['fact_count']} facts, {s['turn_count']} turns")
+        for line in s["summary"].split("\n"):
+            if line.strip():
+                console.print(f"    {line}")
+        console.print()
+
+    asyncio.run(memory.close())
+
+
+@app.command("lessons")
+def lessons_list(
+    limit: int = typer.Option(20, help="Max lessons to show"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data directory"),
+):
+    """List persistent lessons."""
+    from lumen.core.memory import Memory
+
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    memory = Memory(db_path=lumen_dir / "data" / "memory.db")
+    asyncio.run(memory.init())
+
+    lesson_rows = asyncio.run(memory.list_lessons(limit=limit))
+
+    if not lesson_rows:
+        console.print("\n  [dim]No lessons found.[/dim]\n")
+        return
+
+    console.print(f"\n[bold]Lessons[/bold] ({len(lesson_rows)} shown)\n")
+    for l in lesson_rows:
+        pin = "[PIN] " if l.get("pinned") else ""
+        cat_color = {"safety": "red", "preference": "cyan", "tool_usage": "yellow"}.get(l.get("category", ""), "white")
+        console.print(f"  [{cat_color}]{pin}#{l['id']}[/{cat_color}] {l['rule']}")
+        console.print(f"    [dim]{l.get('category', 'general')} | confidence: {l.get('confidence', 0):.1f} | source: {l.get('source', '?')} | triggered: {l.get('trigger_count', 0)}x[/dim]")
+    console.print()
+
+    asyncio.run(memory.close())
+
+
+@app.command("lesson-add")
+def lesson_add(
+    rule: str = typer.Argument(help="The lesson rule"),
+    category: str = typer.Option("general", help="Category: safety, preference, tool_usage, format, general"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data directory"),
+):
+    """Add a new persistent lesson."""
+    from lumen.core.memory import Memory
+
+    if category not in VALID_CATEGORIES:
+        console.print(f"[red]Invalid category '{category}'. Valid: {', '.join(sorted(VALID_CATEGORIES))}[/red]")
+        raise typer.Exit(1)
+
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    memory = Memory(db_path=lumen_dir / "data" / "memory.db")
+    asyncio.run(memory.init())
+
+    lid = asyncio.run(memory.save_lesson(rule=rule, category=category, source="user:cli"))
+    console.print(f"[green]✓[/green] Lesson #{lid} added: {rule}")
+
+    asyncio.run(memory.close())
+
+
+@app.command("lesson-pin")
+def lesson_pin(
+    lesson_id: int = typer.Argument(help="Lesson ID to pin/unpin"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data directory"),
+):
+    """Toggle pin on a lesson."""
+    from lumen.core.memory import Memory
+
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    memory = Memory(db_path=lumen_dir / "data" / "memory.db")
+    asyncio.run(memory.init())
+
+    lesson = asyncio.run(memory.get_lesson(lesson_id))
+    if not lesson:
+        console.print(f"[red]Lesson #{lesson_id} not found[/red]")
+        raise typer.Exit(1)
+
+    new_pinned = 0 if lesson.get("pinned") else 1
+    asyncio.run(memory.update_lesson(lesson_id, pinned=new_pinned))
+    action = "unpinned" if new_pinned == 0 else "pinned"
+    console.print(f"[green]✓[/green] Lesson #{lesson_id} {action}")
+
+    asyncio.run(memory.close())
+
+
+@app.command("lesson-delete")
+def lesson_delete(
+    lesson_id: int = typer.Argument(help="Lesson ID to delete"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data directory"),
+):
+    """Delete a lesson."""
+    from lumen.core.memory import Memory
+
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    memory = Memory(db_path=lumen_dir / "data" / "memory.db")
+    asyncio.run(memory.init())
+
+    lesson = asyncio.run(memory.get_lesson(lesson_id))
+    if not lesson:
+        console.print(f"[red]Lesson #{lesson_id} not found[/red]")
+        raise typer.Exit(1)
+
+    asyncio.run(memory.delete_lesson(lesson_id))
+    console.print(f"[green]✓[/green] Lesson #{lesson_id} deleted")
+
+    asyncio.run(memory.close())
 
 
 if __name__ == "__main__":

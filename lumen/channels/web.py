@@ -1726,6 +1726,27 @@ async def page_agent_status(request: Request):
     )
 
 
+@app.get("/memory")
+async def page_memory(request: Request):
+    """Memory management page."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    await _init_brain_from_config()
+    ui = _locale.get("dashboard", {})
+    return templates.TemplateResponse(
+        "memory.html",
+        {
+            "request": request,
+            "config": loaded,
+            "ui": ui,
+            "language": _config.get("language", "en"),
+        },
+    )
+
+
 @app.post("/api/settings")
 async def api_settings(request: Request):
     """Update dashboard settings without re-running onboarding."""
@@ -2629,6 +2650,110 @@ async def api_agent_status(request: Request):
 
     snapshot = _agent_status_collector.snapshot()
     return snapshot.to_dict()
+
+
+# ─── Memory & Lessons API ───
+
+
+@app.get("/api/memory/facts")
+async def api_memory_facts(
+    request: Request,
+    query: str = "",
+    limit: int = 20,
+):
+    """List distilled session facts."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    if _brain and _brain.memory:
+        facts = await _brain.memory.list_session_facts(query=query, limit=limit)
+        return {"facts": facts, "count": len(facts)}
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
+@app.get("/api/memory/sessions")
+async def api_memory_sessions(request: Request, limit: int = 20):
+    """List session summaries."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    if _brain and _brain.memory:
+        summaries = await _brain.memory.list_session_summaries(limit=limit)
+        return {"sessions": summaries, "count": len(summaries)}
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
+@app.get("/api/lessons")
+async def api_lessons_list(request: Request, limit: int = 50):
+    """List persistent lessons."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    if _brain and _brain.memory:
+        lessons = await _brain.memory.list_lessons(limit=limit)
+        return {"lessons": lessons, "count": len(lessons)}
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
+@app.post("/api/lessons")
+async def api_lesson_create(request: Request):
+    """Create a new lesson."""
+    from lumen.core.lessons import VALID_CATEGORIES
+
+    body = await request.json()
+    rule = body.get("rule", "")
+    category = body.get("category", "general")
+
+    if not rule:
+        return JSONResponse(status_code=400, content={"error": "rule is required"})
+    if category not in VALID_CATEGORIES:
+        category = "general"
+
+    if _brain and _brain.memory:
+        lid = await _brain.memory.save_lesson(
+            rule=rule, category=category, source="user:web"
+        )
+        return {"status": "ok", "id": lid}
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
+@app.delete("/api/lessons/{lesson_id}")
+async def api_lesson_delete(request: Request, lesson_id: int):
+    """Delete a lesson."""
+    if _brain and _brain.memory:
+        existing = await _brain.memory.get_lesson(lesson_id)
+        if not existing:
+            return JSONResponse(status_code=404, content={"error": "Lesson not found"})
+        await _brain.memory.delete_lesson(lesson_id)
+        return {"status": "ok"}
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
+@app.post("/api/lessons/{lesson_id}/pin")
+async def api_lesson_pin(request: Request, lesson_id: int):
+    """Pin or unpin a lesson."""
+    body = await request.json()
+    pinned = bool(body.get("pinned", True))
+
+    if _brain and _brain.memory:
+        existing = await _brain.memory.get_lesson(lesson_id)
+        if not existing:
+            return JSONResponse(status_code=404, content={"error": "Lesson not found"})
+        await _brain.memory.update_lesson(lesson_id, pinned=1 if pinned else 0)
+        return {"status": "ok", "pinned": pinned}
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 _openrouter_models_cache: dict[str, object] = {"fetched_at": 0.0, "items": []}
