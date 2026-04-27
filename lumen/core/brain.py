@@ -2550,9 +2550,14 @@ class Brain:
                         "tool_use_loop: serialized shape detected but no tool calls resolved — sanitising content"
                     )
                     final_message = self._sanitize_raw_tool_content(final_message)
-                if not final_message and all_tool_calls:
-                    recovered = await self._retry_final_response_without_tools(messages)
-                    final_message = recovered or partial_text or self._summarize_tool_results(all_tool_calls)
+                if not final_message:
+                    if all_tool_calls:
+                        final_message = self._summarize_tool_results(all_tool_calls)
+                    if not final_message and partial_text:
+                        final_message = partial_text
+                    if not final_message:
+                        recovered = await self._retry_final_response_without_tools(messages)
+                        final_message = recovered or ''
                 return {
                     "message": final_message,
                     "tool_calls": all_tool_calls,
@@ -2648,9 +2653,14 @@ class Brain:
 
         # Max iterations reached — return what we have
         final_msg = self._safe_extract_content(response)
-        if not final_msg and all_tool_calls:
-            recovered = await self._retry_final_response_without_tools(messages)
-            final_msg = recovered or partial_text or self._summarize_tool_results(all_tool_calls)
+        if not final_msg:
+            if all_tool_calls:
+                final_msg = self._summarize_tool_results(all_tool_calls)
+            if not final_msg and partial_text:
+                final_msg = partial_text
+            if not final_msg:
+                recovered = await self._retry_final_response_without_tools(messages)
+                final_msg = recovered or ''
         return {"message": final_msg, "tool_calls": all_tool_calls}
 
     async def _tool_use_loop_streaming(
@@ -2805,9 +2815,14 @@ class Brain:
 
         # Max iterations reached
         final_msg = self._safe_extract_content(response)
-        if not final_msg and all_tool_calls:
-            recovered = await self._retry_final_response_without_tools(messages)
-            final_msg = recovered or partial_text or self._summarize_tool_results(all_tool_calls)
+        if not final_msg:
+            if all_tool_calls:
+                final_msg = self._summarize_tool_results(all_tool_calls)
+            if not final_msg and partial_text:
+                final_msg = partial_text
+            if not final_msg:
+                recovered = await self._retry_final_response_without_tools(messages)
+                final_msg = recovered or ''
 
         result = {"message": final_msg, "tool_calls": all_tool_calls}
         yield {"type": "delta", "content": final_msg, "_result": result}

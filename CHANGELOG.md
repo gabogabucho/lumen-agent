@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-04-27
+
+### Fixed
+- **Empty response when tool calls are invalid or DSML sanitized to empty**: When DeepSeek returns native tool calls with invalid names (not in schema), `_resolve_tool_calls` rejects them. If DSML content is also present, `_safe_extract_content` sanitizes it to empty. The recovery path (`_retry_final_response_without_tools` / `_summarize_tool_results`) was only activated when `all_tool_calls` was non-empty, but since invalid tools were never executed, the list stayed empty and recovery never fired. Fixed in all 3 recovery sites (inside loop + max_iterations exit, for both `_tool_use_loop` and `_tool_use_loop_streaming`) to prioritize `_summarize_tool_results` when tools were executed, use `partial_text` as fallback, and only attempt the retry-without-tools LLM call as last resort. This also covers the case where the retry itself returns DSML that gets sanitized to empty.
+
 ## [1.0.0] - 2026-04-27
 
 ### Added
