@@ -625,6 +625,29 @@ def _require_owner_access(
     return None
 
 
+def _require_any_auth(
+    request: Request, config: dict | None = None
+) -> JSONResponse | None:
+    """Accept either owner cookie (dashboard) OR Bearer token (API apps).
+
+    Tries cookie auth first; falls back to Bearer token for external apps
+    like Otto App that don't use cookie login.
+    """
+    loaded = config if config is not None else _load_config()
+    # No auth needed in local/dev mode
+    if not _is_serve_mode() or not _is_configured(loaded):
+        return None
+    # Cookie auth (dashboard users)
+    if _request_has_owner_access(request, loaded):
+        return None
+    # Bearer token auth (API users)
+    if _validate_bearer_token(request) is None:
+        return None
+    return JSONResponse(
+        status_code=401, content={"error": "authentication_required"}
+    )
+
+
 def ensure_server_bootstrap(*, host: str = "0.0.0.0", port: int = 3000) -> str:
     """Ensure hosted mode has a token-protected bootstrap state."""
     loaded = _load_config()
@@ -1991,7 +2014,7 @@ async def mark_awakened_endpoint(request: Request):
 @app.get("/api/history/{session_id}")
 async def api_history(request: Request, session_id: str):
     """Load conversation history for a session from persistent memory."""
-    guard = _require_owner_access(request)
+    guard = _require_any_auth(request)
     if guard is not None:
         return guard
     if not _brain:
@@ -2748,7 +2771,7 @@ async def api_modules_complete_setup(request: Request, name: str):
 @app.get("/api/status")
 async def api_status(request: Request):
     """Lumen's current status — from the Body (registry)."""
-    guard = _require_owner_access(request)
+    guard = _require_any_auth(request)
     if guard is not None:
         return guard
     registry = _brain.registry if _brain else None
@@ -3294,7 +3317,7 @@ async def api_memory_facts(
     loaded = _load_config()
     if not _is_configured(loaded):
         return JSONResponse(status_code=400, content={"error": "not_configured"})
-    guard = _require_owner_access(request, loaded)
+    guard = _require_any_auth(request, loaded)
     if guard is not None:
         return guard
 
@@ -3310,7 +3333,7 @@ async def api_memory_sessions(request: Request, limit: int = 20):
     loaded = _load_config()
     if not _is_configured(loaded):
         return JSONResponse(status_code=400, content={"error": "not_configured"})
-    guard = _require_owner_access(request, loaded)
+    guard = _require_any_auth(request, loaded)
     if guard is not None:
         return guard
 

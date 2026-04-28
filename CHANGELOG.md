@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2026-04-28
+
+### Fixed
+- **Auth Bearer token en endpoints de API para apps externas**: Creado `_require_any_auth()` que acepta cookie de owner (dashboard) OR Bearer token (apps externas como Otto App). Aplicado a 4 endpoints críticos:
+  - `GET /api/history/{session_id}` — historial de conversación
+  - `GET /api/status` — estado del agente
+  - `GET /api/memory/facts` — hechos destilados
+  - `GET /api/memory/sessions` — resúmenes de sesión
+  Esto permite que Otto App y otras apps Next.js usen `Authorization: Bearer <rest_key>` en todos los endpoints que necesitan, no solo `/api/chat`.
+
 ## [1.1.6] - 2026-04-28
 
 ### Fixed
