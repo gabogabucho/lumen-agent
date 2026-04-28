@@ -129,6 +129,28 @@ def configure(brain, locale: dict, config: dict, awareness=None, *, lumen_dir: P
     # Set up confirmation handler for web channel
     if _brain:
         _brain.confirmation_gate.set_handler(_web_confirm_handler)
+    _schedule_conversation_purge()
+
+
+def _schedule_conversation_purge():
+    """Purge old conversations once at startup."""
+    if _brain is None or not hasattr(_brain, 'memory'):
+        return
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _run_purge():
+        try:
+            deleted = await _brain.memory.purge_old_conversations(days=30)
+            if deleted:
+                logger.info("Purged %d old conversation memories", deleted)
+        except Exception:
+            pass
+
+    loop.create_task(_run_purge())
 
 
 def _attach_brain_runtime_handlers():
@@ -2168,6 +2190,56 @@ async def api_chat(request: Request):
     return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 
+@app.post("/api/session/new")
+async def api_new_session(request: Request):
+    """Start a new session, archiving the current one.
+
+    Body: {"session_id": "..."}
+    Response: {"new_session_id": "...", "old_session_id": "..."}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "invalid JSON"})
+
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"error": "expected JSON object"})
+
+    old_session_id = body.get("session_id")
+    if not old_session_id:
+        return JSONResponse(status_code=400, content={"error": "session_id is required"})
+
+    old_session, new_session = session_manager.reset_session(old_session_id)
+
+    # Persist session summary if brain is ready
+    if _brain and old_session:
+        turn_count = len(old_session.history)
+        summary = "Nueva conversación"
+        if old_session.history:
+            first_user = next(
+                (m["content"] for m in old_session.history if m.get("role") == "user"),
+                ""
+            )
+            if first_user:
+                summary = first_user[:80] + "..." if len(first_user) > 80 else first_user
+        try:
+            await _brain.memory.save_session_summary(
+                session_id=old_session_id,
+                summary=summary,
+                turn_count=turn_count,
+            )
+        except Exception:
+            pass
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "new_session_id": new_session.session_id,
+            "old_session_id": old_session_id,
+        },
+    )
+
+
 @app.websocket("/ws/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
     """Real-time chat via WebSocket."""
@@ -2236,6 +2308,43 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
             user_text = payload.get("content", "").strip()
 
             if not user_text or not _brain:
+                continue
+
+            # /new command — start a fresh session
+            if user_text.lower() == "/new":
+                old_session = session_manager.get(session_id)
+                old_session_id = session_id
+                old_session, new_session = session_manager.reset_session(session_id)
+                session_id = new_session.session_id
+                session = new_session
+
+                # Persist old session summary
+                if old_session:
+                    turn_count = len(old_session.history)
+                    summary = "Nueva conversación"
+                    if old_session.history:
+                        first_user = next(
+                            (m["content"] for m in old_session.history if m.get("role") == "user"),
+                            ""
+                        )
+                        if first_user:
+                            summary = first_user[:80] + "..." if len(first_user) > 80 else first_user
+                    try:
+                        await _brain.memory.save_session_summary(
+                            session_id=old_session_id,
+                            summary=summary,
+                            turn_count=turn_count,
+                        )
+                    except Exception:
+                        pass
+
+                await websocket.send_text(
+                    json.dumps({
+                        "type": "session_reset",
+                        "new_session_id": session_id,
+                        "message": "Nueva conversación iniciada.",
+                    })
+                )
                 continue
 
             await websocket.send_text(json.dumps({"type": "typing", "status": True}))
@@ -3208,6 +3317,25 @@ async def api_memory_sessions(request: Request, limit: int = 20):
     if _brain and _brain.memory:
         summaries = await _brain.memory.list_session_summaries(limit=limit)
         return {"sessions": summaries, "count": len(summaries)}
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
+@app.post("/api/memory/purge")
+async def api_memory_purge(request: Request):
+    """Manually purge old conversation memories."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+
+    if _brain and _brain.memory:
+        try:
+            deleted = await _brain.memory.purge_old_conversations(days=30)
+            return {"deleted": deleted}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
     return JSONResponse(status_code=503, content={"error": "Memory not available"})
 
 

@@ -470,3 +470,16 @@ class Memory:
             "total_facts": fact_rows[0][0] if fact_rows else 0,
             "total_lessons": lesson_rows[0][0] if lesson_rows else 0,
         }
+
+    async def purge_old_conversations(self, days: int = 30) -> int:
+        """Delete conversation memories older than N days.
+
+        Returns the number of rows deleted.
+        """
+        cutoff = time.time() - (days * 86400)
+        cursor = await self._db.execute(
+            "DELETE FROM memories WHERE category LIKE 'conversation:%' AND created_at < ?",
+            (cutoff,),
+        )
+        await self._db.commit()
+        return cursor.rowcount

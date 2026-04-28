@@ -95,3 +95,16 @@ class SessionManager:
 
     def remove(self, session_id: str):
         self._sessions.pop(session_id, None)
+
+    def reset_session(self, session_id: str) -> tuple[Session, Session]:
+        """Archive the current session and start a fresh one.
+
+        Returns (old_session, new_session). The caller is responsible for
+        persisting the old session summary if desired.
+        """
+        self.prune_stale()
+        old_session = self._sessions.pop(session_id, None)
+        new_session = Session()
+        new_session.touch()
+        self._sessions[new_session.session_id] = new_session
+        return old_session, new_session

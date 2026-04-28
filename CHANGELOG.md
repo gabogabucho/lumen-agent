@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-04-28
+
+### Fixed
+- **Memoria vacía — session_facts nunca se llenaba**: `SessionDistiller` existía pero nunca se invocaba. Ahora se integra en `_finalize_turn()` del brain: después de 4+ turnos de conversación, se dispara `distill_session()` en background (sin bloquear la respuesta al usuario). Los facts extraídos aparecen en `/api/memory/facts`.
+- **Conversaciones acumulándose infinitamente en SQLite**: Nuevo método `memory.purge_old_conversations(days=30)` que corre automáticamente al iniciar el servidor. También disponible vía endpoint `POST /api/memory/purge` y botón "Limpiar historial antiguo" en la página Memoria.
+- **No había forma de iniciar nueva sesión manualmente**: Agregado `SessionManager.reset_session()` + endpoint `POST /api/session/new` + comando `/new` en WebSocket + botón "Nueva conversación" (ícono +) en el dashboard. Al resetear, la sesión anterior se guarda como resumen en `session_summaries` con el primer mensaje del usuario como título.
+
 ## [1.1.5] - 2026-04-28
 
 ### Fixed

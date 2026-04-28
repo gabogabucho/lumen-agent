@@ -11,6 +11,7 @@ The brain combines three sources into one prompt:
   + Active flow, memories, conversation history
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -37,6 +38,7 @@ from lumen.core.provider_health import ProviderHealthTracker
 from lumen.core.tool_policy import ToolPolicy, ToolRisk
 from lumen.core.confirmation_gate import ConfirmationGate, ConfirmDecision
 from lumen.core.session import Session
+from lumen.core.distiller import SessionDistiller
 
 
 logger = logging.getLogger(__name__)
@@ -95,6 +97,8 @@ class Brain:
         self._last_detected_language: str = self.language
         self._current_messages: list[dict] | None = None  # For contradiction retry
         self._cached_lessons_text: str = ""  # Pre-loaded lessons for prompt injection
+        self._distiller = SessionDistiller(memory=self.memory, model=self.model)
+        self._distilled_sessions: set[str] = set()
 
     async def _persist_tool_output(
         self, tool_name: str, result: Any, session_id: str = ""
@@ -1573,6 +1577,16 @@ class Brain:
                 )
         except Exception:
             pass
+
+        # Phase 2.4: Session distillation — extract durable facts after enough turns
+        if (
+            len(session.history) >= 4
+            and session.session_id not in self._distilled_sessions
+        ):
+            self._distilled_sessions.add(session.session_id)
+            asyncio.create_task(
+                self._distiller.distill_session(session.session_id)
+            )
 
         return result
 

@@ -920,6 +920,11 @@
                 placeholder="{{ ui.chat_placeholder | default('Escribe un mensaje...') }}"
                 autocomplete="off"
               />
+              <button type="button" class="l-btn ghost" id="new-session-btn" title="Nueva conversación">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+              </button>
               <button type="submit" class="l-btn">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
@@ -1356,6 +1361,13 @@
       chatInput.focus();
     });
 
+    const newSessionBtn = document.getElementById('new-session-btn');
+    if (newSessionBtn) {
+      newSessionBtn.addEventListener('click', () => {
+        ws.send(JSON.stringify({ content: '/new' }));
+      });
+    }
+
     // === Pulse strip — subtle life indicator ===
     const pulseStrip = document.getElementById('pulse-strip');
     function pulse(kind) {
@@ -1425,6 +1437,14 @@
           addMessage('assistant', data.content);
           pulse('awaken');
           renderSensePanel();
+        }
+        if (data.type === 'session_reset') {
+          typingIndicator.classList.add('hidden');
+          sessionId = data.new_session_id;
+          localStorage.setItem(STORAGE_KEY, sessionId);
+          chatMessages.innerHTML = '';
+          chatMessages.appendChild(chatEmpty);
+          addMessage('assistant', data.message);
         }
       });
 

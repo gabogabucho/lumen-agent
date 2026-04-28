@@ -500,9 +500,14 @@
         <h2>Memoria</h2>
         <p class="sub">Hechos, resúmenes de sesión y aprendizajes de Lumen</p>
       </div>
-      <div class="refresh-indicator" id="refresh-indicator">
-        <span class="spin"></span>
-        <span>Auto-refresh 30s</span>
+      <div style="display:flex;align-items:center;gap:var(--lumen-s-3);">
+        <button type="button" class="l-btn small ghost" id="purge-btn" onclick="purgeOldConversations()">
+          Limpiar historial antiguo
+        </button>
+        <div class="refresh-indicator" id="refresh-indicator">
+          <span class="spin"></span>
+          <span>Auto-refresh 30s</span>
+        </div>
       </div>
     </div>
 
@@ -607,6 +612,27 @@
         overlay.querySelector('#confirm-ok').onclick = () => { overlay.remove(); resolve(true); };
         overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
       });
+    }
+
+    // === Purge old conversations ===
+    async function purgeOldConversations() {
+      const ok = await showConfirm(
+        'Limpiar historial',
+        'Se eliminarán las conversaciones de más de 30 días. ¿Continuar?'
+      );
+      if (!ok) return;
+      try {
+        const resp = await fetch('/api/memory/purge', { method: 'POST' });
+        const data = await resp.json();
+        if (resp.ok) {
+          showToast(`Se eliminaron ${data.deleted} conversaciones antiguas.`);
+          loadFacts();
+        } else {
+          showToast(data.error || 'Error al limpiar.', 'error');
+        }
+      } catch (e) {
+        showToast('Error de red.', 'error');
+      }
     }
 
     // === Sidebar ===
