@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-28
+
+### Fixed
+- **DeepSeek V3/V4 tool calling inconsistente (issue #11)**:
+  - **Pre-tool text leaked to user**: En `think_stream()`, `delta.content` se emitía inmediatamente al stream incluso cuando había `tool_calls`. DeepSeek envía texto como "Completed tool terminal__execute." junto con los tool calls. Fix: suprimir `delta.content` cuando se detectan `tool_calls` — solo emitir el contenido final después de que el tool loop termina.
+  - **`neo__*` tools no registrados en ToolPolicy**: `neo__read_skill`, `neo__search_modules`, `neo__save_module_setup`, `neo__save_artifact_setup`, `neo__check_capability` no estaban en `DEFAULT_TOOL_RISK`, causando "Unknown tool" → `confirm_required=True` → 60s timeout. Fix: agregados como `READ_ONLY` (excepto `save_*` como `MUTATING`).
+  - **Non-standard tool formats no detectados**: Agregados patrones adicionales a `_has_serialized_tool_call_shape` y `_extract_fallback_tool_calls`: `<functions>`, `<function>`, `<｜tool｜>`, `<|tool|>`, y formatos JSON dentro de code blocks.
+  - **`max_iterations` hardcodeado a 3**: DeepSeek necesita más iteraciones para recuperarse de errores. Fix: `_max_tool_iterations()` lee `config.tool_loop.max_iterations` (default 3). Configurable vía `config.yaml`.
+  - **Errores consecutivos consumen iteraciones**: Cuando un tool falla (ej: `command_not_allowed`), DeepSeek intenta otro comando y consume iteraciones rápidamente. Fix: contador `consecutive_errors` en ambos tool loops — si hay 2+ errores consecutivos, se aborta temprano con mensaje informativo.
+
 ## [1.1.9] - 2026-04-28
 
 ### Fixed

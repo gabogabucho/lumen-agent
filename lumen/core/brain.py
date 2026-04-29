@@ -854,7 +854,9 @@ class Brain:
             return {"message": f"I had trouble thinking: {e}", "tool_calls": []}
 
         # 6. Tool use loop — if LLM called tools, execute and send results back
-        result = await self._tool_use_loop(response, messages, tools)
+        result = await self._tool_use_loop(
+            response, messages, tools, max_iterations=self._max_tool_iterations()
+        )
 
         return await self._finalize_turn(session, message, result)
 
@@ -994,6 +996,7 @@ class Brain:
         full_content = ""
         buffered_tool_calls = []
         has_tool_calls = False
+        content_buffer = ""  # Buffer content when tool_calls are detected
 
         async for chunk in response:
             choice = chunk.choices[0]
@@ -1002,7 +1005,11 @@ class Brain:
 
             if delta.content:
                 full_content += delta.content
-                yield {"type": "delta", "content": delta.content}
+                if has_tool_calls:
+                    # Suppress pre-tool content — model sent text alongside tool_calls
+                    content_buffer += delta.content
+                else:
+                    yield {"type": "delta", "content": delta.content}
 
             if delta.tool_calls:
                 has_tool_calls = True
@@ -1031,7 +1038,8 @@ class Brain:
             )
             result = None
             async for event in self._tool_use_loop_streaming(
-                synthetic_response, messages, tools
+                synthetic_response, messages, tools,
+                max_iterations=self._max_tool_iterations(),
             ):
                 if event.get("type") == "delta":
                     yield event  # Final response text
@@ -1046,7 +1054,8 @@ class Brain:
             # Fallback: if streaming didn't produce a result, run the blocking version
             if result is None:
                 result = await self._tool_use_loop(
-                    synthetic_response, messages, tools
+                    synthetic_response, messages, tools,
+                    max_iterations=self._max_tool_iterations(),
                 )
                 if result.get("message"):
                     yield {"type": "delta", "content": result["message"]}
@@ -2283,6 +2292,70 @@ class Brain:
         if parsed:
             return parsed
 
+        # <functions>[{...}]</functions> or <functions><function>...</function></functions>
+        for match in re.finditer(r"<functions>(.*?)</functions>", msg_content, re.DOTALL):
+            try:
+                raw = match.group(1).strip()
+                if raw.startswith("["):
+                    payloads = json.loads(raw)
+                elif raw.startswith("<"):
+                    # XML-style function tags inside functions block
+                    for fn_match in re.finditer(r'<function[^>]*>(.*?)</function>', raw, re.DOTALL):
+                        fn_xml = fn_match.group(1)
+                        name = re.search(r'name="([^"]+)"', fn_xml)
+                        if name:
+                            args = {}
+                            for arg_match in re.finditer(r'<parameter[^>]*>(.*?)</parameter>', fn_xml, re.DOTALL):
+                                param_name = re.search(r'name="([^"]+)"', arg_match.group(0))
+                                if param_name:
+                                    args[param_name.group(1)] = arg_match.group(1)
+                            _materialize({"name": name.group(1), "arguments": args})
+                else:
+                    payloads = [json.loads(raw)]
+                if isinstance(payloads, list):
+                    for payload in payloads:
+                        if isinstance(payload, dict):
+                            _materialize(payload)
+            except Exception:
+                pass
+
+        if parsed:
+            return parsed
+
+        # <function name="x">...</function> single
+        for match in re.finditer(r'<function[^>]*name="([^"]+)"[^>]*>(.*?)</function>', msg_content, re.DOTALL):
+            try:
+                name = match.group(1)
+                body = match.group(2)
+                args = {}
+                for arg_match in re.finditer(r'<parameter[^>]*>(.*?)</parameter>', body, re.DOTALL):
+                    param_name = re.search(r'name="([^"]+)"', arg_match.group(0))
+                    if param_name:
+                        args[param_name.group(1)] = arg_match.group(1)
+                _materialize({"name": name, "arguments": args})
+            except Exception:
+                pass
+
+        if parsed:
+            return parsed
+
+        # <｜tool｜> and <|tool|> tags (DeepSeek variants)
+        for match in re.finditer(r'<[｜|]tool[｜|]>(.*?)</[｜|]tool[｜|]>', msg_content, re.DOTALL):
+            try:
+                raw = match.group(1).strip()
+                if raw.startswith("["):
+                    payloads = json.loads(raw)
+                else:
+                    payloads = [json.loads(raw)]
+                for payload in payloads:
+                    if isinstance(payload, dict):
+                        _materialize(payload)
+            except Exception:
+                pass
+
+        if parsed:
+            return parsed
+
         stripped = msg_content.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
@@ -2312,14 +2385,26 @@ class Brain:
             "<|DSML|invoke ",
             '<invoke name="',
             "[TOOL_CALLS]",
+            "<functions>",
+            "<function ",
+            "<function>",
+            "<｜tool｜>",
+            "<|tool|>",
+            '<function name="',
         )
         if any(marker in stripped for marker in markers):
             return True
 
         if stripped.startswith("{") and stripped.endswith("}"):
             has_tool_key = re.search(r'"(?:name|tool|function)"\s*:', stripped)
-            has_args_key = re.search(r'"(?:arguments|args)"\s*:', stripped)
+            has_args_key = re.search(r'"(?:arguments|args|parameters)"\s*:', stripped)
             return bool(has_tool_key and has_args_key)
+
+        # DeepSeek sometimes sends function calls in code blocks
+        if stripped.startswith("```json") or stripped.startswith("```"):
+            inner = re.search(r'```(?:json)?\s*(.*?)\s*```', stripped, re.DOTALL)
+            if inner:
+                return Brain._has_serialized_tool_call_shape(inner.group(1))
 
         return False
 
@@ -2596,6 +2681,14 @@ class Brain:
             content = self._sanitize_raw_tool_content(content)
         return content
 
+    def _max_tool_iterations(self) -> int:
+        """Read max_iterations from config (default 3, DeepSeek needs 5)."""
+        try:
+            loop_config = self.config.get("tool_loop", {})
+            return int(loop_config.get("max_iterations", 3))
+        except Exception:
+            return 3
+
     async def _tool_use_loop(
         self,
         response,
@@ -2616,6 +2709,7 @@ class Brain:
         """
         all_tool_calls = []
         partial_text = ""
+        consecutive_errors = 0
 
         for _ in range(max_iterations):
             choice = response.choices[0]
@@ -2757,7 +2851,9 @@ class Brain:
                 except Exception as e:
                     tool_result = {"error": str(e)}
                     all_tool_calls.append({"name": func.name, "error": str(e)})
+                    consecutive_errors += 1
                 else:
+                    consecutive_errors = 0
                     # Persist non-trivial tool results as structured outputs
                     await self._persist_tool_output(func.name, tool_result)
 
@@ -2769,6 +2865,16 @@ class Brain:
                         "content": json.dumps(tool_result),
                     }
                 )
+
+            # Abort early if too many consecutive errors (model is stuck)
+            if consecutive_errors >= 2:
+                return {
+                    "message": (
+                        "I encountered repeated errors trying to run tools. "
+                        "Please check your request or try a different approach."
+                    ),
+                    "tool_calls": all_tool_calls,
+                }
 
             # Send tool results back to LLM for final response
             try:
@@ -2823,6 +2929,7 @@ class Brain:
         """
         all_tool_calls = []
         partial_text = ""
+        consecutive_errors = 0
 
         for iteration in range(max_iterations):
             choice = response.choices[0]
@@ -2971,11 +3078,14 @@ class Brain:
                 except Exception as e:
                     tool_error = str(e)
                     all_tool_calls.append({"name": tool_name, "error": tool_error})
+                    consecutive_errors += 1
                     yield {
                         "type": "tool_result",
                         "tool": tool_name,
                         "error": tool_error,
                     }
+                else:
+                    consecutive_errors = 0
 
                 # Add tool result to messages for the LLM
                 messages.append(
@@ -2987,6 +3097,24 @@ class Brain:
                         ),
                     }
                 )
+
+            # Abort early if too many consecutive errors
+            if consecutive_errors >= 2:
+                yield {
+                    "type": "delta",
+                    "content": (
+                        "I encountered repeated errors trying to run tools. "
+                        "Please check your request or try a different approach."
+                    ),
+                    "_result": {
+                        "message": (
+                            "I encountered repeated errors trying to run tools. "
+                            "Please check your request or try a different approach."
+                        ),
+                        "tool_calls": all_tool_calls,
+                    },
+                }
+                return
 
             # Send tool results back to LLM
             try:

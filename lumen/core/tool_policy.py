@@ -61,6 +61,13 @@ DEFAULT_TOOL_RISK: dict[str, dict[str, str]] = {
     "terminal": {
         "execute": ToolRisk.PRIVILEGED.value,
     },
+    "neo": {
+        "read_skill": ToolRisk.READ_ONLY.value,
+        "search_modules": ToolRisk.READ_ONLY.value,
+        "save_module_setup": ToolRisk.MUTATING.value,
+        "save_artifact_setup": ToolRisk.MUTATING.value,
+        "check_capability": ToolRisk.READ_ONLY.value,
+    },
 }
 
 # Default confirmation requirements by risk level
