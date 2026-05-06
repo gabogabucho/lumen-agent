@@ -9,6 +9,17 @@ services:
       - neuron-internal
       - dokploy-network
     restart: unless-stopped
+    labels:
+      - "traefik.http.middlewares.lumen-ratelimit.ratelimit.average=60"
+      - "traefik.http.middlewares.lumen-ratelimit.ratelimit.period=1m"
+      - "traefik.http.middlewares.lumen-ratelimit.ratelimit.burst=30"
+
+      - "traefik.http.middlewares.lumen-secure-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.lumen-secure-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.lumen-secure-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.lumen-secure-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.lumen-secure-headers.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.lumen-secure-headers.headers.referrerPolicy=no-referrer-when-downgrade"
 
 volumes:
   lumen_data:
