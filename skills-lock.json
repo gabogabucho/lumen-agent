@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "docker-development": {
+      "source": "netresearch/docker-development-skill",
+      "sourceType": "github",
+      "skillPath": "skills/docker-development/SKILL.md",
+      "computedHash": "bb7382074d2813a3b8c0fdfceefad1e4faad5ca859302c00a453d56d8cab5f6c"
+    }
+  }
+}

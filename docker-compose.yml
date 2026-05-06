@@ -1,0 +1,20 @@
+services:
+  lumen:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - lumen_data:/root/.lumen
+    networks:
+      - neuron-internal
+      - dokploy-network
+    restart: unless-stopped
+
+volumes:
+  lumen_data:
+
+networks:
+  neuron-internal:
+    external: true
+  dokploy-network:
+    external: true
