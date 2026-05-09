@@ -604,10 +604,10 @@ REST API responses
 Use external services for shared infrastructure:
 
 ```txt
-Honcho = long-term conversational memory
-Qdrant = large semantic document search
-Redis  = cache / temporary state / rate limits
-n8n    = orchestration
+Honcho module = long-term conversational memory (also available as native module)
+Qdrant        = large semantic document search
+Redis         = cache / temporary state / rate limits
+n8n           = orchestration
 ```
 
 ---
@@ -630,6 +630,53 @@ User → Channel module → inbox.jsonl → Gateway watcher → Unified Inbox �
 ```
 
 All channels share one brain, one memory, one identity.
+
+## Integration Modules
+
+Lumen supports enterprise and infrastructure integrations as installable modules.
+
+| Module | What it does | Dependencies | Notes |
+|--------|--------------|--------------|-------|
+| **Paperclip** | Multi-agent orchestration — receive tasks, report status, heartbeat | Paperclip server | Registered agent in a Paperclip company |
+| **Honcho** | Persistent cross-session memory — semantic search, recall, conclusions | honcho-ai SDK | Cloud (honcho.dev) or self-hosted |
+
+### Paperclip
+
+Connects Lumen as a registered agent in a [Paperclip](https://github.com/paperclipai/paperclip) company. Receives tasks from the CEO, processes them through the brain, and reports status back.
+
+```bash
+lumen module install paperclip
+lumen config set paperclip.url https://paperclip.example.com
+lumen config set paperclip.api_key sk-paperclip-xxxxx --secret
+```
+
+Endpoints:
+
+```txt
+POST /paperclip/task      — Receive a task from Paperclip
+GET  /paperclip/report    — CEO reads Lumen's current state
+POST /paperclip/heartbeat — Keep connection alive, receive directives
+POST /paperclip/resume    — Resume an interrupted task
+```
+
+### Honcho Persistent Memory
+
+Integrates with [Honcho](https://honcho.dev) for cross-session persistent memory. Lumen remembers facts, learns from past interactions, and provides personalized responses over time. Works with both Honcho cloud and self-hosted instances.
+
+```bash
+lumen module install honcho
+lumen config set honcho.workspace_id ws_abc123
+lumen config set honcho.api_key hk_live_xxxxxx --secret
+```
+
+Endpoints:
+
+```txt
+POST /honcho/search   — Semantic search across memory
+GET  /honcho/context  — Retrieve full session context
+POST /honcho/conclude — Persist learned facts and conclusions
+POST /honcho/memory   — Store arbitrary memories
+```
 
 ---
 
@@ -1124,6 +1171,8 @@ lumen/
 - [x] HTTP-safe dashboard
 - [x] Universal fallback tool parser
 - [x] Docker support
+- [x] Paperclip multi-agent orchestration module
+- [x] Honcho persistent memory module
 - [ ] Public module registry / discovery
 - [ ] Full hosted documentation
 
