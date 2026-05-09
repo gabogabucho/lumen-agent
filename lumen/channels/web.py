@@ -15,6 +15,7 @@ import os
 import secrets
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 import time
 from urllib.error import HTTPError, URLError
@@ -1561,7 +1562,488 @@ async def api_setup(request: Request):
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "error": str(e)},
+            content={"status": "error", "error": str(e)}
+        )
+
+
+# ─── Honcho Memory Endpoints ───
+
+
+def _honcho_modules_installed() -> bool:
+    """Check if the honcho module is installed and configured."""
+    installed_names = set()
+    if _brain and _brain.registry:
+        for cap in _brain.registry.all():
+            if hasattr(cap, "provides") and isinstance(cap.provides, list):
+                for p in cap.provides:
+                    if "honcho" in str(p):
+                        return True
+    # Fallback: check installed modules dir
+    for name in ["honcho", "honcho-memory"]:
+        if (_installed_module_dir(name) / "module.yaml").exists():
+            return True
+    return False
+
+
+def _get_honcho_config() -> dict | None:
+    """Get honcho config, validating required fields."""
+    honcho_config = (_config or {}).get("honcho", {}) or {}
+    api_key = (
+        (_config or {}).get("secrets", {})
+        .get("honcho", {})
+        .get("api_key", "")
+    )
+    if not isinstance(honcho_config, dict):
+        honcho_config = {}
+    if not isinstance(api_key, str):
+        api_key = ""
+
+    if not honcho_config.get("workspace_id") or not api_key:
+        return None
+
+    return {
+        "workspace_id": str(honcho_config.get("workspace_id", "")).strip(),
+        "api_key": api_key.strip(),
+        "base_url": str(honcho_config.get("base_url", "")).strip() or None,
+        "session_strategy": str(
+            honcho_config.get("session_strategy", "per-session")
+        ).strip(),
+        "recall_mode": str(honcho_config.get("recall_mode", "hybrid")).strip(),
+    }
+
+
+def _validate_honcho_bearer_token(request: Request) -> str | None:
+    """Validate Authorization: Bearer <token> header for honcho endpoints.
+
+    Checks against honcho-specific API key from config.
+    Returns None if valid, or error string if invalid/missing.
+    """
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return "bearer_token_required"
+
+    token = auth_header[7:].strip()
+    if not token:
+        return "bearer_token_required"
+
+    # Validate against honcho config
+    try:
+        honcho_keys = []
+        # Check env var first
+        honcho_env_key = "HONCHO_API_KEY"
+        if os.environ.get(honcho_env_key) == token:
+            return None  # Valid
+        honcho_keys.append(os.environ.get(honcho_env_key))
+
+        # Check config api_key
+        config_api_key = (
+            (_config or {}).get("secrets") or {}
+        ).get("honcho", {}).get("api_key", "")
+        honcho_keys.append(str(config_api_key).strip())
+
+        # Also check raw config path
+        honcho_keys.append(
+            str(
+                (_load_config() or {}).get("secrets", {})
+                .get("honcho", {})
+                .get("api_key", "")
+            ).strip()
+        )
+
+        if token in honcho_keys or token in [k for k in honcho_keys if k]:
+            return None  # Valid
+    except Exception:
+        pass
+
+    return "bearer_token_required"
+
+
+@app.post("/honcho/search")
+async def honcho_search(request: Request):
+    """POST /honcho/search — Semantic search in Honcho memory.
+
+    Bearer token auth required + module installed guard + brain ready check.
+    Body: {"query": "...", "max_tokens": 800}
+    Response: {"result": "...", "sessions": [...]}
+    """
+    # 1. Module guard
+    module = _installed_module_dir("honcho")
+    if not module.exists() and not _honcho_modules_installed():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "honcho_module_not_installed",
+                "message": "honcho module not installed. Run: lumen module install honcho",
+            },
+        )
+
+    # 2. Bearer auth
+    token = _validate_honcho_bearer_token(request)
+    if token:
+        return JSONResponse(
+            status_code=401,
+            content={"error": token, "message": "Bearer authentication required"},
+        )
+
+    # 3. Brain ready
+    if not _brain:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": "Honcho API unreachable — Lumen brain not ready",
+            },
+        )
+
+    # 4. Import & call
+    from lumen.catalog.modules.honcho.honcho import get_honcho_client
+
+    client = get_honcho_client()
+    if not client or not client.is_connected():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": "Honcho not connected — configure workspace: lumen configure honcho",
+            },
+        )
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "bad_request", "message": "Expected JSON object"},
+        )
+
+    query = str(body.get("query", "")).strip()
+    if not query:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "bad_request",
+                "message": "Query is required",
+            },
+        )
+
+    max_tokens = body.get("max_tokens", 800)
+    if not isinstance(max_tokens, int) or max_tokens < 0:
+        max_tokens = 800
+    max_tokens = min(max_tokens, 2000)  # Cap at 2000
+
+    session_key = (
+        (body.get("session_key"))
+        or getattr(_brain, "session", None)
+        or "default"
+    )
+    if not isinstance(session_key, str):
+        session_key = "default"
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(client.search, session_key, query, max_tokens),
+            timeout=30,
+        )
+        return JSONResponse(
+            content={
+                "result": result.get("result", ""),
+                "sessions": result.get("sessions", []),
+            }
+        )
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={
+                "error": "gateway_timeout",
+                "message": "Timeout — honcho no responde (30s)",
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": f"Honcho API unreachable — {e}",
+            },
+        )
+
+
+@app.get("/honcho/context")
+async def honcho_context(request: Request):
+    """GET /honcho/context — Retrieve full context block for a session.
+
+    Bearer token auth + module guard. Query params: ?session_id=...&peer=...
+    Response: {context, summary, card, representation, recent}
+    """
+    # 1. Module guard
+    if not _installed_module_dir("honcho").exists() and not _honcho_modules_installed():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "honcho_module_not_installed",
+                "message": "honcho module not installed. Run: lumen module install honcho",
+            },
+        )
+
+    # 2. Bearer auth
+    token = _validate_honcho_bearer_token(request)
+    if token:
+        return JSONResponse(
+            status_code=401,
+            content={"error": token, "message": "Bearer authentication required"},
+        )
+
+    # 3. Brain ready
+    if not _brain:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": "Honcho API unreachable — Lumen brain not ready",
+            },
+        )
+
+    # 4. Import & call
+    from lumen.catalog.modules.honcho.honcho import get_honcho_client
+
+    client = get_honcho_client()
+    if not client or not client.is_connected():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": "Honcho not connected — configure workspace: lumen configure honcho",
+            },
+        )
+
+    session_id = request.query_params.get("session_id")
+    peer = request.query_params.get("peer", "")
+
+    if not isinstance(session_id, str) or not session_id.strip():
+        # Empty session → return empty context, not an error
+        return JSONResponse(
+            content={
+                "context": "",
+                "summary": "",
+                "card": {},
+                "representation": {},
+                "recent": [],
+            }
+        )
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(client.fetch_context, session_id),
+            timeout=30,
+        )
+        return JSONResponse(content=result)
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={
+                "error": "gateway_timeout",
+                "message": "Timeout — honcho no responde (30s)",
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": f"Honcho API unreachable — {e}",
+            },
+        )
+
+
+@app.post("/honcho/conclude")
+async def honcho_conclude(request: Request):
+    """POST /honcho/conclude — Write a conclusion/fact to Honcho memory.
+
+    Bearer token auth + module guard. Body: {"content": "...", "peer": "user"}
+    Returns {"success": true} or {"success": false, "error": "..."}
+    Fire-and-forget semantics — API failures return success:false, not 503.
+    """
+    # 1. Module guard
+    if not _installed_module_dir("honcho").exists() and not _honcho_modules_installed():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "honcho_module_not_installed",
+                "message": "honcho module not installed. Run: lumen module install honcho",
+            },
+        )
+
+    # 2. Bearer auth
+    token = _validate_honcho_bearer_token(request)
+    if token:
+        return JSONResponse(
+            status_code=401,
+            content={"error": token, "message": "Bearer authentication required"},
+        )
+
+    # 3. Brain ready
+    if not _brain:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": "Honcho API unreachable — Lumen brain not ready",
+            },
+        )
+
+    # 4. Import & call
+    from lumen.catalog.modules.honcho.honcho import get_honcho_client
+
+    client = get_honcho_client()
+    if not client or not client.is_connected():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": "Honcho not connected — configure workspace: lumen configure honcho",
+            },
+        )
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "bad_request",
+                "message": "Expected JSON object",
+            },
+        )
+
+    content = str(body.get("content", "")).strip()
+    if not content:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "bad_request",
+                "message": "Content is required",
+            },
+        )
+
+    peer = str(body.get("peer", "user")).strip() or "user"
+
+    session_key = (
+        (body.get("session_key"))
+        or getattr(_brain, "session", None)
+        or "default"
+    )
+    if not isinstance(session_key, str):
+        session_key = "default"
+
+    # Fire-and-forget: no 503, just success:false on failure
+    try:
+        import asyncio as _asyncio
+
+        result = await asyncio.wait_for(
+            _asyncio.to_thread(client.write_conclusion, session_key, content, peer),
+            timeout=30,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        # Exception means the service is down — still return 200 with success:false
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": str(e),
+            }
+        )
+
+
+@app.post("/honcho/memory")
+async def honcho_memory(request: Request):
+    """POST /honcho/memory — Store arbitrary memory in Honcho.
+
+    Bearer token auth + module guard. Body: {"content": "...", "session": "sess123", "type": "fact"}
+    Returns {"id": "...", "success": true} or {"success": false, "error": "..."}
+    """
+    # 1. Module guard
+    if not _installed_module_dir("honcho").exists() and not _honcho_modules_installed():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "honcho_module_not_installed",
+                "message": "honcho module not installed. Run: lumen module install honcho",
+            },
+        )
+
+    # 2. Bearer auth
+    token = _validate_honcho_bearer_token(request)
+    if token:
+        return JSONResponse(
+            status_code=401,
+            content={"error": token, "message": "Bearer authentication required"},
+        )
+
+    # 3. Brain ready
+    if not _brain:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": "Honcho API unreachable — Lumen brain not ready",
+            },
+        )
+
+    # 4. Import & call
+    from lumen.catalog.modules.honcho.honcho import get_honcho_client
+
+    client = get_honcho_client()
+    if not client or not client.is_connected():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": "Honcho not connected — configure workspace: lumen configure honcho",
+            },
+        )
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "bad_request",
+                "message": "Expected JSON object",
+            },
+        )
+
+    content = str(body.get("content", "")).strip()
+    if not content:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "bad_request",
+                "message": "Content is required",
+            },
+        )
+
+    session = str(body.get("session", "")).strip() or None
+    memory_type = str(body.get("type", "fact")).strip() or "fact"
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(client.store_memory, session, content, memory_type),
+            timeout=30,
+        )
+        return JSONResponse(content=result)
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={
+                "error": "gateway_timeout",
+                "message": "Timeout — honcho no responde (30s)",
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service_unavailable",
+                "message": f"Honcho API unreachable — {e}",
+            },
         )
 
 
@@ -3574,3 +4056,285 @@ async def api_capability_hook(request: Request):
     await broadcast_awareness()
 
     return {"status": "registered", "name": name, "kind": kind_str}
+
+
+# ─── Paperclip Integration Endpoints ───
+
+
+def _paperclip_modules_installed() -> bool:
+    """Check if the paperclip module is installed and configured."""
+    if not _brain:
+        return False
+    # Check catalog for paperclip module
+    for cap in _brain.registry.list_by_kind(CapabilityKind.MODULE):
+        if "paperclip" in cap.provides:
+            return True
+    return False
+
+
+def _get_paperclip_config() -> dict | None:
+    """Get paperclip config, validating required fields."""
+    # Check config for paperclip settings
+    paperclip_url = (_config or {}).get("paperclip.url", "")
+    api_key = ((_config or {}).get("secrets") or {}).get("paperclip", {}).get("PAPERCLIP_API_KEY", "") or ((_config or {}).get("secrets") or {}).get("paperclip", {}).get("paperclip.api_key", "") or ((_config or {}).get("paperclip", {}).get("api_key", ""))
+    company_id = ((_config or {}).get("paperclip", {}).get("company_id", "")) or ((_config or {}).get("paperclip.company_id", ""))
+
+    if not paperclip_url or not api_key or not company_id:
+        return None
+
+    return {
+        "url": paperclip_url,
+        "api_key": api_key,
+        "company_id": company_id,
+        "agent_id": ((_config or {}).get("paperclip", {}).get("agent_id", "")) or ((_config or {}).get("paperclip.agent_id", "")),
+        "role": ((_config or {}).get("paperclip", {}).get("agent_role", "")) or ((_config or {}).get("paperclip.agent_role", "")),
+    }
+
+
+async def _validate_bearer_token(request: Request, config: dict | None = None) -> JSONResponse | None:
+    """Validate Bearer token for paperclip endpoints."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse(status_code=401, content={"error": "bearer_token_required"})
+
+    token = auth_header[7:]
+    if not token:
+        return JSONResponse(status_code=401, content={"error": "bearer_token_required"})
+
+    # Validate against paperclip config
+    pc_config = _get_paperclip_config()
+    if pc_config and pc_config.get("api_key") == token:
+        return None  # Token valid
+
+    return JSONResponse(
+        status_code=403,
+        content={"error": "invalid_bearer_token"}
+    )
+
+
+@app.post("/paperclip/task")
+async def api_paperclip_task(request: Request):
+    """POST /paperclip/task — Paperclip sends a task for Lumen to process.
+
+    Requires Bearer auth. Processes the task through Lumen's brain
+    with full personality, memory, and skill context.
+    """
+    if not _paperclip_modules_installed():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "paperclip_module_not_installed",
+                "message": "Paperclip module is not installed. Run: lumen module install paperclip"
+            }
+        )
+
+    guard = await _validate_bearer_token(request)
+    if guard is not None:
+        return guard
+
+    if not _brain:
+        return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
+
+    try:
+        body = await _brain.wait_for_task_processing() if hasattr(_brain, "wait_for_task_processing") else {}
+
+        # Import handler for the actual processing
+        try:
+            from lumen.catalog.modules.paperclip import handler as paperclip_handler
+        except ImportError:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "paperclip_handler_not_found", "message": "Paperclip handler module not found."}
+            )
+
+        request_data = {
+            "path": "/paperclip/task",
+            "method": "POST",
+            "headers": dict(request.headers),
+            "body": body,
+        }
+
+        result = await paperclip_handler.handle_task(
+            request=request_data,
+            config=_config or {},
+            brain=_brain,
+            memory=_brain.memory if _brain and hasattr(_brain, "memory") else None,
+            awareness=_awareness,
+        )
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "ok": False,
+                "error": str(e),
+                "message": "internal_server_error"
+            }
+        )
+
+
+@app.get("/paperclip/report")
+async def api_paperclip_report(request: Request):
+    """GET /paperclip/report — Paperclip CEO reads Lumen's current state.
+
+    Optional query params:
+      - period: 1d | 7d | 30d | all (default: 7d)
+    Requires Bearer auth.
+    """
+    if not _paperclip_modules_installed():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "paperclip_module_not_installed",
+                "message": "Paperclip module is not installed."
+            }
+        )
+
+    guard = await _validate_bearer_token(request)
+    if guard is not None:
+        return guard
+
+    if not _brain:
+        return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
+
+    try:
+        try:
+            from lumen.catalog.modules.paperclip import handler as paperclip_handler
+        except ImportError:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "paperclip_handler_not_found", "message": "Paperclip handler module not found."}
+            )
+
+        request_data = {
+            "path": "/paperclip/report",
+            "method": "GET",
+            "query_params": dict(request.query_params),
+            "body": {},
+        }
+
+        result = await paperclip_handler.handle_report(
+            request=request_data,
+            config=_config or {},
+            brain=_brain,
+            memory=_brain.memory if _brain and hasattr(_brain, "memory") else None,
+            awareness=_awareness,
+        )
+
+        return result
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "ok": False,
+                "error": f"report failed: {e}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+
+@app.post("/paperclip/heartbeat")
+async def api_paperclip_heartbeat(request: Request):
+    """POST /paperclip/heartbeat — Paperclip sends periodic heartbeats.
+
+    Receives directives in the heartbeat body. Stores them in Lumen memory.
+    Requires Bearer auth.
+    """
+    if not _paperclip_modules_installed():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "paperclip_module_not_installed",
+                "message": "Paperclip module is not installed."
+            }
+        )
+
+    guard = await _validate_bearer_token(request)
+    if guard is not None:
+        return guard
+
+    if not _brain:
+        return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
+
+    try:
+        body = await request.json()
+
+        try:
+            from lumen.catalog.modules.paperclip import handler as paperclip_handler
+        except ImportError:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "paperclip_handler_not_found", "message": "Paperclip handler module not found."}
+            )
+
+        request_data = {"path": "/paperclip/heartbeat", "method": "POST", "body": body}
+
+        result = await paperclip_handler.handle_heartbeat(
+            request=request_data,
+            config=_config or {},
+            brain=_brain,
+            memory=_brain.memory if _brain and hasattr(_brain, "memory") else None,
+            awareness=_awareness,
+        )
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": str(e), "timestamp": datetime.now().isoformat()}
+        )
+
+
+@app.post("/paperclip/resume")
+async def api_paperclip_resume(request: Request):
+    """POST /paperclip/resume — Resume an interrupted task with updated context.
+
+    Paperclip calls this when a task was interrupted and it can retry.
+    Requires Bearer auth.
+    """
+    if not _paperclip_modules_installed():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "paperclip_module_not_installed",
+                "message": "Paperclip module is not installed."
+            }
+        )
+
+    guard = await _validate_bearer_token(request)
+    if guard is not None:
+        return guard
+
+    if not _brain:
+        return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
+
+    try:
+        body = await request.json()
+
+        try:
+            from lumen.catalog.modules.paperclip import handler as paperclip_handler
+        except ImportError:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "paperclip_handler_not_found", "message": "Paperclip handler module not found."}
+            )
+
+        request_data = {"path": "/paperclip/resume", "method": "POST", "body": body}
+
+        result = await paperclip_handler.handle_resume(
+            request=request_data,
+            config=_config or {},
+            memory=_brain.memory if _brain and hasattr(_brain, "memory") else None,
+        )
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": str(e), "timestamp": datetime.now().isoformat()}
+        )

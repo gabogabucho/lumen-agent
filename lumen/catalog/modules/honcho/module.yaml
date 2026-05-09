@@ -1,0 +1,64 @@
+name: honcho-memory
+display_name: "Honcho Persistent Memory"
+description: "Integración con Honcho.dev para memoria persistente cross-session — recuperar hechos, aprender de interacciones pasadas, modelado de pares y razonamiento dialéctico."
+version: 1.0.0
+author: "Lumen Team"
+price: free
+min_capability: tier-2
+provides:
+  - honcho.memory
+  - honcho.search
+  - honcho.remember
+requires:
+  skills:
+    - honcho-awareness
+  modules: []
+x-lumen:
+  runtime:
+    env:
+      - name: workspace_id
+        label: "Workspace ID"
+        hint: "ID del workspace de Honcho donde se almacena la memoria."
+        secret: false
+        pattern: ".+"
+        format_guidance: "Identificador alfanumérico del workspace (ej. ws_abcdef)."
+        examples:
+          - "ws_abc123"
+      - name: api_key
+        label: "API key"
+        hint: "Clave de API de Honcho.dev para autenticación."
+        secret: true
+        format_guidance: "Clave secreta con prefijo hk_."
+        examples:
+          - "hk_live_xxxxxx"
+      - name: base_url
+        label: "Self-hosted URL (optional)"
+        hint: "URL del servidor Honcho self-hosted. Dejar vacío para modo cloud (honcho.dev)."
+        secret: false
+        format_guidance: "Protocolo http o https, seguido de un host."
+        examples:
+          - "https://honcho.internal"
+      - name: session_strategy
+        label: "Session strategy"
+        hint: "Estrategia de gestión de sesiones con Honcho."
+        secret: false
+        format_guidance: "Dejar vacío para usar el valor predeterminado (per-session)."
+        choices:
+          - per-session
+          - per-directory
+          - per-repo
+          - global
+        examples:
+          - "per-session"
+      - name: recall_mode
+        label: "Recall mode"
+        hint: "Modo de recuperación de memoria (cómo se inyectan los recuerdos)."
+        secret: false
+        format_guidance: "Dejar vacío para usar el valor predeterminado (hybrid)."
+        choices:
+          - hybrid
+          - context
+          - tools
+        examples:
+          - "hybrid"
+tags: [integration, memory, cross-session, honcho, x-lumen]

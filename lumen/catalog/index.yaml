@@ -206,3 +206,35 @@ modules:
     requires:
       connectors: [task, memory, message]
     tags: [vertical, restaurant, food]
+
+  - name: paperclip
+    display_name: "Paperclip Integration"
+    description: "Connect Lumen to a Paperclip company as a registered agent. Receive tasks, report status, operate within company goals."
+    version: "1.0.0"
+    author: "Lumen Team"
+    price: free
+    min_capability: tier-2
+    provides:
+      - paperclip.agent
+      - paperclip.task.receiver
+      - paperclip.report.endpoint
+    requires:
+      skills: [paperclip-awareness]
+    tags: [integration, orchestration, enterprise, paperclip]
+
+  - name: honcho-memory
+    display_name: "Honcho Persistent Memory"
+    description: "Integraci\u00f3n con Honcho.dev para memoria persistente cross-session \u2014 recuperar hechos, aprender de interacciones pasadas"
+    version: 1.0.0
+    author: "Lumen Team"
+    price: free
+    min_capability: tier-2
+    provides:
+      - honcho.memory
+      - honcho.search
+      - honcho.remember
+    requires:
+      skills:
+        - honcho-awareness
+      modules: []
+    tags: [integration, memory, cross-session, honcho]

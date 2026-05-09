@@ -1,0 +1,55 @@
+name: paperclip
+display_name: "Paperclip Integration"
+description: "Conecta Lumen a una compañía Paperclip como agente registrado. Recibe tareas, reporta estado y opera dentro de objetivos y presupuesto."
+version: 1.0.0
+author: "Lumen Team"
+price: free
+min_capability: tier-2
+provides:
+  - paperclip.agent
+  - paperclip.task.receiver
+  - paperclip.report.endpoint
+requires:
+  skills:
+    - paperclip-awareness
+  modules: []
+x-lumen:
+  runtime:
+    env:
+      - name: PAPERCLIP_URL
+        label: "Paperclip server URL"
+        hint: "URL base del servidor Paperclip donde se ejecuta el orchestration."
+        secret: false
+        pattern: "https?://[^\\s]+"
+        format_guidance: "Protocolo http o https, seguido de un host y puerto opcional."
+        examples:
+          - "http://localhost:3100"
+          - "https://paperclip.app"
+      - name: PAPERCLIP_API_KEY
+        label: "Paperclip API key"
+        hint: "Clave de API con permisos de registro de agentes."
+        secret: true
+        examples:
+          - "sk-paperclip-xxxxx"
+      - name: PAPERCLIP_COMPANY_ID
+        label: "Company ID"
+        hint: "ID de la compañía Paperclip a la que se conecta."
+        secret: false
+        format_guidance: "Formato: company_abcdef123456"
+        examples:
+          - "company_abc123"
+      - name: PAPERCLIP_AGENT_ID
+        label: "Agent ID"
+        hint: "ID de agente asignado por Paperclip después del registro."
+        secret: false
+        expected_type: "string"
+        examples:
+          - "agent_xyz789"
+      - name: PAPERCLIP_AGENT_ROLE
+        label: "Agent role"
+        hint: "Rol humano-readable del agente (ej. 'Sales Agent', 'Marketing Bot')."
+        secret: false
+        examples:
+          - "Sales Agent"
+tags: [integration, orchestration, enterprise, paperclip, x-lumen]
+
