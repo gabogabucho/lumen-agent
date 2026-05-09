@@ -604,10 +604,10 @@ REST API responses
 Use external services for shared infrastructure:
 
 ```txt
-Honcho module = long-term conversational memory (also available as native module)
-Qdrant        = large semantic document search
-Redis         = cache / temporary state / rate limits
-n8n           = orchestration
+Honcho = long-term conversational memory
+Qdrant = large semantic document search
+Redis  = cache / temporary state / rate limits
+n8n    = orchestration
 ```
 
 ---
@@ -633,7 +633,7 @@ All channels share one brain, one memory, one identity.
 
 ## Integration Modules
 
-Lumen supports enterprise and infrastructure integrations as installable modules.
+The catalog includes integration modules that connect Lumen with external services. Install like any other module.
 
 | Module | What it does | Dependencies | Notes |
 |--------|--------------|--------------|-------|
@@ -1171,8 +1171,6 @@ lumen/
 - [x] HTTP-safe dashboard
 - [x] Universal fallback tool parser
 - [x] Docker support
-- [x] Paperclip multi-agent orchestration module
-- [x] Honcho persistent memory module
 - [ ] Public module registry / discovery
 - [ ] Full hosted documentation
 
