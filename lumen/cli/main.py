@@ -1327,6 +1327,14 @@ def doctor():
     run_doctor()
 
 
+# ── workspace commands ────────────────────────────────────────────────────────
+
+
+from lumen.cli.workspace import workspace_app as _workspace_app  # noqa: E402
+
+app.add_typer(_workspace_app, name="workspace")
+
+
 # ── memory & lessons commands ──────────────────────────────────────────────────
 
 
