@@ -4,7 +4,11 @@
 
 ## Project-Level Skills
 
-_None found in project root (.claude/skills/, .gemini/skills/, .agent/skills/, skills/)_
+| Skill | Trigger | Source |
+|-------|---------|--------|
+| docker-development | Docker tasks: Dockerfiles, compose, multi-stage builds, container audits | `.agents/skills/docker-development/SKILL.md` |
+| senior-security | Application security, pentesting, security architecture, crypto, compliance auditing | `.agents/skills/senior-security-engineering/SKILL.md` |
+| ecc-claude-engineering-team-senior-secops | OpenClaw bridge for engineering team senior secops | `.agents/skills/senior-secops-engineering-guide/SKILL.md` |
 
 ## User-Level Skills
 
@@ -14,7 +18,7 @@ _None found in project root (.claude/skills/, .gemini/skills/, .agent/skills/, s
 | find-skills | When user asks to find, discover, or install agent skills | `~/.agents/skills/find-skills/SKILL.md` |
 | go-testing | When writing Go tests, using teatest, or adding test coverage | `~/.config/opencode/skills/go-testing/SKILL.md` |
 | issue-creation | When creating a GitHub issue, reporting a bug, or requesting a feature | `~/.config/opencode/skills/issue-creation/SKILL.md` |
-| judgment-day | When user says "judgment day", "judgment-day", "review adversarial", "dual review", "doble review", "juzgar", "que lo juzguen" | `~/.config/opencode/skills/judgment-day/SKILL.md` |
+| judgment-day | When user says "judgment day", "judgment-day", "review adversarial", "dual review", "juzgar", "que lo juzguen" | `~/.config/opencode/skills/judgment-day/SKILL.md` |
 | skill-creator | When user asks to create a new skill, add agent instructions, or document patterns for AI | `~/.config/opencode/skills/skill-creator/SKILL.md` |
 | windows-admin | Administra un sistema Windows remoto via PowerShell (SSH o WSL2) | `~/.claude/skills/windows-admin/Claw/clawhub/SKILL.md` |
 

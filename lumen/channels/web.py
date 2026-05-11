@@ -44,6 +44,7 @@ from lumen.core.runtime import (
     refresh_runtime_registry,
     rehydrate_runtime_config,
     reload_runtime_personality_surface,
+    reload_workspace_index,
     sync_runtime_modules,
 )
 from lumen.core.module_runtime import ModuleRuntimeManager
@@ -72,6 +73,8 @@ _active_websockets: set[WebSocket] = set()  # Track connected clients
 _watchers = None  # FilePoller — started in lifespan
 _reload_ipc_task = None
 _web_start_time = time.monotonic()  # For uptime calculation
+_workspace_index = None  # WorkspaceIndex if workspace mode active
+_WS_USER_CONTEXT = None  # WorkspaceUser from JWT for the current WS connection
 
 LUMEN_DIR = Path.home() / ".lumen"
 CONFIG_PATH = LUMEN_DIR / "config.yaml"
@@ -591,6 +594,36 @@ def _request_has_owner_access(request: Request, config: dict | None = None) -> b
     return bool(payload and payload.get("scope") == "owner")
 
 
+def _has_workspace_auth(request) -> bool:
+    """Check if the request carries a valid workspace JWT (cookie or header)."""
+    if _workspace_index is None:
+        return False
+    from lumen.core.workspace_auth import create_jwt, load_workspace_secret
+
+    # Try cookie first
+    token = request.cookies.get("lumen_ws_token")
+    if token:
+        secret = load_workspace_secret(LUMEN_DIR)
+        if secret:
+            from lumen.core.workspace_auth import verify_jwt
+            payload = verify_jwt(token, secret)
+            if payload:
+                return True
+
+    # Try header
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        secret = load_workspace_secret(LUMEN_DIR)
+        if secret:
+            from lumen.core.workspace_auth import verify_jwt
+            payload = verify_jwt(token, secret)
+            if payload:
+                return True
+
+    return False
+
+
 def _websocket_has_owner_access(
     websocket: WebSocket, config: dict | None = None
 ) -> bool:
@@ -599,6 +632,25 @@ def _websocket_has_owner_access(
         _server_secret(config),
     )
     return bool(payload and payload.get("scope") == "owner")
+
+
+def _get_workspace_user_from_websocket(websocket) -> dict | None:
+    """Extract WorkspaceUser from WS cookie. Returns None if invalid/missing."""
+    token = websocket.cookies.get("lumen_ws_token")
+    if not token:
+        return None
+    from lumen.core.workspace_auth import load_workspace_secret, verify_jwt
+    secret = load_workspace_secret(LUMEN_DIR)
+    if not secret:
+        return None
+    payload = verify_jwt(token, secret)
+    if not payload:
+        return None
+    return {
+        "email": payload.get("sub"),
+        "role": payload.get("role"),
+        "team": payload.get("team"),
+    }
 
 
 def _require_setup_access(
@@ -622,6 +674,7 @@ def _require_owner_access(
         _is_serve_mode()
         and _is_configured(loaded)
         and not _request_has_owner_access(request, loaded)
+        and not _has_workspace_auth(request)
     ):
         return JSONResponse(
             status_code=401, content={"error": "authentication_required"}
@@ -641,6 +694,9 @@ def _require_any_auth(
     # No auth needed in local/dev mode
     if not _is_serve_mode() or not _is_configured(loaded):
         return None
+    # Workspace JWT auth
+    if _has_workspace_auth(request):
+        return None
     # Cookie auth (dashboard users)
     if _request_has_owner_access(request, loaded):
         return None
@@ -650,6 +706,28 @@ def _require_any_auth(
     return JSONResponse(
         status_code=401, content={"error": "authentication_required"}
     )
+
+
+def _has_workspace_auth(request: Request) -> bool:
+    """Check if the request has a valid workspace JWT cookie.
+
+    Only active when _workspace_index is not None.
+    """
+    if _workspace_index is None:
+        return False
+    token = request.cookies.get("lumen_ws_token")
+    if not token:
+        return False
+    try:
+        from lumen.core.workspace_auth import _get_workspace_secret, verify_jwt
+
+        secret = _get_workspace_secret()
+        if not secret:
+            return False
+        payload = verify_jwt(token, secret)
+        return payload is not None
+    except Exception:
+        return False
 
 
 def ensure_server_bootstrap(*, host: str = "0.0.0.0", port: int = 3000) -> str:
@@ -1070,7 +1148,7 @@ def _current_personality_ui() -> dict:
 
 async def _init_brain_from_config():
     """Lazy brain initialization — runs once after web setup saves config."""
-    global _brain, _locale, _config
+    global _brain, _locale, _config, _workspace_index
 
     latest_config = _load_config() if _has_config() else {}
 
@@ -1098,6 +1176,7 @@ async def _init_brain_from_config():
     _locale = runtime.locale
     _config = runtime.config
     _awareness = runtime.awareness
+    _workspace_index = runtime.workspace_index
     _attach_brain_runtime_handlers()
 
     # Wire broadcast callback so modules can push real-time events
@@ -1110,6 +1189,12 @@ async def _init_brain_from_config():
 
     # Set up confirmation handler for web channel
     _brain.confirmation_gate.set_handler(_web_confirm_handler)
+
+    # Wire workspace auth hooks
+    import lumen.core.workspace_auth as _wa_mod
+
+    _wa_mod._get_workspace_index = lambda: _workspace_index
+    _wa_mod._get_workspace_secret = lambda: _wa_mod.load_workspace_secret(LUMEN_DIR) if _workspace_index is not None else None
 
     return True
 
@@ -1443,6 +1528,118 @@ async def api_logout():
     response = JSONResponse(content={"status": "ok"})
     response.delete_cookie(AUTH_COOKIE_NAME)
     return response
+
+
+# ── Workspace auth endpoints ────────────────────────────────────────────
+
+
+@app.post("/api/workspace/login")
+async def api_workspace_login(request: Request):
+    """Workspace-mode login: validate email+PIN against workspace index, issue JWT cookie."""
+    if _workspace_index is None:
+        return JSONResponse(status_code=404, content={"error": "workspace_not_configured"})
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "invalid_request"})
+
+    email = str(body.get("email") or "").strip().lower()
+    pin = str(body.get("pin") or "").strip()
+
+    if not email or not pin:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_credentials"},
+        )
+
+    user_data = _workspace_index.lookup_user(email)
+    if user_data is None:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_credentials"},
+        )
+
+    from lumen.core.workspace_auth import verify_pin
+
+    if not verify_pin(pin, user_data["pin_hash"]):
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_credentials"},
+        )
+
+    # Issue JWT
+    from lumen.core.workspace_auth import create_jwt, load_workspace_secret
+
+    secret = load_workspace_secret(LUMEN_DIR)
+    if not secret:
+        secret = secrets.token_urlsafe(32)
+
+    token = create_jwt(
+        user_email=email,
+        role=user_data["role"],
+        team=user_data["team"],
+        secret=secret,
+    )
+
+    response = JSONResponse(content={
+        "ok": True,
+        "user": {
+            "email": email,
+            "role": user_data["role"],
+            "team": user_data["team"],
+            "display_name": user_data["display_name"],
+        },
+    })
+    response.set_cookie(
+        "lumen_ws_token",
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=COOKIE_MAX_AGE_SECONDS,
+    )
+    return response
+
+
+@app.post("/api/workspace/logout")
+async def api_workspace_logout(request: Request):
+    """Clear workspace JWT cookie (POST with cookie present, or with header)."""
+    # Validate workspace auth for logout
+    from lumen.core.workspace_auth import WorkspaceUser, require_workspace_admin
+    try:
+        user = require_workspace_admin(request)
+    except Exception:
+        # Allow logout even without auth — just clear the cookie
+        pass
+    response = JSONResponse(content={"ok": True})
+    response.delete_cookie("lumen_ws_token")
+    return response
+
+
+@app.post("/api/workspace/reload")
+async def api_workspace_reload():
+    """Trigger workspace config reload. Admin only."""
+    global _workspace_index
+    if _workspace_index is None:
+        return JSONResponse(status_code=404, content={"error": "workspace_not_active"})
+
+    try:
+        new_index = reload_workspace_index(LUMEN_DIR, existing_index=_workspace_index)
+        if new_index is None:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "workspace_config_invalid"},
+            )
+        _workspace_index = new_index
+        return JSONResponse(content={
+            "ok": True,
+            "workspace_mode": _workspace_index.is_workspace_mode(),
+        })
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(exc)},
+        )
 
 
 @app.post("/api/setup/owner")
@@ -2751,13 +2948,15 @@ async def api_new_session(request: Request):
 @app.websocket("/ws/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
     """Real-time chat via WebSocket."""
-    if (
-        _is_serve_mode()
-        and _is_configured(_load_config())
-        and not _websocket_has_owner_access(websocket)
-    ):
-        await websocket.close(code=4401)
-        return
+    # Workspace mode: accept JWT from cookie. Non-workspace: keep owner cookie.
+    if _is_serve_mode() and _is_configured(_load_config()):
+        ws_user = None
+        if _workspace_index is not None:
+            ws_user = _get_workspace_user_from_websocket(websocket)
+        if ws_user is None and not _websocket_has_owner_access(websocket):
+            await websocket.close(code=4011)
+            return
+        _WS_USER_CONTEXT = ws_user
     await websocket.accept()
     session = session_manager.get_or_create(session_id)
     _active_websockets.add(websocket)

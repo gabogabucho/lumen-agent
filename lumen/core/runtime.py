@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 
 import yaml
 
@@ -33,6 +34,7 @@ class RuntimeBootstrap:
     config: dict
     awareness: CapabilityAwareness | None = None
     integration_summary: dict | None = None
+    workspace_index: object | None = None  # WorkspaceIndex if workspace mode
 
 
 def rehydrate_runtime_config(config: dict | None, *, lumen_dir: Path) -> dict:
@@ -301,13 +303,66 @@ async def bootstrap_runtime(
     if ui_path.exists():
         locale = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
 
+    # ── Workspace mode detection ────────────────────────────────────
+    # If workspace.yaml exists in lumen_dir, load workspace config and
+    # build the user index.  If absent, workspace_index stays None
+    # (legacy single-owner mode).
+    workspace_index = _load_workspace_index(lumen_dir)
+
     return RuntimeBootstrap(
         brain=brain,
         locale=locale,
         config=config,
         awareness=awareness,
         integration_summary=awareness.peek_summary(),
+        workspace_index=workspace_index,
     )
+
+
+def _load_workspace_index(lumen_dir: Path):
+    """Load workspace config and build user index if workspace.yaml exists.
+
+    Returns a WorkspaceIndex if workspace mode is active, or None for
+    legacy single-owner mode.
+    """
+    from lumen.core.workspace import build_workspace_index, load_teams, load_workspace
+
+    ws = load_workspace(lumen_dir)
+    if ws is None:
+        return None
+
+    teams = load_teams(lumen_dir)
+    idx = build_workspace_index(ws, teams)
+
+    logger.info(
+        "Workspace mode activated: %s (%d admins, %d teams, %d users)",
+        ws.display_name,
+        len(ws.admins),
+        len(teams),
+        len(idx._users),
+    )
+    return idx
+
+
+def reload_workspace_index(
+    lumen_dir: Path,
+    *,
+    existing_index: object | None = None,
+) -> object | None:
+    """Reload workspace config and return the new WorkspaceIndex.
+
+    If reload fails, return existing_index to preserve live state.
+    """
+    from lumen.core.workspace import reload_workspace as _reload_workspace
+
+    try:
+        idx = _reload_workspace(lumen_dir, existing_index=existing_index)
+        if idx is not None and idx is not existing_index:
+            if idx.is_workspace_mode():
+                logger.info("Workspace config reloaded successfully")
+        return idx
+    except Exception:
+        return existing_index
 
 
 def _migrate_secrets(config: dict) -> tuple[dict, list[str]]:

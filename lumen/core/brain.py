@@ -70,6 +70,7 @@ class Brain:
         config: dict | None = None,
         model_router: ModelRouter | None = None,
         provider_health: ProviderHealthTracker | None = None,
+        workspace_index=None,
     ):
         self.consciousness = consciousness
         self.personality = personality
@@ -97,6 +98,8 @@ class Brain:
         self._last_detected_language: str = self.language
         self._current_messages: list[dict] | None = None  # For contradiction retry
         self._cached_lessons_text: str = ""  # Pre-loaded lessons for prompt injection
+        self.workspace_index = workspace_index  # For ACL checks (Phase 3)
+        self._last_user_email: str = ""  # Current user for ACL (set per-request)
         self._distiller = SessionDistiller(memory=self.memory, model=self.model)
         self._distilled_sessions: set[str] = set()
 
@@ -171,6 +174,41 @@ class Brain:
             description=policy.description,
         )
         return response.decision
+
+    # ── ACL check (Phase 3: Skill ACL) ──────────────────────────────────
+
+    def _check_skill_acl(self, tool_name: str, user_email: str) -> str | None:
+        """Check workspace ACL for a tool before execution.
+
+        Returns ``None`` if access is allowed (or ACL is not applicable).
+        Returns a denial message string if access is denied.
+
+        Order: ACL check → confirmation gate → tool execution.
+        Admins skip ACL. Non-workspace mode skips ACL.
+        Unknown mappings fail open.
+        """
+        from lumen.core.skill_acl import check_skill_access, get_acl_denial_message, extract_skill_from_tool_call
+
+        # Non-workspace mode → skip ACL
+        if self.workspace_index is None:
+            return None
+
+        # Brain-internal tools are never ACL-gated
+        if tool_name.startswith("neo__"):
+            return None
+
+        # Extract the skill name this tool maps to
+        skill_name = extract_skill_from_tool_call(tool_name, self.registry)
+        if skill_name is None:
+            # Unmapped → fail open
+            return None
+
+        # Check access
+        if not check_skill_access(skill_name, user_email, self.workspace_index):
+            return get_acl_denial_message()
+
+        return None
+
 
     def _resolved_model(self, role: str = "main") -> str:
         """Route model through OpenRouter when OpenRouter creds are active.
