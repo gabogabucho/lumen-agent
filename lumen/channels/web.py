@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import threading
@@ -59,6 +60,7 @@ from lumen.core.model_router import ModelRouter, ModelRouterConfig, VALID_ROLES
 from lumen.core.provider_health import ProviderHealthTracker
 from lumen.core.agent_status import AgentStatusCollector
 from lumen.core.tool_policy import ToolPolicy, SecurityConfig
+from lumen.core.workspace import list_governance, load_workspace, workspace_branding
 
 
 # State — initialized lazily after web setup or by CLI
@@ -104,6 +106,7 @@ PERSONALITY_ENTRY_TAGS = {
 _oauth_state_store: dict[str, dict] = {}
 _oauth_state_lock = threading.Lock()
 _agent_status_collector: AgentStatusCollector | None = None
+logger = logging.getLogger(__name__)
 
 # Pending tool confirmations: call_id -> asyncio.Future
 _pending_confirmations: dict[str, asyncio.Future] = {}
@@ -495,6 +498,10 @@ def _is_serve_mode() -> bool:
     return _access_mode == "serve"
 
 
+def _workspace_snapshot():
+    return load_workspace(lumen_dir=LUMEN_DIR)
+
+
 def _server_secret(config: dict | None = None) -> str | None:
     loaded = config if config is not None else _load_config()
     secret = loaded.get("server_secret")
@@ -562,16 +569,20 @@ def _read_signed_cookie(value: str | None, secret: str | None) -> dict | None:
 
 
 def _issue_cookie(
-    scope: str, secret: str, *, ttl_seconds: int = COOKIE_MAX_AGE_SECONDS
+    scope: str,
+    secret: str,
+    *,
+    ttl_seconds: int = COOKIE_MAX_AGE_SECONDS,
+    claims: dict | None = None,
 ) -> str:
-    return _sign_cookie(
-        {
-            "scope": scope,
-            "exp": int(time.time()) + ttl_seconds,
-            "nonce": secrets.token_urlsafe(8),
-        },
-        secret,
-    )
+    payload = {
+        "scope": scope,
+        "exp": int(time.time()) + ttl_seconds,
+        "nonce": secrets.token_urlsafe(8),
+    }
+    if isinstance(claims, dict):
+        payload.update(claims)
+    return _sign_cookie(payload, secret)
 
 
 def _request_has_setup_access(request: Request, config: dict | None = None) -> bool:
@@ -587,7 +598,7 @@ def _request_has_owner_access(request: Request, config: dict | None = None) -> b
         request.cookies.get(AUTH_COOKIE_NAME),
         _server_secret(config),
     )
-    return bool(payload and payload.get("scope") == "owner")
+    return bool(payload and payload.get("scope") in {"owner", "workspace"})
 
 
 def _websocket_has_owner_access(
@@ -597,7 +608,165 @@ def _websocket_has_owner_access(
         websocket.cookies.get(AUTH_COOKIE_NAME),
         _server_secret(config),
     )
-    return bool(payload and payload.get("scope") == "owner")
+    return bool(payload and payload.get("scope") in {"owner", "workspace"})
+
+
+def _request_auth_payload(request: Request, config: dict | None = None) -> dict | None:
+    return _read_signed_cookie(
+        request.cookies.get(AUTH_COOKIE_NAME),
+        _server_secret(config),
+    )
+
+
+def _websocket_auth_payload(websocket: WebSocket, config: dict | None = None) -> dict | None:
+    return _read_signed_cookie(
+        websocket.cookies.get(AUTH_COOKIE_NAME),
+        _server_secret(config),
+    )
+
+
+def _apply_workspace_session_context(session, payload: dict | None, *, loaded: dict | None = None) -> None:
+    if not payload or payload.get("scope") != "workspace":
+        return
+    session.workspace = payload.get("workspace")
+    session.user_email = payload.get("email")
+    session.team = payload.get("team")
+    session.role = payload.get("role")
+
+    if payload.get("role") == "admin":
+        session.enabled_skills = ["*"]
+        return
+
+    snapshot = _workspace_snapshot()
+    team_slug = str(payload.get("team") or "").strip()
+    team_doc = snapshot.teams.get(team_slug, {})
+    skills = team_doc.get("enabled_skills") if isinstance(team_doc, dict) else []
+    if not isinstance(skills, list):
+        skills = []
+    session.enabled_skills = [str(skill).strip() for skill in skills if str(skill).strip()]
+
+
+def _scoped_session_id(session) -> str:
+    role = str(getattr(session, "role", "") or "").strip().lower()
+    workspace = str(getattr(session, "workspace", "") or "").strip() or "default"
+    team = str(getattr(session, "team", "") or "").strip() or "no-team"
+    email = str(getattr(session, "user_email", "") or "").strip().lower() or "anon"
+    raw = session.session_id
+    if role == "admin":
+        return f"global:{workspace}:{raw}"
+    if role == "team_admin":
+        return f"team:{workspace}:{team}:{raw}"
+    if role:
+        return f"user:{workspace}:{team}:{email}:{raw}"
+    return raw
+
+
+def _scoped_session_id_from_raw(raw_session_id: str, payload: dict | None) -> str:
+    if not payload or payload.get("scope") != "workspace":
+        return raw_session_id
+    role = str(payload.get("role") or "").strip().lower()
+    workspace = str(payload.get("workspace") or "").strip() or "default"
+    team = str(payload.get("team") or "").strip() or "no-team"
+    email = str(payload.get("email") or "").strip().lower() or "anon"
+    if role == "admin":
+        return f"global:{workspace}:{raw_session_id}"
+    if role == "team_admin":
+        return f"team:{workspace}:{team}:{raw_session_id}"
+    return f"user:{workspace}:{team}:{email}:{raw_session_id}"
+
+
+def _memory_prefixes_for_payload(payload: dict | None) -> list[str]:
+    """Return allowed memory prefixes for the authenticated identity."""
+    if not payload or payload.get("scope") != "workspace":
+        return []
+    role = str(payload.get("role") or "").strip().lower()
+    workspace = str(payload.get("workspace") or "").strip() or "default"
+    team = str(payload.get("team") or "").strip() or "no-team"
+    email = str(payload.get("email") or "").strip().lower() or "anon"
+
+    user_prefix = f"user:{workspace}:{team}:{email}:"
+    team_prefix = f"team:{workspace}:{team}:"
+    global_prefix = f"global:{workspace}:"
+
+    if role == "admin":
+        return [f"user:{workspace}:", f"team:{workspace}:", global_prefix]
+    if role == "team_admin":
+        return [user_prefix, team_prefix, global_prefix]
+    return [user_prefix, team_prefix, global_prefix]
+
+
+def _is_workspace_scope(payload: dict | None) -> bool:
+    return bool(payload and payload.get("scope") == "workspace")
+
+
+def _workspace_role(payload: dict | None) -> str:
+    if not payload:
+        return ""
+    return str(payload.get("role") or "").strip().lower()
+
+
+def _require_workspace_roles(
+    request: Request,
+    *,
+    allowed_roles: set[str],
+    config: dict | None = None,
+) -> JSONResponse | None:
+    loaded = config if config is not None else _load_config()
+    if not _is_serve_mode() or not _is_configured(loaded):
+        return None
+
+    payload = _request_auth_payload(request, loaded)
+    if not _is_workspace_scope(payload):
+        return None
+
+    role = _workspace_role(payload)
+    if role in allowed_roles:
+        return None
+    return JSONResponse(status_code=403, content={"error": "forbidden"})
+
+
+def _workspace_identity_from_credentials(email: str, pin: str):
+    snapshot = _workspace_snapshot()
+    if not snapshot.enabled or not snapshot.valid:
+        return None
+
+    normalized_email = str(email or "").strip().lower()
+    if not normalized_email or not pin:
+        return None
+
+    admin_entries = snapshot.workspace.get("admins") if isinstance(snapshot.workspace, dict) else []
+    if isinstance(admin_entries, list):
+        for admin in admin_entries:
+            if not isinstance(admin, dict):
+                continue
+            admin_email = str(admin.get("email") or "").strip().lower()
+            pin_hash = str(admin.get("pin_hash") or "")
+            if admin_email == normalized_email and _verify_secret(pin, pin_hash):
+                workspace_name = snapshot.workspace.get("name")
+                return {
+                    "sub": normalized_email,
+                    "email": normalized_email,
+                    "workspace": workspace_name,
+                    "team": None,
+                    "role": "admin",
+                    "display_name": str(admin.get("display_name") or normalized_email),
+                }
+
+    record = snapshot.users_by_email.get(normalized_email)
+    if record is None:
+        return None
+    if not _verify_secret(pin, record.pin_hash):
+        return None
+
+    workspace_name = snapshot.workspace.get("name") if isinstance(snapshot.workspace, dict) else None
+    return {
+        "sub": normalized_email,
+        "email": normalized_email,
+        "workspace": workspace_name,
+        "team": record.team,
+        "role": record.role,
+        "display_name": record.display_name,
+    }
 
 
 def _require_setup_access(
@@ -1437,11 +1606,48 @@ async def api_login(request: Request):
     return response
 
 
+@app.post("/api/auth/login")
+async def api_auth_login(request: Request):
+    loaded = _load_config()
+    if not _is_serve_mode() or not _is_configured(loaded):
+        return JSONResponse(
+            status_code=400, content={"status": "error", "error": "login_not_available"}
+        )
+
+    body = await request.json()
+    email = str(body.get("email") or "").strip().lower()
+    pin = str(body.get("pin") or "").strip()
+    identity = _workspace_identity_from_credentials(email, pin)
+    if identity is None:
+        return JSONResponse(
+            status_code=401, content={"status": "error", "error": "invalid_credentials"}
+        )
+
+    response = JSONResponse(content={"status": "ok", "user": identity})
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        _issue_cookie(
+            "workspace",
+            _server_secret(loaded) or secrets.token_urlsafe(32),
+            claims=identity,
+        ),
+        httponly=True,
+        samesite="lax",
+        max_age=COOKIE_MAX_AGE_SECONDS,
+    )
+    return response
+
+
 @app.post("/api/logout")
 async def api_logout():
     response = JSONResponse(content={"status": "ok"})
     response.delete_cookie(AUTH_COOKIE_NAME)
     return response
+
+
+@app.post("/api/auth/logout")
+async def api_auth_logout():
+    return await api_logout()
 
 
 @app.post("/api/setup/owner")
@@ -1563,6 +1769,33 @@ async def api_setup(request: Request):
             status_code=500,
             content={"status": "error", "error": str(e)},
         )
+
+
+@app.get("/api/workspace/branding")
+async def api_workspace_branding():
+    snapshot = _workspace_snapshot()
+    fallback_name = _load_config().get("app_name") or "Lumen"
+    payload = workspace_branding(snapshot)
+    if not payload.get("display_name"):
+        payload["display_name"] = fallback_name
+    return {"status": "ok", "branding": payload}
+
+
+@app.get("/api/workspace/governance")
+async def api_workspace_governance(request: Request):
+    loaded = _load_config()
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+    role_guard = _require_workspace_roles(
+        request,
+        allowed_roles={"admin", "team_admin"},
+        config=loaded,
+    )
+    if role_guard is not None:
+        return role_guard
+    governance = list_governance(lumen_dir=LUMEN_DIR)
+    return {"status": "ok", "governance": governance}
 
 
 @app.get("/oauth/openrouter/start")
@@ -1731,6 +1964,27 @@ async def dashboard(request: Request):
 async def page_settings_index(request: Request):
     """Settings landing page — redirect to general."""
     return RedirectResponse("/settings/general")
+
+
+@app.get("/settings/workspace")
+async def page_workspace_settings(request: Request):
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return RedirectResponse("/setup")
+    if _is_serve_mode() and not _request_has_owner_access(request, loaded):
+        return RedirectResponse(url="/login")
+    role_guard = _require_workspace_roles(
+        request,
+        allowed_roles={"admin", "team_admin"},
+        config=loaded,
+    )
+    if role_guard is not None:
+        return JSONResponse(status_code=403, content={"error": "forbidden"})
+    return templates.TemplateResponse(
+        request,
+        "settings_workspace.html",
+        context={"language": _config.get("language", "en")},
+    )
 
 
 @app.get("/settings/general")
@@ -2023,7 +2277,9 @@ async def api_history(request: Request, session_id: str):
     if not _brain:
         return {"messages": []}
     try:
-        messages = await _brain.memory.load_conversation(session_id, limit=50)
+        payload = _request_auth_payload(request, _load_config())
+        scoped_session_id = _scoped_session_id_from_raw(session_id, payload)
+        messages = await _brain.memory.load_conversation(scoped_session_id, limit=50)
         return {"messages": messages}
     except Exception:
         return {"messages": []}
@@ -2119,6 +2375,7 @@ async def api_chat(request: Request):
 
     session_id = body.get("session_id")
     session = session_manager.get_or_create(session_id)
+    _apply_workspace_session_context(session, _request_auth_payload(request, _load_config()))
 
     # Parse stream flag — only literal True enables streaming
     stream = body.get("stream") is True
@@ -2250,7 +2507,7 @@ async def api_new_session(request: Request):
                 summary = first_user[:80] + "..." if len(first_user) > 80 else first_user
         try:
             await _brain.memory.save_session_summary(
-                session_id=old_session_id,
+                session_id=_scoped_session_id(old_session),
                 summary=summary,
                 turn_count=turn_count,
             )
@@ -2278,12 +2535,13 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         return
     await websocket.accept()
     session = session_manager.get_or_create(session_id)
+    _apply_workspace_session_context(session, _websocket_auth_payload(websocket, _load_config()))
     _active_websockets.add(websocket)
 
     # Hydrate session from persistent memory if empty (reconnect/refresh)
     if not session.history and _brain:
         try:
-            stored = await _brain.memory.load_conversation(session_id, limit=50)
+            stored = await _brain.memory.load_conversation(_scoped_session_id(session), limit=50)
             for msg in stored:
                 session.add_message(msg["role"], msg["content"])
         except Exception:
@@ -2343,6 +2601,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 old_session, new_session = session_manager.reset_session(session_id)
                 session_id = new_session.session_id
                 session = new_session
+                _apply_workspace_session_context(session, _websocket_auth_payload(websocket, _load_config()))
 
                 # Persist old session summary
                 if old_session:
@@ -2357,7 +2616,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                             summary = first_user[:80] + "..." if len(first_user) > 80 else first_user
                     try:
                         await _brain.memory.save_session_summary(
-                            session_id=old_session_id,
+                            session_id=_scoped_session_id(old_session),
                             summary=summary,
                             turn_count=turn_count,
                         )
@@ -3325,7 +3584,13 @@ async def api_memory_facts(
         return guard
 
     if _brain and _brain.memory:
-        facts = await _brain.memory.list_session_facts(query=query, limit=limit)
+        payload = _request_auth_payload(request, loaded)
+        prefixes = _memory_prefixes_for_payload(payload)
+        facts = await _brain.memory.list_session_facts(
+            query=query,
+            limit=limit,
+            session_prefixes=prefixes or None,
+        )
         return {"facts": facts, "count": len(facts)}
     return JSONResponse(status_code=503, content={"error": "Memory not available"})
 
@@ -3341,7 +3606,12 @@ async def api_memory_sessions(request: Request, limit: int = 20):
         return guard
 
     if _brain and _brain.memory:
-        summaries = await _brain.memory.list_session_summaries(limit=limit)
+        payload = _request_auth_payload(request, loaded)
+        prefixes = _memory_prefixes_for_payload(payload)
+        summaries = await _brain.memory.list_session_summaries(
+            limit=limit,
+            session_prefixes=prefixes or None,
+        )
         return {"sessions": summaries, "count": len(summaries)}
     return JSONResponse(status_code=503, content={"error": "Memory not available"})
 
@@ -3386,6 +3656,20 @@ async def api_lesson_create(request: Request):
     """Create a new lesson."""
     from lumen.core.lessons import VALID_CATEGORIES
 
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_any_auth(request, loaded)
+    if guard is not None:
+        return guard
+    role_guard = _require_workspace_roles(
+        request,
+        allowed_roles={"admin", "team_admin"},
+        config=loaded,
+    )
+    if role_guard is not None:
+        return role_guard
+
     body = await request.json()
     rule = body.get("rule", "")
     category = body.get("category", "general")
@@ -3406,6 +3690,20 @@ async def api_lesson_create(request: Request):
 @app.delete("/api/lessons/{lesson_id}")
 async def api_lesson_delete(request: Request, lesson_id: int):
     """Delete a lesson."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_any_auth(request, loaded)
+    if guard is not None:
+        return guard
+    role_guard = _require_workspace_roles(
+        request,
+        allowed_roles={"admin", "team_admin"},
+        config=loaded,
+    )
+    if role_guard is not None:
+        return role_guard
+
     if _brain and _brain.memory:
         existing = await _brain.memory.get_lesson(lesson_id)
         if not existing:
@@ -3418,6 +3716,20 @@ async def api_lesson_delete(request: Request, lesson_id: int):
 @app.post("/api/lessons/{lesson_id}/pin")
 async def api_lesson_pin(request: Request, lesson_id: int):
     """Pin or unpin a lesson."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_any_auth(request, loaded)
+    if guard is not None:
+        return guard
+    role_guard = _require_workspace_roles(
+        request,
+        allowed_roles={"admin", "team_admin"},
+        config=loaded,
+    )
+    if role_guard is not None:
+        return role_guard
+
     body = await request.json()
     pinned = bool(body.get("pinned", True))
 

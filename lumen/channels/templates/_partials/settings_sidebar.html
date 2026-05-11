@@ -38,7 +38,11 @@
       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
       <span>Seguridad</span>
     </a>
-  </nav>
+    <a href="/settings/workspace" class="settings-nav-item {% if active_settings == 'workspace' %}active{% endif %}">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M6 3h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2zm3 8h6m-6 4h6"/></svg>
+      <span>Workspace</span>
+    </a>
+</nav>
 </aside>
 
 <style>
@@ -46,12 +50,15 @@
   width: 240px; flex-shrink: 0;
   background: var(--lumen-paper-2); border-right: 1px solid var(--lumen-line);
   display: flex; flex-direction: column; min-height: 100vh;
+  box-shadow: var(--lumen-shadow-sm);
 }
 .settings-sidebar-head {
   padding: 20px; border-bottom: 1px solid var(--lumen-line);
 }
 .settings-sidebar-head h2 {
-  font-size: 18px; font-weight: 700; margin-top: 12px;
+  font-size: 16px; font-weight: 600; margin-top: 12px;
+  font-family: var(--lumen-font-mono);
+  letter-spacing: -0.01em;
 }
 .back-link {
   display: flex; align-items: center; gap: 6px;
@@ -63,16 +70,14 @@
   display: flex; align-items: center; gap: 12px;
   padding: 10px 20px; color: var(--lumen-ink-soft);
   text-decoration: none; font-size: 14px;
-  border-left: 3px solid transparent;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 .settings-nav-item:hover {
-  background: rgba(0,0,0,0.03); color: var(--lumen-ink);
+  background: var(--lumen-surface); color: var(--lumen-ink);
 }
 .settings-nav-item.active {
-  background: rgba(0,0,0,0.04);
+  background: var(--lumen-lavender);
   color: var(--lumen-primary); font-weight: 500;
-  border-left-color: var(--lumen-primary);
 }
 .settings-nav-item svg { width: 20px; height: 20px; flex-shrink: 0; }
 
@@ -85,3 +90,4 @@
   .back-link span { display: none; }
 }
 </style>
+

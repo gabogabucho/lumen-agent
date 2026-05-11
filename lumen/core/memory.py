@@ -232,19 +232,37 @@ class Memory:
         await self._db.commit()
         return cursor.lastrowid
 
-    async def list_session_facts(self, query: str = "", limit: int = 10) -> list[dict]:
+    async def list_session_facts(
+        self,
+        query: str = "",
+        limit: int = 10,
+        session_prefix: str | None = None,
+        session_prefixes: list[str] | None = None,
+    ) -> list[dict]:
         """List session facts, optionally filtered by query."""
+        clauses = []
+        params: list = []
+        prefix_values = [p for p in (session_prefixes or []) if p]
+        if session_prefix:
+            prefix_values.append(session_prefix)
+        if prefix_values:
+            clauses.append("(" + " OR ".join(["session_id LIKE ?"] * len(prefix_values)) + ")")
+            params.extend([f"{p}%" for p in prefix_values])
+        if query:
+            clauses.append("fact LIKE ?")
+            params.append(f"%{query}%")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         if query:
             rows = await self._db.execute_fetchall(
                 "SELECT id, session_id, fact, category, importance, created_at "
-                "FROM session_facts WHERE fact LIKE ? ORDER BY importance DESC LIMIT ?",
-                (f"%{query}%", limit),
+                f"FROM session_facts {where} ORDER BY importance DESC LIMIT ?",
+                (*params, limit),
             )
         else:
             rows = await self._db.execute_fetchall(
                 "SELECT id, session_id, fact, category, importance, created_at "
-                "FROM session_facts ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                f"FROM session_facts {where} ORDER BY created_at DESC LIMIT ?",
+                (*params, limit),
             )
         return [
             {"id": r[0], "session_id": r[1], "fact": r[2], "category": r[3],
@@ -252,12 +270,26 @@ class Memory:
             for r in rows
         ]
 
-    async def list_session_summaries(self, limit: int = 20) -> list[dict]:
+    async def list_session_summaries(
+        self,
+        limit: int = 20,
+        session_prefix: str | None = None,
+        session_prefixes: list[str] | None = None,
+    ) -> list[dict]:
         """List session summaries."""
+        params: list = []
+        where = ""
+        prefix_values = [p for p in (session_prefixes or []) if p]
+        if session_prefix:
+            prefix_values.append(session_prefix)
+        if prefix_values:
+            where = "WHERE (" + " OR ".join(["session_id LIKE ?"] * len(prefix_values)) + ")"
+            params.extend([f"{p}%" for p in prefix_values])
+        params.append(limit)
         rows = await self._db.execute_fetchall(
             "SELECT id, session_id, summary, fact_count, turn_count, created_at "
-            "FROM session_summaries ORDER BY created_at DESC LIMIT ?",
-            (limit,),
+            f"FROM session_summaries {where} ORDER BY created_at DESC LIMIT ?",
+            params,
         )
         return [
             {"id": r[0], "session_id": r[1], "summary": r[2],

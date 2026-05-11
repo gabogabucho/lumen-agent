@@ -3,12 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Lumen AI agent dashboard: chat, modules, memory, settings, tools and runtime control.">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F5F8FC">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Lumen">
   <title>Lumen — Modelos</title>
   <link rel="icon" href="/static/logo.png" type="image/png">
   {% include "_partials/tokens.html" %}
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+  <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
     body {
       display: flex;
@@ -119,6 +124,20 @@
       font-size: 12px; font-weight: 600; color: var(--lumen-mute);
       text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--lumen-s-3);
     }
+    .section-head {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: var(--lumen-s-3);
+    }
+    .section-head h3 { margin: 0; }
+    .section-icon {
+      width: 22px; height: 22px; border-radius: var(--lumen-r-sm);
+      border: 1px solid var(--lumen-line);
+      background: var(--lumen-paper-2);
+      color: var(--lumen-primary);
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .section-icon svg { width: 13px; height: 13px; }
     .l-card p { color: var(--lumen-ink-soft); line-height: 1.6; }
     .l-card-grid { display: grid; gap: var(--lumen-s-4); }
     .l-card-grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
@@ -260,7 +279,7 @@
       <div class="settings-stack">
         <!-- Current config card -->
         <div class="l-card">
-          <h3>Modelo principal y fallback</h3>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h10M4 17h7"/></svg></span><h3>Modelo principal y fallback</h3></div>
           <p style="margin-bottom:var(--lumen-s-4);">El modelo principal es el que usa Lumen para todo. El fallback entra si el principal falla.</p>
           <div class="settings-grid">
             <div class="field">
@@ -276,7 +295,7 @@
 
         <!-- Toggle card -->
         <div class="l-card">
-          <h3>Enrutamiento por rol</h3>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 7h10M7 12h6M7 17h4"/></svg></span><h3>Enrutamiento por rol</h3></div>
           <div class="toggle-row">
             <div>
               <div class="toggle-row-label">Usar el mismo modelo para todos los roles</div>
@@ -323,7 +342,7 @@
 
         <!-- Resolved models (read-only) -->
         <div class="l-card">
-          <h3>Modelos resueltos por rol</h3>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M12 5v14"/></svg></span><h3>Modelos resueltos por rol</h3></div>
           <p>Modelo que se usa efectivamente para cada rol (después de aplicar la configuración).</p>
           <div id="resolved-models" class="resolved-grid">
             <p class="field-hint">Cargando…</p>
@@ -471,3 +490,5 @@
   </script>
 </body>
 </html>
+
+
