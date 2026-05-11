@@ -2551,7 +2551,19 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         while True:
             data = await websocket.receive_text()
             session_manager.touch(session_id)
-            payload = json.loads(data)
+            try:
+                payload = json.loads(data)
+            except Exception:
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": "Recibí un mensaje inválido en el socket. Intenta de nuevo.",
+                        }
+                    )
+                )
+                continue
 
             if payload.get("type") == "ping":
                 # Check for pending capability awareness — proactive announcement
@@ -2634,22 +2646,38 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
 
             await websocket.send_text(json.dumps({"type": "typing", "status": True}))
 
-            result = await _brain.think(user_text, session)
-
-            await websocket.send_text(
-                json.dumps(
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": result["message"],
-                    }
+            try:
+                result = await _brain.think(user_text, session)
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": result.get("message", ""),
+                        }
+                    )
                 )
-            )
-
-            await websocket.send_text(json.dumps({"type": "typing", "status": False}))
+            except Exception:
+                logger.exception("websocket_think_failed session_id=%s", session_id)
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": (
+                                "Tuve un error temporal procesando la respuesta, "
+                                "pero la conexión sigue activa."
+                            ),
+                        }
+                    )
+                )
+            finally:
+                await websocket.send_text(json.dumps({"type": "typing", "status": False}))
 
     except WebSocketDisconnect:
         session_manager.remove(session_id)
+    except Exception:
+        logger.exception("websocket_chat_unhandled_error session_id=%s", session_id)
     finally:
         _active_websockets.discard(websocket)
 
