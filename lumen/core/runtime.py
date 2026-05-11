@@ -27,6 +27,9 @@ from lumen.core.personality import Personality
 from lumen.core.registry import Registry
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class RuntimeBootstrap:
     brain: Brain

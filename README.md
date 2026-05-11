@@ -1171,6 +1171,7 @@ lumen/
 - [x] HTTP-safe dashboard
 - [x] Universal fallback tool parser
 - [x] Docker support
+- [x] Workspace mode (multi-user auth, team governance, scoped reload)
 - [ ] Public module registry / discovery
 - [ ] Full hosted documentation
 

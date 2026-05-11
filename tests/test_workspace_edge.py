@@ -119,6 +119,204 @@ class TestMissingWorkspace(unittest.TestCase):
             web_mod._workspace_index = orig_index
 
 
+class TestWorkspaceReloadEndpoint(unittest.TestCase):
+    def test_reload_endpoint_refreshes_workspace_index(self):
+        from pathlib import Path
+        import lumen.channels.web as web_mod
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            save_workspace_secret(tmp_path, "secret-12345678")
+            (tmp_path / "workspace.yaml").write_text(
+                yaml.dump({
+                    "name": "acme",
+                    "display_name": "Acme",
+                    "branding": {"logo": "/l.png", "primary_color": "#000", "app_name": "Acme"},
+                    "admins": [{"email": "admin@acme.com", "display_name": "Admin", "pin_hash": "$2b$12$hash"}],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+            team_dir = tmp_path / "teams" / "marketing"
+            team_dir.mkdir(parents=True)
+            team_path = team_dir / "team.yaml"
+            team_path.write_text(
+                yaml.dump({
+                    "name": "marketing",
+                    "display_name": "Marketing",
+                    "enabled_skills": ["chat"],
+                    "users": [{"email": "alice@acme.com", "role": "member", "display_name": "Alice", "pin_hash": "$2b$12$hash"}],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+
+            ws = load_workspace(tmp_path)
+            teams = load_teams(tmp_path)
+            idx = build_workspace_index(ws, teams)
+
+            team_path.write_text(
+                yaml.dump({
+                    "name": "marketing",
+                    "display_name": "Marketing",
+                    "enabled_skills": ["chat"],
+                    "users": [
+                        {"email": "alice@acme.com", "role": "member", "display_name": "Alice", "pin_hash": "$2b$12$hash"},
+                        {"email": "bob@acme.com", "role": "member", "display_name": "Bob", "pin_hash": "$2b$12$hash"},
+                    ],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+
+            orig_index = getattr(web_mod, "_workspace_index", None)
+            orig_lumen_dir = web_mod.LUMEN_DIR
+            try:
+                web_mod._workspace_index = idx
+                web_mod.LUMEN_DIR = tmp_path
+
+                client = TestClient(app)
+                resp = client.post("/api/workspace/reload")
+                self.assertEqual(resp.status_code, 200)
+                self.assertTrue(resp.json()["ok"])
+                self.assertTrue(resp.json()["workspace_mode"])
+                self.assertEqual(resp.json()["users"], 3)
+                self.assertIsNotNone(web_mod._workspace_index.lookup_user("bob@acme.com"))
+            finally:
+                web_mod._workspace_index = orig_index
+                web_mod.LUMEN_DIR = orig_lumen_dir
+
+
+class TestWorkspaceGovernanceVisibility(unittest.TestCase):
+    def test_team_admin_only_sees_own_team(self):
+        from pathlib import Path
+        import lumen.channels.web as web_mod
+        import lumen.core.workspace_auth as wa
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            save_workspace_secret(tmp_path, "secret-12345678")
+            (tmp_path / "workspace.yaml").write_text(
+                yaml.dump({
+                    "name": "acme",
+                    "display_name": "Acme",
+                    "branding": {"logo": "/l.png", "primary_color": "#000", "app_name": "Acme"},
+                    "admins": [{"email": "admin@acme.com", "display_name": "Admin", "pin_hash": "$2b$12$hash"}],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+            marketing_dir = tmp_path / "teams" / "marketing"
+            marketing_dir.mkdir(parents=True)
+            (marketing_dir / "team.yaml").write_text(
+                yaml.dump({
+                    "name": "marketing",
+                    "display_name": "Marketing",
+                    "enabled_skills": ["chat"],
+                    "users": [{"email": "lead@acme.com", "role": "team_admin", "display_name": "Lead", "pin_hash": "$2b$12$hash"}],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+            sales_dir = tmp_path / "teams" / "sales"
+            sales_dir.mkdir(parents=True)
+            (sales_dir / "team.yaml").write_text(
+                yaml.dump({
+                    "name": "sales",
+                    "display_name": "Sales",
+                    "enabled_skills": ["crm"],
+                    "users": [{"email": "sales@acme.com", "role": "member", "display_name": "Sales", "pin_hash": "$2b$12$hash"}],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+
+            ws = load_workspace(tmp_path)
+            teams = load_teams(tmp_path)
+            idx = build_workspace_index(ws, teams)
+
+            orig_index = getattr(web_mod, "_workspace_index", None)
+            orig_lumen_dir = web_mod.LUMEN_DIR
+            orig_access = web_mod._access_mode
+            orig_config = web_mod._config
+            orig_secret = wa._get_workspace_secret
+            try:
+                web_mod._workspace_index = idx
+                web_mod.LUMEN_DIR = tmp_path
+                web_mod._access_mode = "serve"
+                web_mod._config = {"model": "test-model"}
+                wa._get_workspace_secret = lambda: "secret-12345678"
+
+                token = create_jwt("lead@acme.com", "team_admin", "marketing", "secret-12345678")
+                client = TestClient(app)
+                client.cookies.set("lumen_ws_token", token)
+                resp = client.get("/api/workspace/governance")
+                self.assertEqual(resp.status_code, 200)
+                teams_payload = resp.json()["governance"]["teams"]
+                self.assertEqual(len(teams_payload), 1)
+                self.assertEqual(teams_payload[0]["team"], "marketing")
+            finally:
+                web_mod._workspace_index = orig_index
+                web_mod.LUMEN_DIR = orig_lumen_dir
+                web_mod._access_mode = orig_access
+                web_mod._config = orig_config
+                wa._get_workspace_secret = orig_secret
+
+    def test_admin_sees_all_teams(self):
+        from pathlib import Path
+        import lumen.channels.web as web_mod
+        import lumen.core.workspace_auth as wa
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            save_workspace_secret(tmp_path, "secret-12345678")
+            (tmp_path / "workspace.yaml").write_text(
+                yaml.dump({
+                    "name": "acme",
+                    "display_name": "Acme",
+                    "branding": {"logo": "/l.png", "primary_color": "#000", "app_name": "Acme"},
+                    "admins": [{"email": "admin@acme.com", "display_name": "Admin", "pin_hash": "$2b$12$hash"}],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+            for team_name in ("marketing", "sales"):
+                team_dir = tmp_path / "teams" / team_name
+                team_dir.mkdir(parents=True)
+                (team_dir / "team.yaml").write_text(
+                    yaml.dump({
+                        "name": team_name,
+                        "display_name": team_name.title(),
+                        "enabled_skills": [team_name],
+                        "users": [],
+                    }, default_flow_style=False),
+                    encoding="utf-8",
+                )
+
+            ws = load_workspace(tmp_path)
+            teams = load_teams(tmp_path)
+            idx = build_workspace_index(ws, teams)
+
+            orig_index = getattr(web_mod, "_workspace_index", None)
+            orig_lumen_dir = web_mod.LUMEN_DIR
+            orig_access = web_mod._access_mode
+            orig_config = web_mod._config
+            orig_secret = wa._get_workspace_secret
+            try:
+                web_mod._workspace_index = idx
+                web_mod.LUMEN_DIR = tmp_path
+                web_mod._access_mode = "serve"
+                web_mod._config = {"model": "test-model"}
+                wa._get_workspace_secret = lambda: "secret-12345678"
+
+                token = create_jwt("admin@acme.com", "admin", None, "secret-12345678")
+                client = TestClient(app)
+                client.cookies.set("lumen_ws_token", token)
+                resp = client.get("/api/workspace/governance")
+                self.assertEqual(resp.status_code, 200)
+                teams_payload = resp.json()["governance"]["teams"]
+                self.assertEqual({team["team"] for team in teams_payload}, {"marketing", "sales"})
+            finally:
+                web_mod._workspace_index = orig_index
+                web_mod.LUMEN_DIR = orig_lumen_dir
+                web_mod._access_mode = orig_access
+                web_mod._config = orig_config
+                wa._get_workspace_secret = orig_secret
+
+
 class TestJwtExpiry(unittest.TestCase):
     """Edge: JWT expires → user must re-login."""
 

@@ -652,6 +652,38 @@ def _request_auth_payload(request: Request, config: dict | None = None) -> dict 
     )
 
 
+def _request_workspace_payload(request: Request, config: dict | None = None) -> dict | None:
+    payload = _request_auth_payload(request, config)
+    if _is_workspace_scope(payload):
+        return payload
+    if _workspace_index is None:
+        return None
+    token = request.cookies.get("lumen_ws_token")
+    if not token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+    if not token:
+        return None
+    try:
+        from lumen.core.workspace_auth import _get_workspace_secret, verify_jwt
+
+        secret = _get_workspace_secret()
+        if not secret:
+            return None
+        jwt_payload = verify_jwt(token, secret)
+        if jwt_payload is None:
+            return None
+        return {
+            "scope": "workspace",
+            "email": jwt_payload.get("sub"),
+            "role": jwt_payload.get("role"),
+            "team": jwt_payload.get("team"),
+        }
+    except Exception:
+        return None
+
+
 def _websocket_auth_payload(websocket: WebSocket, config: dict | None = None) -> dict | None:
     return _read_signed_cookie(
         websocket.cookies.get(AUTH_COOKIE_NAME),
@@ -739,6 +771,22 @@ def _workspace_role(payload: dict | None) -> str:
     return str(payload.get("role") or "").strip().lower()
 
 
+def _workspace_governance_view(governance: dict, payload: dict | None) -> dict:
+    if not isinstance(governance, dict):
+        return governance
+    role = _workspace_role(payload)
+    if role != "team_admin":
+        return governance
+
+    team_slug = str((payload or {}).get("team") or "").strip()
+    teams = governance.get("teams") or []
+    filtered_teams = [team for team in teams if isinstance(team, dict) and team.get("team") == team_slug]
+    return {
+        **governance,
+        "teams": filtered_teams,
+    }
+
+
 def _require_workspace_roles(
     request: Request,
     *,
@@ -749,7 +797,7 @@ def _require_workspace_roles(
     if not _is_serve_mode() or not _is_configured(loaded):
         return None
 
-    payload = _request_auth_payload(request, loaded)
+    payload = _request_workspace_payload(request, loaded)
     if not _is_workspace_scope(payload):
         return None
 
@@ -878,13 +926,17 @@ def _require_any_auth(
 
 
 def _has_workspace_auth(request: Request) -> bool:
-    """Check if the request has a valid workspace JWT cookie.
+    """Check if the request has a valid workspace JWT cookie or bearer token.
 
     Only active when _workspace_index is not None.
     """
     if _workspace_index is None:
         return False
     token = request.cookies.get("lumen_ws_token")
+    if not token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
     if not token:
         return False
     try:
@@ -1787,6 +1839,42 @@ async def api_workspace_logout():
     return response
 
 
+@app.post("/api/workspace/reload")
+async def api_workspace_reload(request: Request):
+    global _workspace_index
+
+    if _workspace_index is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "workspace_not_enabled"})
+
+    loaded = _load_config()
+    guard = _require_owner_access(request, loaded)
+    if guard is not None:
+        return guard
+    role_guard = _require_workspace_roles(
+        request,
+        allowed_roles={"admin", "team_admin"},
+        config=loaded,
+    )
+    if role_guard is not None:
+        return role_guard
+
+    reloaded = reload_workspace_index(LUMEN_DIR, existing_index=_workspace_index)
+    if reloaded is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "workspace_not_enabled"})
+
+    _workspace_index = reloaded
+    if _brain is not None:
+        _brain.workspace_index = _workspace_index
+
+    return JSONResponse(
+        content={
+            "ok": True,
+            "workspace_mode": _workspace_index.is_workspace_mode(),
+            "users": len(getattr(_workspace_index, "_users", {})),
+        }
+    )
+
+
 
 
 @app.post("/api/setup/owner")
@@ -2414,7 +2502,11 @@ async def api_workspace_governance(request: Request):
     )
     if role_guard is not None:
         return role_guard
-    governance = list_governance(lumen_dir=LUMEN_DIR)
+    payload = _request_workspace_payload(request, loaded)
+    governance = _workspace_governance_view(
+        list_governance(lumen_dir=LUMEN_DIR),
+        payload,
+    )
     return {"status": "ok", "governance": governance}
 
 

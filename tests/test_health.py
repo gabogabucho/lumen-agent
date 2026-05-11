@@ -127,8 +127,7 @@ class HealthCheckTests(unittest.TestCase):
     def test_health_no_cookie_required(self):
         """Works even without owner cookie."""
         web._brain = BrainStub()
-        # Explicitly no cookies
-        response = self.client.get("/health", cookies={})
+        response = self.client.get("/health")
         assert response.status_code == 200
         assert response.json()["ok"] is True
 

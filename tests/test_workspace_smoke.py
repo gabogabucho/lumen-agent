@@ -88,7 +88,8 @@ class TestSmokeWorkspaceLoginToChat:
 
                 # Now use the JWT to access a protected endpoint
                 cookie_token = resp.cookies.get("lumen_ws_token")
-                resp2 = client.get("/api/status", cookies={"lumen_ws_token": cookie_token})
+                client.cookies.set("lumen_ws_token", cookie_token)
+                resp2 = client.get("/api/status")
                 # Should NOT be 401 auth required
                 if resp2.status_code == 401:
                     error = resp2.json().get("error", "")

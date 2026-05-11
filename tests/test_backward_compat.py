@@ -391,7 +391,8 @@ class TestWorkspaceModeDualAuth(unittest.TestCase):
 
             try:
                 token = create_jwt("user@test.com", "member", "marketing", "secret-for-jwt-12345")
-                client = TestClient(app, cookies={"lumen_ws_token": token})
+                client = TestClient(app)
+                client.cookies.set("lumen_ws_token", token)
                 resp = client.get("/api/status")
                 # Should NOT be 401 with "authentication_required"
                 if resp.status_code == 401:
@@ -435,7 +436,8 @@ class TestWorkspaceModeDualAuth(unittest.TestCase):
 
                 # JWT access
                 token = create_jwt("admin@test.com", "admin", None, "secret-12345678")
-                resp_jw = client.get("/api/status", cookies={"lumen_ws_token": token})
+                client.cookies.set("lumen_ws_token", token)
+                resp_jw = client.get("/api/status")
                 if resp_jw.status_code == 401:
                     error = resp_jw.json().get("error", "")
                     self.assertNotEqual(error, "authentication_required")

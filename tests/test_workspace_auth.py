@@ -308,7 +308,8 @@ class TestGetWorkspaceUser(unittest.TestCase):
         token = create_jwt("alice@example.com", "member", "marketing", "test-secret")
 
         client = TestClient(app)
-        resp = client.get("/test", cookies={"lumen_ws_token": token})
+        client.cookies.set("lumen_ws_token", token)
+        resp = client.get("/test")
         assert resp.status_code == 200
         data = resp.json()
         assert data["auth"] is True
@@ -375,7 +376,8 @@ class TestRequireWorkspaceAuth(unittest.TestCase):
 
         token = create_jwt("alice@example.com", "member", "marketing", "test-secret")
         client = TestClient(app)
-        resp = client.get("/protected", cookies={"lumen_ws_token": token})
+        client.cookies.set("lumen_ws_token", token)
+        resp = client.get("/protected")
         assert resp.status_code == 200
         assert resp.json()["email"] == "alice@example.com"
 
@@ -468,7 +470,8 @@ class TestRequireWorkspaceAdmin(unittest.TestCase):
 
         token = create_jwt("admin@example.com", "admin", None, "test-secret")
         client = TestClient(app)
-        resp = client.get("/admin-only", cookies={"lumen_ws_token": token})
+        client.cookies.set("lumen_ws_token", token)
+        resp = client.get("/admin-only")
         assert resp.status_code == 200
         assert resp.json()["email"] == "admin@example.com"
 
@@ -499,7 +502,8 @@ class TestRequireWorkspaceAdmin(unittest.TestCase):
 
         token = create_jwt("alice@example.com", "member", "marketing", "test-secret")
         client = TestClient(app)
-        resp = client.get("/admin-only", cookies={"lumen_ws_token": token})
+        client.cookies.set("lumen_ws_token", token)
+        resp = client.get("/admin-only")
         assert resp.status_code == 403
 
         wa._get_workspace_index = orig_index
@@ -688,16 +692,56 @@ class TestWorkspaceAuthOnExistingEndpoints(unittest.TestCase):
         token = create_jwt("alice@example.com", "member", "marketing", "test-secret")
 
         client = TestClient(app)
-        resp = client.get(
-            "/api/status",
-            cookies={"lumen_ws_token": token},
-        )
+        client.cookies.set("lumen_ws_token", token)
+        resp = client.get("/api/status")
 
         # Should not be 401 with "authentication_required"
         if resp.status_code == 401:
             error = resp.json().get("error", "")
             assert error != "authentication_required", (
                 "Workspace JWT should bypass owner auth"
+            )
+
+        web_mod._workspace_index = orig_index
+        web_mod._access_mode = orig_access_mode
+        web_mod._config = orig_config
+        wa._get_workspace_secret = orig_secret
+
+    def test_protected_endpoint_with_workspace_jwt_bearer_header(self):
+        """A workspace JWT in Authorization header should grant access too."""
+        from lumen.core.workspace import WorkspaceIndex
+        from lumen.core.workspace_auth import create_jwt
+        from lumen.channels.web import app
+        from starlette.testclient import TestClient
+
+        idx = WorkspaceIndex()
+        idx.add_user("alice@example.com", "member", "marketing", "Alice", [], "$2b$12$hash")
+
+        import lumen.channels.web as web_mod
+        import lumen.core.workspace_auth as wa
+
+        orig_index = getattr(web_mod, "_workspace_index", None)
+        orig_access_mode = web_mod._access_mode
+        orig_config = web_mod._config
+        orig_secret = wa._get_workspace_secret
+
+        web_mod._workspace_index = idx
+        web_mod._access_mode = "serve"
+        web_mod._config = {"model": "test-model"}
+        wa._get_workspace_secret = lambda: "test-secret"
+
+        token = create_jwt("alice@example.com", "member", "marketing", "test-secret")
+
+        client = TestClient(app)
+        resp = client.get(
+            "/api/status",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        if resp.status_code == 401:
+            error = resp.json().get("error", "")
+            assert error != "authentication_required", (
+                "Workspace JWT bearer header should bypass owner auth"
             )
 
         web_mod._workspace_index = orig_index
