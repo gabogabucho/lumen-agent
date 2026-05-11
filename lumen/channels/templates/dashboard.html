@@ -1789,7 +1789,20 @@
         const res = await fetch('/api/status');
         if (!res.ok) return;
         const data = await res.json();
-        const caps = (data.capabilities || []).filter(c => (c.status || 'ready') !== 'error');
+        const rawCaps = (data.capabilities || []).filter(c => (c.status || 'ready') !== 'error');
+        const seen = new Map();
+        const caps = [];
+        // Deduplicate by stable identity + interoperability level.
+        rawCaps.forEach((c) => {
+          const meta = c.metadata || {};
+          const interop = meta.interoperability || {};
+          const level = (interop.level || 'native').toLowerCase();
+          const baseKey = String(c.id || c.name || '').trim().toLowerCase();
+          const key = `${baseKey}::${level}`;
+          if (!baseKey || seen.has(key)) return;
+          seen.set(key, true);
+          caps.push(c);
+        });
         const groups = { native: [], adapted: [], opaque: [] };
         caps.forEach(c => {
           const meta = c.metadata || {};
@@ -1797,6 +1810,10 @@
           const level = (interop.level || 'native').toLowerCase();
           (groups[level] || groups.native).push(c);
         });
+        const sorter = (a, b) => String(a.name || '').localeCompare(String(b.name || ''));
+        groups.native.sort(sorter);
+        groups.adapted.sort(sorter);
+        groups.opaque.sort(sorter);
         renderSenseGroup('sense-native', groups.native, '{{ ui.sense_empty_native | default("Aún no sumo capacidades propias.") }}');
         renderSenseGroup('sense-adapted', groups.adapted, '{{ ui.sense_empty_adapted | default("Nada adoptado por ahora.") }}');
         renderSenseGroup('sense-opaque', groups.opaque, '{{ ui.sense_empty_opaque | default("No veo nada fuera de mi alcance.") }}');
