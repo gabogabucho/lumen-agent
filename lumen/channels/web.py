@@ -503,7 +503,7 @@ def _is_serve_mode() -> bool:
 
 
 def _workspace_snapshot():
-    return load_workspace(lumen_dir=LUMEN_DIR)
+    return load_workspace(lumen_dir=LUMEN_DIR, snapshot=True)
 
 
 def _server_secret(config: dict | None = None) -> str | None:
@@ -1738,6 +1738,53 @@ async def api_auth_logout():
 
 
 # ── Workspace auth endpoints ────────────────────────────────
+
+
+@app.post("/api/workspace/login")
+async def api_workspace_login(request: Request):
+    if _workspace_index is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "workspace_not_enabled"})
+
+    body = await request.json()
+    email = str(body.get("email") or "").strip().lower()
+    pin = str(body.get("pin") or "").strip()
+    user = _workspace_index.lookup_user(email) if email else None
+
+    if user is None:
+        return JSONResponse(status_code=401, content={"ok": False, "error": "invalid_credentials"})
+
+    from lumen.core.workspace_auth import _get_workspace_secret, create_jwt, verify_pin
+
+    if not verify_pin(pin, user.get("pin_hash") or ""):
+        return JSONResponse(status_code=401, content={"ok": False, "error": "invalid_credentials"})
+
+    secret = _get_workspace_secret()
+    if not secret:
+        return JSONResponse(status_code=500, content={"ok": False, "error": "workspace_secret_missing"})
+
+    token = create_jwt(email, user.get("role", "member"), user.get("team"), secret)
+    payload = {
+        "email": email,
+        "role": user.get("role"),
+        "team": user.get("team"),
+        "display_name": user.get("display_name", email),
+    }
+    response = JSONResponse(content={"ok": True, "user": payload})
+    response.set_cookie(
+        "lumen_ws_token",
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=COOKIE_MAX_AGE_SECONDS,
+    )
+    return response
+
+
+@app.post("/api/workspace/logout")
+async def api_workspace_logout():
+    response = JSONResponse(content={"ok": True})
+    response.delete_cookie("lumen_ws_token")
+    return response
 
 
 
@@ -4524,7 +4571,7 @@ def _get_paperclip_config() -> dict | None:
     }
 
 
-async def _validate_bearer_token(request: Request, config: dict | None = None) -> JSONResponse | None:
+async def _validate_paperclip_bearer_token(request: Request, config: dict | None = None) -> JSONResponse | None:
     """Validate Bearer token for paperclip endpoints."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -4561,7 +4608,7 @@ async def api_paperclip_task(request: Request):
             }
         )
 
-    guard = await _validate_bearer_token(request)
+    guard = await _validate_paperclip_bearer_token(request)
     if guard is not None:
         return guard
 
@@ -4625,7 +4672,7 @@ async def api_paperclip_report(request: Request):
             }
         )
 
-    guard = await _validate_bearer_token(request)
+    guard = await _validate_paperclip_bearer_token(request)
     if guard is not None:
         return guard
 
@@ -4685,7 +4732,7 @@ async def api_paperclip_heartbeat(request: Request):
             }
         )
 
-    guard = await _validate_bearer_token(request)
+    guard = await _validate_paperclip_bearer_token(request)
     if guard is not None:
         return guard
 
@@ -4738,7 +4785,7 @@ async def api_paperclip_resume(request: Request):
             }
         )
 
-    guard = await _validate_bearer_token(request)
+    guard = await _validate_paperclip_bearer_token(request)
     if guard is not None:
         return guard
 
