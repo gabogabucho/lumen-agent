@@ -1,11 +1,12 @@
 # RFC: Lumen Workspaces
 
-**Status:** Draft  
+**Status:** ✅ IMPLEMENTED (v1.2.2)  
 **Version:** 2.0.0  
-**Target:** Lumen 1.2.0  
-**Type:** Major Feature  
-**Author:** gabogabucho  
-**Date:** 2026-05-09
+**Target:** Lumen 1.2.x  
+**Type:** Major Feature — Implemented  
+**Author:** gabogabucho + neuronlabpro-coder  
+**Date:** 2026-05-09  
+**Closed:** 2026-05-11
 
 ---
 
@@ -286,11 +287,101 @@ El wizard no toca módulos ni skills — eso es responsabilidad del admin como s
 
 ---
 
-## 12. Roadmap
+## 12. v1.2.x — IMPLEMENTED ✅
 
-| Versión | Alcance | Estimado |
-|---------|---------|----------|
-| **v1.2.0** | Auth JWT, Teams, Skill ACL, `lumen workspace init` | 3–4 semanas |
-| **v1.3.0** | Dominios de memoria, Branding API | 1–2 semanas |
-| **v1.4.0** | Admin UI + CLI — gestión de equipos, usuarios y skills habilitados (UI y CLI son equivalentes, YAML es la fuente de verdad) | 2–3 semanas |
-| **v2.0.0** | UI web de administración, SSO, audit log | TBD |
+### Checklist de cierre
+
+| # | Requisito | Implementado | Commit |
+|---|-----------|-------------|--------|
+| 9.1 | Auth JWT, `POST /api/auth/login` con `{email, pin}` | ✅ Sí (collaborator `lumen/core/workspace.py` + nuestro `workspace_auth.py`) | d9dad48 |
+| 9.2 | Workspace loader — `workspace.yaml` + `teams/*/team.yaml` | ✅ Sí (`core/workspace.py` + `runtime.py` `_load_workspace_index`) | merge |
+| 9.3 | Skill ACL — tool call valida `skill ∈ enabled_skills` | ✅ Dos capas: session ACL (collaborator) + skill_acl.py (nuestro) | merge |
+| 9.4 | Dominios de memoria — sesión escalada por workspace/team/email | Parcial — `_scoped_session_id` existe pero dominio de memoria persistente pendiente | brain.py |
+| 9.5 | Branding API — `GET /api/workspace/branding` público | ✅ Sí (collaborator `web.py` + templates) | d9dad48 |
+| 9.6 | Personality resolver — comportamiento dual (con/sin workspace.yaml) | ✅ Sí (`runtime.py` detecta workspace mode) | merge |
+| 8   | CLI `lumen workspace init` wizard | ✅ Sí (`cli/workspace.py` — 303 líneas) | merge |
+|     | CLI `lumen workspace user-add/remove/skill-enable/disable` | ⚠️ Esqueleto en `cli/workspace.py` (comandos registrados) | merge |
+|     | `lumen reload` sin restart del servidor | ✅ `api/workspace/reload` en `web.py` | merge |
+|     | `/settings/workspace` page | ✅ Template `settings_workspace.html` | merge |
+
+**Veredicto: v1.2.2 listo.** Auth JWT, Teams, Skill ACL, Branding API y CLI workspace implementados y integrados con el código del collaborator (PR #13).
+
+### Merge de v1.2.2
+
+- PR original del collaborator: #13 → `d9dad48` (v1.2.1)
+- Integración de workspaces propios: `0214bef` (merge con skill ACL layered, tests, CLI)
+- Total: ~55k líneas añadidas por collaborator + ~6k líneas propias + ~5k líneas tests
+
+---
+
+## 13. Roadmap v1.3+ — Fusionado (RFC + Colaborador)
+
+### v1.3.0 — Seguridad y fiabilidad (próximo sprint)
+
+| # | Feature | Autor RFC | Autor | Descripción |
+|---|---------|-----------|-------|-------------|
+| 1 | **Dominios de memoria** | ✅ RFC §6 | — | Memoria aislada por usuario/equipo/global. Cada sesión resuelve su dominio al inicializarse. |
+| 2 | **Version pinning + rollback** | — | Colaborador | Fijar versión por workspace + botón "volver a versión anterior" si algo falla. |
+| 3 | **Sandbox de permisos por módulo** | — | Colaborador | Ver y limitar qué tools/endpoints puede usar cada módulo antes de instalar. |
+| 4 | **Dry-run install / compat testing** | — | Colaborador | Validar dependencias y riesgos antes de aplicar cambios sin romper nada. |
+| 5 | **Health checks por módulo** | — | Colaborador | Estado real (ready/degraded/down) con diagnóstico corto y última verificación. |
+
+### v1.4.0 — Gobernanza
+
+| # | Feature | Autor RFC | Autor | Descripción |
+|---|---------|-----------|-------|-------------|
+| 6 | **Centro de eventos y cambios** | — | Colaborador | Timeline de "quién instaló qué, cuándo y por qué" + export para compliance. |
+| 7 | **Aprobación de instalación por rol/team** | — | Colaborador | Flujo "solicitar módulo" y aprobación por admin/team_admin con auditoría. |
+| 8 | **Telemetría de uso por team** | — | Colaborador | Qué módulos aportan valor, uso por usuario/equipo, errores y latencia. |
+| 9 | **Admin UI + CLI completa** | ✅ RFC §12 | — | UI web de gestión de equipos, usuarios, skills habilitados + CLI `workspace *` completa. |
+|10 | **Plantillas de packs por departamento** | — | Colaborador | "Pack Sales", "Pack Soporte" — activar varios módulos de una vez. |
+
+### v2.0.0 — Enterprise
+
+| # | Feature | Autor RFC | Autor | Descripción |
+|---|---------|-----------|-------|-------------|
+|11 | **Firma y trust score** | — | Colaborador | Módulos firmados, publisher verificado, nivel de confianza visible en UI. |
+|12 | **Políticas por entorno** | — | Colaborador | dev/staging/prod con reglas distintas de instalación y activación. |
+|13 | **SSO / LDAP / OIDC** | ✅ RFC §11 | — | Autenticación corporativa más allá de email+pin. |
+|14 | **Audit log completo** | ✅ RFC §11 | — | Registro de todas las acciones, exportable para compliance. |
+|15 | **Multi-workspace por instancia** | ✅ RFC §11 | — | No múltiple workspace (v1 is single workspace). |
+
+### Estimaciones acumuladas
+
+| Versión | Alcance | Estimado | Dependencias |
+|---------|---------|----------|--------------|
+| **v1.2.2** | ✅ IMPLEMENTADO | — | — |
+| **v1.3.0** | Dominios de memoria, version pinning, sandbox dry-run, health checks, compat testing | 3–4 semanas | Depende de v1.2.2 completo |
+| **v1.4.0** | Centro de eventos, aprobación de instal., telemetría, admin UI+CLI, plantillas | 4–6 semanas | Depende de v1.3.0 |
+| **v2.0.0** | Firma/trust score, políticas por entorno, SSO/audit log, multi-workspace | TBD — cuando v1.4.0 esté estable | Depende de v1.4.0 |
+
+---
+
+## 14. Contrato de integración con colaborador
+
+El código de cada fase se integra de manera no destructiva:
+
+- **Nuestro** (`workspace_auth.py`, `skill_acl.py`, `cli/workspace.py`, `core/workspace.py`) → capa de gobernanza + ACL
+- **Colaborador** (`workspace.py` v1.2.1, `web.py` endpoints, templates, branding) → capa de auth + UI
+
+Las dos capas operan en paralelo y se combinan en los puntos de integración:
+- `web.py` — endpoints fusionados
+- `runtime.py` — workspace index compartido
+- `brain.py` — dos capas de ACL (session-based en collaborator + skill_acl.py en nuestro)
+- `cli/main.py` — CLI del colaborador + CLI de workspaces propio
+
+**Para nuevos colaboradores**: cada cambio nuevo debe mantener esta separación.
+
+---
+
+## 15. Cambios al RFC desde su versión draft
+
+| Cambio | Razón |
+|--------|-------|
+| Status: Draft → ✅ IMPLEMENTED v1.2.2 | Auth, Teams, ACL, Branding, CLI completados |
+| v1.2.0 → v1.2.2 | Incluyendo branding API, CLI init, reload endpoint |
+| Roadmap fusionado RFC + propuestas colaborador | Las propuestas del colaborador cubren gaps del RFC |
+| Dominios de memoria no movido a v1.2 | Requiere cambios en core de memoria, mejor en v1.3 |
+| v2.0.0 ampliado con nuevas features | SSO + audit log del RFC + firma + trust score + env policies del colaborador |
+
+(End of file - total 297 lines)
