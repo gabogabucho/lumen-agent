@@ -22,6 +22,7 @@ from lumen.core.provider_health import ProviderHealthTracker
 from lumen.core.registry import CapabilityKind
 from lumen.core.runtime import apply_provider_runtime_env, bootstrap_runtime, refresh_runtime_registry, rehydrate_runtime_config, reload_runtime_personality_surface, sync_runtime_modules
 from lumen.core.lessons import VALID_CATEGORIES
+from lumen.core.workspace import hash_secret, list_governance, load_team, load_workspace, save_team
 from lumen.core.tool_policy import ToolPolicy, SecurityConfig, ToolRisk
 
 BRAND = "#3d3d6d"
@@ -574,6 +575,13 @@ config_app = typer.Typer(
 )
 app.add_typer(config_app, name="config")
 
+workspace_app = typer.Typer(
+    name="workspace",
+    help="Bootstrap and inspect enterprise workspace configuration.",
+    no_args_is_help=True,
+)
+app.add_typer(workspace_app, name="workspace")
+
 
 def _redact(value: str) -> str:
     """Show first 4 chars + **** for values > 4 chars."""
@@ -588,6 +596,221 @@ def _resolve_config_paths(instance: str | None, data_dir: str | None):
     lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
     configure_paths(lumen_dir=lumen_dir)
     return lumen_dir
+
+
+@workspace_app.command("init")
+def workspace_init(
+    name: str = typer.Option(..., "--name", help="Workspace slug"),
+    display_name: str = typer.Option(..., "--display-name", help="Workspace display name"),
+    team_slug: str = typer.Option("general", "--team", help="Initial team slug"),
+    team_name: str = typer.Option("General Team", "--team-name", help="Initial team display name"),
+    admin_email: str = typer.Option(..., "--admin-email", help="Initial admin email"),
+    user_email: str = typer.Option(..., "--user-email", help="Initial member email"),
+    logo: str = typer.Option("", "--logo", help="Optional branding logo URL/path"),
+    primary_color: str = typer.Option("", "--primary-color", help="Optional primary brand color"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing workspace files"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
+):
+    """Create workspace.yaml and teams/<slug>/team.yaml scaffolding."""
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    workspace_path = lumen_dir / "workspace.yaml"
+    team_dir = lumen_dir / "teams" / team_slug
+    team_path = team_dir / "team.yaml"
+
+    if not force and (workspace_path.exists() or team_path.exists()):
+        console.print("[red]Workspace files already exist.[/red] Use --force to overwrite.")
+        raise typer.Exit(1)
+
+    lumen_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+
+    admin_pin = Prompt.ask("Admin PIN", password=True).strip()
+    member_pin = Prompt.ask("Initial member PIN", password=True).strip()
+    if len(admin_pin) < 4 or len(member_pin) < 4:
+        console.print("[red]PIN must be at least 4 characters.[/red]")
+        raise typer.Exit(1)
+
+    workspace_doc = {
+        "name": name,
+        "display_name": display_name,
+        "branding": {"app_name": display_name},
+        "admins": [
+            {
+                "email": admin_email,
+                "display_name": "Workspace Admin",
+                "pin_hash": hash_secret(admin_pin),
+            }
+        ],
+    }
+    if logo.strip():
+        workspace_doc["branding"]["logo"] = logo.strip()
+    if primary_color.strip():
+        workspace_doc["branding"]["primary_color"] = primary_color.strip()
+    team_doc = {
+        "name": team_slug,
+        "display_name": team_name,
+        "enabled_skills": [
+            "chat",
+            "memory",
+            "web",
+        ],
+        "users": [
+            {
+                "email": user_email,
+                "display_name": "Team Member",
+                "role": "member",
+                "pin_hash": hash_secret(member_pin),
+            }
+        ],
+    }
+
+    workspace_path.write_text(yaml.safe_dump(workspace_doc, sort_keys=False), encoding="utf-8")
+    team_path.write_text(yaml.safe_dump(team_doc, sort_keys=False), encoding="utf-8")
+
+    snapshot = load_workspace(lumen_dir=lumen_dir)
+    if not snapshot.valid:
+        console.print("[yellow]Workspace scaffold created with warnings:[/yellow]")
+        for err in snapshot.errors:
+            console.print(f"  - {err}")
+    else:
+        console.print("[green]✓[/green] Workspace scaffold created")
+
+    console.print(f"  Workspace: {workspace_path}")
+    console.print(f"  Team:      {team_path}")
+    console.print("  [dim]PIN hashes generated and saved securely.[/dim]")
+
+
+@workspace_app.command("show")
+def workspace_show(
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
+):
+    """Show teams, users, and enabled skills."""
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    gov = list_governance(lumen_dir=lumen_dir)
+    if not gov["enabled"]:
+        console.print("[red]Workspace is not initialized.[/red]")
+        raise typer.Exit(1)
+    if not gov["valid"]:
+        console.print("[yellow]Workspace has validation errors:[/yellow]")
+        for err in gov["errors"]:
+            console.print(f"  - {err}")
+
+    console.print(f"[bold]Workspace:[/bold] {gov.get('display_name') or gov.get('workspace')}")
+    for team in gov["teams"]:
+        console.print(f"\n[bold]{team['display_name']}[/bold] ({team['team']})")
+        console.print(f"  Skills: {', '.join(team.get('enabled_skills') or []) or '-'}")
+        users = team.get("users") or []
+        if not users:
+            console.print("  Users: -")
+            continue
+        for user in users:
+            console.print(f"  - {user.get('email')} [{user.get('role', 'member')}]")
+
+
+@workspace_app.command("user-add")
+def workspace_user_add(
+    team: str = typer.Option(..., "--team", help="Team slug"),
+    email: str = typer.Option(..., "--email", help="User email"),
+    role: str = typer.Option("member", "--role", help="Role: member|team_admin"),
+    display_name: str = typer.Option("", "--display-name", help="Display name"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
+):
+    """Add a workspace user to a team."""
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    team_doc = load_team(lumen_dir=lumen_dir, team_slug=team)
+    if not team_doc:
+        console.print(f"[red]Team not found: {team}[/red]")
+        raise typer.Exit(1)
+    if role not in {"member", "team_admin"}:
+        console.print("[red]Invalid role. Use member or team_admin.[/red]")
+        raise typer.Exit(1)
+    pin = Prompt.ask("User PIN", password=True).strip()
+    if len(pin) < 4:
+        console.print("[red]PIN must be at least 4 characters.[/red]")
+        raise typer.Exit(1)
+
+    users = team_doc.get("users") or []
+    normalized_email = email.strip().lower()
+    users = [u for u in users if str(u.get("email", "")).strip().lower() != normalized_email]
+    users.append(
+        {
+            "email": normalized_email,
+            "display_name": display_name.strip() or normalized_email,
+            "role": role,
+            "pin_hash": hash_secret(pin),
+        }
+    )
+    team_doc["users"] = users
+    save_team(lumen_dir=lumen_dir, team_slug=team, team_doc=team_doc)
+    console.print(f"[green]✓[/green] User added: {normalized_email} -> {team}")
+
+
+@workspace_app.command("user-remove")
+def workspace_user_remove(
+    team: str = typer.Option(..., "--team", help="Team slug"),
+    email: str = typer.Option(..., "--email", help="User email"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
+):
+    """Remove a workspace user from a team."""
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    team_doc = load_team(lumen_dir=lumen_dir, team_slug=team)
+    if not team_doc:
+        console.print(f"[red]Team not found: {team}[/red]")
+        raise typer.Exit(1)
+    users = team_doc.get("users") or []
+    normalized_email = email.strip().lower()
+    next_users = [u for u in users if str(u.get("email", "")).strip().lower() != normalized_email]
+    if len(next_users) == len(users):
+        console.print(f"[yellow]User not found in team: {normalized_email}[/yellow]")
+        raise typer.Exit(1)
+    team_doc["users"] = next_users
+    save_team(lumen_dir=lumen_dir, team_slug=team, team_doc=team_doc)
+    console.print(f"[green]✓[/green] User removed: {normalized_email}")
+
+
+@workspace_app.command("skill-enable")
+def workspace_skill_enable(
+    team: str = typer.Option(..., "--team", help="Team slug"),
+    skill: str = typer.Option(..., "--skill", help="Skill/tool root to enable"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
+):
+    """Enable a skill key for a team."""
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    team_doc = load_team(lumen_dir=lumen_dir, team_slug=team)
+    if not team_doc:
+        console.print(f"[red]Team not found: {team}[/red]")
+        raise typer.Exit(1)
+    skills = [str(s).strip() for s in (team_doc.get("enabled_skills") or []) if str(s).strip()]
+    if skill not in skills:
+        skills.append(skill)
+    team_doc["enabled_skills"] = sorted(set(skills))
+    save_team(lumen_dir=lumen_dir, team_slug=team, team_doc=team_doc)
+    console.print(f"[green]✓[/green] Skill enabled for {team}: {skill}")
+
+
+@workspace_app.command("skill-disable")
+def workspace_skill_disable(
+    team: str = typer.Option(..., "--team", help="Team slug"),
+    skill: str = typer.Option(..., "--skill", help="Skill/tool root to disable"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
+):
+    """Disable a skill key for a team."""
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    team_doc = load_team(lumen_dir=lumen_dir, team_slug=team)
+    if not team_doc:
+        console.print(f"[red]Team not found: {team}[/red]")
+        raise typer.Exit(1)
+    skills = [str(s).strip() for s in (team_doc.get("enabled_skills") or []) if str(s).strip()]
+    next_skills = [s for s in skills if s != skill]
+    team_doc["enabled_skills"] = next_skills
+    save_team(lumen_dir=lumen_dir, team_slug=team, team_doc=team_doc)
+    console.print(f"[green]✓[/green] Skill disabled for {team}: {skill}")
 
 
 @config_app.command("set")

@@ -20,6 +20,11 @@ class Session:
     flow_prompted: bool = False
     pending_setup_offer: dict[str, Any] | None = None
     last_seen: float = field(default_factory=time.time)
+    workspace: str | None = None
+    user_email: str | None = None
+    team: str | None = None
+    role: str | None = None
+    enabled_skills: list[str] = field(default_factory=list)
 
     def touch(self):
         self.last_seen = time.time()

@@ -3,12 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Lumen AI agent dashboard: chat, modules, memory, settings, tools and runtime control.">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F5F8FC">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Lumen">
   <title>Lumen — Seguridad</title>
   <link rel="icon" href="/static/logo.png" type="image/png">
   {% include "_partials/tokens.html" %}
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+  <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
     body {
       display: flex; overflow: hidden;
@@ -99,6 +104,20 @@
       font-size: 12px; font-weight: 600; color: var(--lumen-mute);
       text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--lumen-s-3);
     }
+    .section-head {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: var(--lumen-s-3);
+    }
+    .section-head h3 { margin: 0; }
+    .section-icon {
+      width: 22px; height: 22px; border-radius: var(--lumen-r-sm);
+      border: 1px solid var(--lumen-line);
+      background: var(--lumen-paper-2);
+      color: var(--lumen-primary);
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .section-icon svg { width: 13px; height: 13px; }
     .l-card p { color: var(--lumen-ink-soft); line-height: 1.6; }
     .l-card-grid { display: grid; gap: var(--lumen-s-4); }
     .l-card-grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
@@ -225,7 +244,7 @@
       <div class="settings-stack">
         <!-- Confirmation toggles -->
         <div class="l-card">
-          <h3>Confirmaciones</h3>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.6-4A12 12 0 0 1 12 3a12 12 0 0 1-8.6 3A12 12 0 0 0 3 9c0 5.6 3.8 10.3 9 11.6C17.2 19.3 21 14.6 21 9c0-1-.1-2-.4-3z"/></svg></span><h3>Confirmaciones</h3></div>
           <p style="margin-bottom:var(--lumen-s-4);">Controlá qué acciones requieren confirmación antes de ejecutarse.</p>
 
           <div class="toggle-row">
@@ -275,7 +294,7 @@
 
         <!-- Timeout -->
         <div class="l-card">
-          <h3>Timeout de confirmación</h3>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8v5l3 2m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></span><h3>Timeout de confirmación</h3></div>
           <p style="margin-bottom:var(--lumen-s-4);">Tiempo máximo de espera (en segundos) para una confirmación del usuario. Si expira, la acción se cancela automáticamente.</p>
           <div class="field" style="max-width:200px;">
             <label for="input-timeout">Segundos</label>
@@ -285,7 +304,7 @@
 
         <!-- Privileged tools -->
         <div class="l-card">
-          <h3>Herramientas privilegiadas</h3>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10 14L21 3m0 0h-7m7 0v7M5 7h5v5H5zM4 17h6v3H4z"/></svg></span><h3>Herramientas privilegiadas</h3></div>
           <p>Estas herramientas tienen el nivel de riesgo más alto y siempre requieren confirmación.</p>
           <div class="tools-list" id="privileged-tools">
             <span class="field-hint">Cargando…</span>
@@ -403,3 +422,5 @@
   </script>
 </body>
 </html>
+
+

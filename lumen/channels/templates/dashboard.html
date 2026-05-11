@@ -3,14 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Lumen AI agent dashboard: chat, modules, memory, settings, tools and runtime control.">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F5F8FC">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Lumen">
   <title>{{ ui.title | default('Lumen — Dashboard') }}</title>
   <link rel="icon" href="/static/logo.png" type="image/png">
   {% include "_partials/tokens.html" %}
   {% from "_partials/animated_eye.html" import animated_eye, eye_styles %}
   {{ eye_styles() }}
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
     body {
@@ -89,18 +94,45 @@
       padding: var(--lumen-s-3);
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 10px;
       overflow-y: auto;
       overflow-x: hidden;
+    }
+    .sidebar-nav a,
+    .sidebar-nav a:link,
+    .sidebar-nav a:visited,
+    .sidebar-nav a:hover,
+    .sidebar-nav a:active {
+      text-decoration: none !important;
+    }
+    .nav-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--lumen-line);
+    }
+    .nav-group:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .nav-group-title {
+      padding: 2px 10px 6px;
+      font-family: var(--lumen-font-mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--lumen-mute);
+      opacity: 0.9;
     }
     .nav-btn {
       display: flex;
       align-items: center;
       gap: var(--lumen-s-3);
       padding: 10px 12px;
-      border-radius: var(--lumen-r-sm);
+      border-radius: var(--lumen-r-md);
       background: transparent;
-      border: none;
+      border: 1px solid transparent;
       color: var(--lumen-ink-soft);
       font: inherit;
       font-weight: 500;
@@ -109,12 +141,18 @@
       text-align: left;
       transition: background 0.15s ease, color 0.15s ease;
     }
-    .nav-btn:hover { background: var(--lumen-surface); color: var(--lumen-ink); }
+    .nav-btn:hover {
+      background: color-mix(in srgb, var(--lumen-surface) 82%, transparent);
+      color: var(--lumen-ink);
+      border-color: var(--lumen-line);
+    }
     .nav-btn.active {
       background: var(--lumen-lavender);
       color: var(--lumen-blue);
+      border-color: color-mix(in srgb, var(--lumen-blue) 28%, var(--lumen-line));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lumen-blue) 14%, transparent);
     }
-    .nav-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .nav-btn svg { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.95; }
 
     .sidebar-foot {
       padding: var(--lumen-s-3);
@@ -218,7 +256,63 @@
     /* === Chat === */
     .chat-panel { display: flex; flex-direction: column; height: 100%; }
     .chat-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
-    .chat-center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .chat-center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      position: relative;
+      --bg-shift-x: 0px;
+      --bg-shift-y: 0px;
+      --orb-line: rgba(11,30,58,0.24);
+      --orb-line-soft: rgba(11,30,58,0.14);
+      --orb-node: rgba(11,30,58,0.62);
+      --orb-accent: rgba(25,118,210,0.82);
+      --orb-core: rgba(25,118,210,0.28);
+    }
+    [data-theme="dark"] .chat-center {
+      --orb-line: rgba(255,255,255,0.14);
+      --orb-line-soft: rgba(255,255,255,0.08);
+      --orb-node: rgba(255,255,255,0.58);
+      --orb-accent: rgba(95,181,214,0.82);
+      --orb-core: rgba(95,181,214,0.24);
+    }
+    .chat-center::before,
+    .chat-center::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      transition: transform 220ms ease-out;
+    }
+    .chat-center::before {
+      background:
+        repeating-radial-gradient(
+          circle at 22% 54%,
+          var(--orb-line) 0 1px,
+          transparent 1px 36px
+        ),
+        repeating-radial-gradient(
+          circle at 78% 46%,
+          var(--orb-line) 0 1px,
+          transparent 1px 36px
+        ),
+        radial-gradient(ellipse at 50% 50%, var(--orb-line-soft) 0%, transparent 62%);
+      opacity: 0.42;
+      transform: translate(calc(var(--bg-shift-x) * -0.32), calc(var(--bg-shift-y) * -0.32));
+    }
+    .chat-center::after {
+      background:
+        radial-gradient(circle at 50% 50%, var(--orb-core) 0 150px, color-mix(in srgb, var(--orb-core) 35%, transparent) 190px, transparent 300px),
+        radial-gradient(circle at 32% 42%, var(--orb-node) 0 2px, transparent 3px),
+        radial-gradient(circle at 66% 58%, color-mix(in srgb, var(--orb-node) 86%, transparent) 0 2px, transparent 3px),
+        radial-gradient(circle at 44% 66%, var(--orb-accent) 0 3px, transparent 4px),
+        radial-gradient(circle at 58% 34%, color-mix(in srgb, var(--orb-accent) 88%, transparent) 0 3px, transparent 4px);
+      opacity: 0.7;
+      filter: blur(0.1px);
+      transform: translate(calc(var(--bg-shift-x) * 0.48), calc(var(--bg-shift-y) * 0.48));
+    }
 
     /* Pulse strip — subtle life indicator, "like pressing to find a pulse" */
     .pulse-strip {
@@ -263,7 +357,7 @@
 
     /* Sense panel — "lo que sé que tengo" */
     .sense-panel {
-      width: 240px;
+      width: 260px;
       flex-shrink: 0;
       border-left: 1px solid var(--lumen-line);
       background: var(--lumen-paper-2);
@@ -281,19 +375,67 @@
       margin: 0 0 8px;
       font-weight: 600;
     }
-    .sense-group { display: flex; flex-direction: column; gap: 6px; }
+    .sense-group { display: flex; flex-direction: column; gap: 8px; }
     .sense-item {
-      padding: 8px 10px;
       background: var(--lumen-paper);
       border: 1px solid var(--lumen-line);
       border-radius: 8px;
       font-size: 12px;
       line-height: 1.35;
+      overflow: hidden;
+      transition: border-color 140ms ease, box-shadow 140ms ease;
     }
-    .sense-item-name { font-weight: 600; color: var(--lumen-ink); display: block; }
-    .sense-item-desc { color: var(--lumen-ink-soft); font-size: 11px; display: block; margin-top: 2px; }
+    .sense-item:hover {
+      border-color: color-mix(in srgb, var(--lumen-primary) 32%, var(--lumen-line));
+      box-shadow: var(--lumen-shadow-sm);
+    }
+    .sense-item summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 9px 10px;
+      user-select: none;
+    }
+    .sense-item summary::-webkit-details-marker { display: none; }
+    .sense-item summary:hover { background: color-mix(in srgb, var(--lumen-paper-2) 70%, transparent); }
+    .sense-item-name {
+      font-weight: 600;
+      color: var(--lumen-ink);
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sense-chevron {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      color: var(--lumen-mute);
+      transition: transform 140ms ease;
+    }
+    .sense-item[open] .sense-chevron { transform: rotate(180deg); }
+    .sense-item-desc {
+      color: var(--lumen-ink-soft);
+      font-size: 11px;
+      display: block;
+      padding: 8px 12px 12px;
+      line-height: 1.45;
+      border-top: 1px solid var(--lumen-line-2);
+      background: color-mix(in srgb, var(--lumen-paper) 86%, transparent);
+    }
     .sense-empty { color: var(--lumen-ink-soft); font-style: italic; font-size: 11px; opacity: 0.7; }
     @media (max-width: 960px) { .sense-panel { display: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      .chat-center::before,
+      .chat-center::after {
+        transition: none;
+        transform: none;
+      }
+    }
 
     /* OpenRouter model picker */
     .model-picker-wrapper {
@@ -358,7 +500,13 @@
       display: flex;
       flex-direction: column;
       gap: var(--lumen-s-4);
-      background: linear-gradient(180deg, rgba(255,255,255,0.35), rgba(255,255,255,0));
+      background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--lumen-paper) 60%, transparent),
+        color-mix(in srgb, var(--lumen-paper) 42%, transparent)
+      );
+      position: relative;
+      z-index: 1;
     }
     .chat-empty {
       flex: 1;
@@ -486,6 +634,16 @@
       padding: var(--lumen-s-4) var(--lumen-s-5);
       background: var(--lumen-paper);
       box-shadow: 0 -10px 24px rgba(15,21,69,0.04);
+      position: relative;
+      z-index: 3;
+      isolation: isolate;
+    }
+    .composer::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: var(--lumen-paper);
+      z-index: -1;
     }
     .composer form {
       display: flex;
@@ -546,6 +704,43 @@
       gap: var(--lumen-s-2);
       margin-bottom: var(--lumen-s-4);
     }
+    .market-toolbar {
+      display: grid;
+      grid-template-columns: minmax(240px, 1.4fr) minmax(130px, .55fr) minmax(130px, .55fr) minmax(160px, .7fr) auto auto minmax(170px, .8fr);
+      gap: var(--lumen-s-2);
+      margin-bottom: var(--lumen-s-4);
+      align-items: center;
+    }
+    .market-search { min-width: 0; }
+    .market-category { max-width: 220px; }
+    .market-tool-btn { height: 40px; }
+    .market-view-switch {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--lumen-line);
+      border-radius: var(--lumen-r-md);
+      overflow: hidden;
+      background: var(--lumen-surface);
+      height: 40px;
+    }
+    .market-view-btn {
+      width: 44px;
+      height: 44px;
+      border: 0;
+      border-right: 1px solid var(--lumen-line);
+      background: transparent;
+      color: var(--lumen-ink-soft);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .market-view-btn:last-child { border-right: 0; }
+    .market-view-btn svg { width: 16px; height: 16px; }
+    .market-view-btn.active {
+      background: var(--lumen-lavender);
+      color: var(--lumen-blue);
+    }
     .l-pill {
       padding: 6px 12px;
       font-size: 12px;
@@ -582,6 +777,18 @@
       color: var(--lumen-ink-soft);
       font-weight: 600;
     }
+    .compat-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 6px;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.05);
+    }
+    .compat-dot.ready { background: var(--lumen-success); }
+    .compat-dot.installable { background: var(--lumen-warn); }
+    .compat-dot.partial { background: var(--lumen-coral); }
+    .compat-dot.blocked { background: var(--lumen-danger); }
 
     .section-title {
       font-size: 11px;
@@ -595,28 +802,81 @@
 
     .mod-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: var(--lumen-s-3);
+      align-items: stretch;
     }
+    .sr-only {
+      position: absolute !important;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .mod-grid.market-list-view { grid-template-columns: 1fr; }
     .mod-list { display: flex; flex-direction: column; gap: var(--lumen-s-3); }
 
     .mod-card {
       background: var(--lumen-surface);
       border: 1px solid var(--lumen-line);
-      border-radius: var(--lumen-r-md);
+      border-radius: var(--lumen-r-lg);
       padding: var(--lumen-s-4);
       box-shadow: var(--lumen-shadow-sm);
       display: flex;
       flex-direction: column;
-      gap: var(--lumen-s-3);
+      gap: var(--lumen-s-2);
+      position: relative;
+      overflow: hidden;
+      transition: transform 140ms ease, box-shadow 180ms ease, border-color 180ms ease;
+      height: 100%;
+      min-height: 320px;
+    }
+    .mod-card::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--lumen-line);
+    }
+    .mod-card:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--lumen-shadow);
+      border-color: color-mix(in srgb, var(--lumen-primary) 28%, var(--lumen-line));
     }
     .mod-card.is-personality { border-color: var(--lumen-blue-soft); }
+    .mod-card.is-personality::before { background: var(--lumen-primary); }
     .mod-card-top {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
       gap: var(--lumen-s-3);
     }
+    .mod-title-wrap {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-width: 0;
+    }
+    .mod-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      border: 1px solid var(--lumen-line);
+      background: var(--lumen-paper-2);
+      color: var(--lumen-primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .mod-icon svg { width: 16px; height: 16px; }
+    .mod-title-main { min-width: 0; }
     .mod-card h4 {
       font-size: 15px;
       font-weight: 600;
@@ -625,18 +885,80 @@
       align-items: center;
       gap: var(--lumen-s-2);
       flex-wrap: wrap;
+      line-height: 1.25;
     }
     .mod-meta {
-      font-size: 11px;
+      font-size: 12px;
       color: var(--lumen-mute);
       margin-top: 4px;
+    }
+    .mod-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--lumen-mute);
+    }
+    .mod-meta-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: var(--lumen-r-pill);
+      border: 1px solid var(--lumen-line);
+      background: var(--lumen-paper-2);
+      font-family: var(--lumen-font-mono);
+      letter-spacing: 0.01em;
     }
     .mod-desc {
       font-size: 13px;
       color: var(--lumen-ink-soft);
       line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      min-height: 58px;
     }
-    .mod-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .meta-stack .mod-meta {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      min-height: 36px;
+    }
+    .mod-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .mod-actions-row {
+      margin-top: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border-top: 1px solid var(--lumen-line);
+      padding-top: 10px;
+    }
+    .mod-actions-meta {
+      display: inline-flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .mod-actions-aux {
+      display: inline-flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      margin-left: auto;
+    }
+    .install-cta {
+      min-width: 116px;
+      min-height: 32px;
+      padding: 6px 16px !important;
+      font-size: 12px;
+      justify-content: center;
+    }
 
     .badge {
       display: inline-flex;
@@ -647,6 +969,14 @@
       font-size: 11px;
       font-weight: 500;
       border: 1px solid transparent;
+    }
+    .badge-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.9;
+      box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 16%, transparent);
     }
     .badge-personality {
       background: var(--lumen-coral-soft);
@@ -672,6 +1002,14 @@
 
     .reason-warn { font-size: 11px; color: var(--lumen-coral); }
     .reason-error { font-size: 11px; color: var(--lumen-danger); }
+    .reason-warn,
+    .reason-error {
+      padding: 8px 10px;
+      border-radius: var(--lumen-r-sm);
+      border: 1px solid var(--lumen-line);
+      background: var(--lumen-paper-2);
+      line-height: 1.45;
+    }
     .meta-stack { display: flex; flex-direction: column; gap: 6px; }
     .meta-row {
       display: flex;
@@ -789,7 +1127,10 @@
     @media (max-width: 720px) {
       aside.sidebar { width: 64px; }
       aside.sidebar .sidebar-text { display: none; }
+      .nav-group-title { display: none; }
       .panel { padding: var(--lumen-s-4); }
+      .market-toolbar { grid-template-columns: 1fr; }
+      .market-view-switch { width: fit-content; }
       .composer form { flex-direction: column; }
       .composer .l-btn { width: 100%; justify-content: center; }
       .bubble { max-width: 85%; }
@@ -797,6 +1138,19 @@
       .market-head { flex-direction: column; gap: var(--lumen-s-3); }
       .topbar { flex-wrap: wrap; }
       .chat-empty .sub { font-size: 16px; max-width: none; padding: 0 var(--lumen-s-4); }
+    }
+    @media (max-width: 1400px) {
+      .market-toolbar {
+        grid-template-columns: minmax(220px, 1.2fr) minmax(120px, .6fr) minmax(120px, .6fr) minmax(140px, .7fr) auto auto;
+      }
+      .market-sort { grid-column: 1 / -1; }
+    }
+    @media (max-width: 1280px) {
+      .mod-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 920px) {
+      .mod-card { min-height: 300px; }
+      .mod-desc { -webkit-line-clamp: 4; min-height: 76px; }
     }
   </style>
 </head>
@@ -820,41 +1174,50 @@
     </div>
 
     <nav class="sidebar-nav">
-      <button class="nav-btn active" id="nav-chat" onclick="showPanel('chat')">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-        </svg>
-        <span class="sidebar-text">{{ ui.chat | default('Charlas') }}</span>
-      </button>
+      <div class="nav-group">
+        <div class="nav-group-title sidebar-text">Workspace</div>
+        <button class="nav-btn active" id="nav-chat" onclick="showPanel('chat')">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+          </svg>
+          <span class="sidebar-text">{{ ui.chat | default('Charlas') }}</span>
+        </button>
 
-      <a href="/memory" class="nav-btn" title="Memoria">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
-        </svg>
-        <span class="sidebar-text">{{ ui.memory | default('Memoria') }}</span>
-      </a>
+        <a href="/memory" class="nav-btn" title="Memoria">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
+          </svg>
+          <span class="sidebar-text">{{ ui.memory | default('Memoria') }}</span>
+        </a>
 
-      <button class="nav-btn" id="nav-marketplace" onclick="showPanel('marketplace')">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
-        </svg>
-        <span class="sidebar-text">{{ ui.marketplace | default('Módulos') }}</span>
-      </button>
+        <button class="nav-btn" id="nav-marketplace" onclick="showPanel('marketplace')">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+          </svg>
+          <span class="sidebar-text">{{ ui.marketplace | default('Módulos') }}</span>
+        </button>
+      </div>
 
-      <a href="/agent-status" class="nav-btn" title="Estado">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-        </svg>
-        <span class="sidebar-text">{{ ui.agent_status | default('Estado') }}</span>
-      </a>
+      <div class="nav-group">
+        <div class="nav-group-title sidebar-text">Monitoring</div>
+        <a href="/agent-status" class="nav-btn" title="Estado">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          <span class="sidebar-text">{{ ui.agent_status | default('Estado') }}</span>
+        </a>
+      </div>
 
-      <a href="/settings" class="nav-btn" title="Ajustes">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-        </svg>
-        <span class="sidebar-text">{{ ui.config | default('Ajustes') }}</span>
-      </a>
+      <div class="nav-group">
+        <div class="nav-group-title sidebar-text">System</div>
+        <a href="/settings" class="nav-btn" title="Ajustes">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <span class="sidebar-text">{{ ui.config | default('Ajustes') }}</span>
+        </a>
+      </div>
     </nav>
 
     <div class="sidebar-foot">
@@ -987,29 +1350,46 @@
         </label>
       </div>
 
-      <div class="pill-row" id="marketplace-tabs">
-        <button type="button" onclick="switchMarketplaceTab('modules')" id="tab-modules" class="l-pill marketplace-tab active">{{ ui.tab_modules | default('Módulos') }}</button>
-        <button type="button" onclick="switchMarketplaceTab('kits')" id="tab-kits" class="l-pill marketplace-tab">{{ ui.tab_kits | default('Kits') }}</button>
-        <button type="button" onclick="switchMarketplaceTab('skills')" id="tab-skills" class="l-pill marketplace-tab">Skills</button>
+      <div class="market-toolbar">
+        <label for="marketplace-search" class="sr-only">Buscar módulos</label>
+        <input id="marketplace-search" class="l-input market-search" type="search" placeholder="{{ ui.marketplace_search | default('Buscar por nombre, descripción o tag...') }}" aria-label="Buscar módulos" />
+        <select id="marketplace-kind" class="l-input market-select" aria-label="Tipo de catálogo">
+          <option value="modules">{{ ui.tab_modules | default('Módulos') }}</option>
+          <option value="kits">{{ ui.tab_kits | default('Kits') }}</option>
+          <option value="skills">Skills</option>
+        </select>
+        <select id="marketplace-state" class="l-input market-select" aria-label="Estado de instalación">
+          <option value="all">{{ ui.filter_all | default('Todo') }}</option>
+          <option value="installed">{{ ui.filter_installed | default('Instalados') }}</option>
+          <option value="available">{{ ui.filter_available | default('Disponibles') }}</option>
+        </select>
+        <select id="marketplace-category" class="l-input market-select market-category" aria-label="Categoría">
+          <option value="">Todas las categorías</option>
+        </select>
+        <button type="button" id="marketplace-filters-toggle" class="l-pill market-tool-btn active" onclick="toggleMarketplaceFilters()">
+          Filtros
+        </button>
+        <div class="market-view-switch">
+          <button type="button" id="view-grid" class="market-view-btn active" onclick="setMarketplaceView('grid')" aria-label="Vista grilla">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
+          </button>
+          <button type="button" id="view-list" class="market-view-btn" onclick="setMarketplaceView('list')" aria-label="Vista lista">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
+          </button>
+        </div>
+        <select id="marketplace-sort" class="l-input market-select market-sort" aria-label="Orden">
+          <option value="name_asc">Nombre A-Z</option>
+          <option value="name_desc">Nombre Z-A</option>
+          <option value="status">Compatibilidad</option>
+        </select>
       </div>
-
-      <div class="pill-row" id="marketplace-filter-bar">
-        <button type="button" onclick="setMarketplaceFilter('all')" id="filter-all" class="l-pill marketplace-filter-btn active">{{ ui.filter_all | default('Todo') }}</button>
-        <button type="button" onclick="setMarketplaceFilter('installed')" id="filter-installed" class="l-pill marketplace-filter-btn">{{ ui.filter_installed | default('Instalados') }}</button>
-        <button type="button" onclick="setMarketplaceFilter('available')" id="filter-available" class="l-pill marketplace-filter-btn">{{ ui.filter_available | default('Disponibles') }}</button>
-      </div>
-
-      <div class="pill-row" style="align-items:center; margin-top:-4px;">
-        <input id="marketplace-search" class="l-input" type="search" placeholder="{{ ui.marketplace_search | default('Buscar por nombre, descripción o tag...') }}" style="max-width:420px;" />
-      </div>
-      <div class="pill-row" id="marketplace-tag-bar"></div>
 
       <div class="legend">
         <strong>Compatibilidad</strong>
-        <span>🟢 lista</span>
-        <span>🟡 instalable</span>
-        <span>🟠 parcial</span>
-        <span>🔴 bloqueada</span>
+        <span><i class="compat-dot ready"></i> lista</span>
+        <span><i class="compat-dot installable"></i> instalable</span>
+        <span><i class="compat-dot partial"></i> parcial</span>
+        <span><i class="compat-dot blocked"></i> bloqueada</span>
       </div>
 
       <div id="marketplace-note" style="font-size:12px;color:var(--lumen-mute);margin-bottom:var(--lumen-s-4);"></div>
@@ -1190,20 +1570,25 @@
       marketplace: ['{{ ui.marketplace | default("Módulos") }}',  '{{ ui.marketplace_sub_top | default("Capacidades disponibles para sumar") }}'],
       config:      ['{{ ui.config | default("Ajustes") }}',       '{{ ui.config_sub | default("Modelo, idioma y personalidad") }}'],
     };
+    const PANEL_STORAGE_KEY = 'lumen-dashboard-panel';
     function showPanel(name) {
+      const panelName = Object.prototype.hasOwnProperty.call(PANEL_TITLES, name) ? name : 'chat';
       document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-      const panel = document.getElementById(`panel-${name}`);
+      const panel = document.getElementById(`panel-${panelName}`);
       if (panel) panel.classList.remove('hidden');
-      const btn = document.getElementById(`nav-${name}`);
+      const btn = document.getElementById(`nav-${panelName}`);
       if (btn) btn.classList.add('active');
-      const [t, s] = PANEL_TITLES[name] || [name, ''];
+      const [t, s] = PANEL_TITLES[panelName] || [panelName, ''];
       document.getElementById('topbar-title').textContent = t;
       document.getElementById('topbar-sub').textContent = s;
-      if (name === 'marketplace') loadMarketplace();
+      if (panel) localStorage.setItem(PANEL_STORAGE_KEY, panelName);
+      if (panelName === 'marketplace') loadMarketplace();
     }
     const dashboardQuery = new URLSearchParams(window.location.search);
-    showPanel(dashboardQuery.get('panel') || 'chat');
+    const requestedPanel = dashboardQuery.get('panel');
+    const savedPanel = localStorage.getItem(PANEL_STORAGE_KEY);
+    showPanel(requestedPanel || savedPanel || 'chat');
 
     // === WebSocket Chat ===
     const STORAGE_KEY = 'lumen_session_id';
@@ -1226,6 +1611,7 @@
     let reconnectTimer = null;
     let connectionLostShown = false;
 
+    const chatCenter = document.querySelector('.chat-center');
     const chatMessages = document.getElementById('chat-messages');
     const chatEmpty = document.getElementById('chat-empty');
     const chatForm = document.getElementById('chat-form');
@@ -1237,6 +1623,22 @@
     const openRouterStatusPill = document.getElementById('openrouter-status-pill');
     const openRouterConnectionState = document.getElementById('openrouter-connection-state');
     const openRouterModelDisplay = document.getElementById('openrouter-model-display');
+
+    if (chatCenter && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      chatCenter.addEventListener('mousemove', (event) => {
+        const rect = chatCenter.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / rect.width;
+        const y = (event.clientY - rect.top) / rect.height;
+        const shiftX = (x - 0.5) * 42;
+        const shiftY = (y - 0.5) * 34;
+        chatCenter.style.setProperty('--bg-shift-x', `${shiftX.toFixed(2)}px`);
+        chatCenter.style.setProperty('--bg-shift-y', `${shiftY.toFixed(2)}px`);
+      });
+      chatCenter.addEventListener('mouseleave', () => {
+        chatCenter.style.setProperty('--bg-shift-x', '0px');
+        chatCenter.style.setProperty('--bg-shift-y', '0px');
+      });
+    }
 
     function buildOpenRouterAuthUrl(model) {
       const params = new URLSearchParams({
@@ -1408,10 +1810,15 @@
         return;
       }
       el.innerHTML = items.map(c => `
-        <div class="sense-item">
-          <span class="sense-item-name">${escapeHtml(c.name || '')}</span>
+        <details class="sense-item">
+          <summary>
+            <span class="sense-item-name">${escapeHtml(c.name || '')}</span>
+            <svg class="sense-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </summary>
           <span class="sense-item-desc">${escapeHtml(c.description || '')}</span>
-        </div>
+        </details>
       `).join('');
     }
     renderSensePanel();
@@ -1685,6 +2092,9 @@
     let currentMarketplaceFilter = 'all';
     let currentMarketplaceQuery = '';
     let currentMarketplaceTag = '';
+    let currentMarketplaceView = 'grid';
+    let currentMarketplaceSort = 'name_asc';
+    let marketplaceFiltersExpanded = true;
 
     function isPersonalityModule(item) {
       const tags = item.tags || [];
@@ -1693,9 +2103,8 @@
 
     function setMarketplaceFilter(filter) {
       currentMarketplaceFilter = filter;
-      document.querySelectorAll('.marketplace-filter-btn').forEach(btn => btn.classList.remove('active'));
-      const active = document.getElementById(`filter-${filter}`);
-      if (active) active.classList.add('active');
+      const stateSelect = document.getElementById('marketplace-state');
+      if (stateSelect && stateSelect.value !== filter) stateSelect.value = filter;
       renderMarketplaceTab();
     }
 
@@ -1708,17 +2117,51 @@
     function switchMarketplaceTab(tab) {
       currentMarketplaceTab = tab;
       currentMarketplaceTag = '';
-      document.querySelectorAll('.marketplace-tab').forEach(btn => btn.classList.remove('active'));
-      const active = document.getElementById(`tab-${tab}`);
-      if (active) active.classList.add('active');
+      const kindSelect = document.getElementById('marketplace-kind');
+      if (kindSelect && kindSelect.value !== tab) kindSelect.value = tab;
       renderMarketplaceTags();
+      renderMarketplaceTab();
+    }
+
+    function toggleMarketplaceFilters() {
+      marketplaceFiltersExpanded = !marketplaceFiltersExpanded;
+      const legend = document.querySelector('#panel-marketplace .legend');
+      const note = document.getElementById('marketplace-note');
+      const btn = document.getElementById('marketplace-filters-toggle');
+      if (legend) legend.style.display = marketplaceFiltersExpanded ? 'flex' : 'none';
+      if (note) note.style.display = marketplaceFiltersExpanded ? 'block' : 'none';
+      btn?.classList.toggle('active', marketplaceFiltersExpanded);
+    }
+
+    function setMarketplaceView(view) {
+      currentMarketplaceView = view === 'list' ? 'list' : 'grid';
+      document.getElementById('view-grid')?.classList.toggle('active', currentMarketplaceView === 'grid');
+      document.getElementById('view-list')?.classList.toggle('active', currentMarketplaceView === 'list');
       renderMarketplaceTab();
     }
 
     function renderCompatBadge(item) {
       const badge = item.compatibility?.badge;
       if (!badge) return '';
-      return `<span class="badge badge-status-${badge.status || 'blocked'}">${badge.emoji || ''} ${escapeHtml(badge.label || '')}</span>`;
+      return `<span class="badge badge-status-${badge.status || 'blocked'}"><span class="badge-status-dot"></span>${escapeHtml(badge.label || '')}</span>`;
+    }
+
+    function renderModuleIcon(item, fallbackType = 'module') {
+      const tags = (item.tags || []).map(t => String(t).toLowerCase());
+      const kind = String(item.kind || fallbackType || 'module').toLowerCase();
+      const isSkill = kind === 'skill' || tags.includes('skill');
+      const isKit = kind === 'kit' || tags.includes('kit');
+      const isPersonality = isPersonalityModule(item) || tags.includes('personality');
+      if (isPersonality) {
+        return `<span class="mod-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3l2.4 4.86L20 9l-4 3.9.94 5.5L12 16l-4.94 2.4L8 12.9 4 9l5.6-1.14L12 3z"/></svg></span>`;
+      }
+      if (isSkill) {
+        return `<span class="mod-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 4v16m8-8H4m13-7l3 3-3 3M7 5L4 8l3 3m10 8l3-3-3-3M7 19l-3-3 3-3"/></svg></span>`;
+      }
+      if (isKit) {
+        return `<span class="mod-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 8h16v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8zm0 0l2-4h12l2 4M9 12h6"/></svg></span>`;
+      }
+      return `<span class="mod-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10 4a2 2 0 1 1 4 0v1a1 1 0 0 0 1 1h3a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1a2 2 0 1 0 0 4h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0v-1a1 1 0 0 0-1-1H6a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a2 2 0 1 0 0-4H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 0 1-1V4z"/></svg></span>`;
     }
 
     function renderTagPills(item) {
@@ -1749,21 +2192,32 @@
     function renderReadOnlyCard(item, emptyLabel) {
       const reasons = item.compatibility?.reasons || [];
       const installBtn = item.actions?.can_install
-        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small">Instalar</button>` : '';
+        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small install-cta">Instalar</button>` : '';
       return `
         <div class="mod-card">
           <div class="mod-card-top">
-            <div>
-              <h4>${escapeHtml(item.display_name || item.name)}<span class="badge">Skill</span>${renderInteroperabilityBadge(item)}</h4>
-              <div class="mod-meta">${escapeHtml(item.min_capability || 'tier-1')} · ${item.installed ? 'instalado' : 'descubierto'}</div>
+            <div class="mod-title-wrap">
+              ${renderModuleIcon(item, 'skill')}
+              <div class="mod-title-main">
+                <h4>${escapeHtml(item.display_name || item.name)}</h4>
+              </div>
             </div>
-            <div class="mod-actions">${renderCompatBadge(item)}${installBtn}</div>
+            <div class="mod-actions">${renderCompatBadge(item)}</div>
           </div>
           <div class="mod-desc">${escapeHtml(item.description || emptyLabel)}</div>
           ${renderInteroperabilityMeta(item)}
           ${renderSourcePills(item)}
           ${renderTagPills(item)}
           ${reasons.length ? `<div class="reason-error">${reasons.map(r => escapeHtml(r)).join(' • ')}</div>` : ''}
+          <div class="mod-actions-row">
+            <div class="mod-actions-meta">
+              <span class="mod-meta-chip">Skill</span>
+              <span class="mod-meta-chip">v${escapeHtml(item.version || '0.0.0')}</span>
+              <span class="mod-meta-chip">${escapeHtml(item.min_capability || 'tier-1')}</span>
+              <span class="mod-meta-chip">${item.installed ? 'instalado' : 'disponible'}</span>
+            </div>
+            <div class="mod-actions-aux">${installBtn}</div>
+          </div>
         </div>`;
     }
 
@@ -1777,20 +2231,19 @@
         : '';
       const typeBadge = `<span class="badge">${typeLabel}</span>`;
       const installBtn = item.actions?.can_install
-        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small">Instalar</button>` : '';
+        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small install-cta">Instalar</button>` : '';
       const uninstallBtn = item.actions?.can_uninstall
         ? `<button onclick="uninstallModule('${item.name}')" class="l-btn small ghost">Quitar</button>` : '';
       return `
         <div class="mod-card ${personality ? 'is-personality' : ''}">
           <div class="mod-card-top">
-            <div>
-              <h4>${escapeHtml(item.display_name || item.name)}${typeBadge}${personalityBadge}${renderInteroperabilityBadge(item)}</h4>
-              <div class="mod-meta">v${escapeHtml(item.version || '0.0.0')} · ${escapeHtml(item.min_capability || 'tier-1')} · ${item.installed ? 'instalado' : 'disponible'}</div>
+            <div class="mod-title-wrap">
+              ${renderModuleIcon(item, item.kind || 'module')}
+              <div class="mod-title-main">
+                <h4>${escapeHtml(item.display_name || item.name)}${personalityBadge}</h4>
+              </div>
             </div>
-            <div class="mod-actions">
-              ${renderCompatBadge(item)}
-              ${installBtn}${uninstallBtn}
-            </div>
+            <div class="mod-actions">${renderCompatBadge(item)}</div>
           </div>
           <div class="mod-desc">${escapeHtml(item.description || 'Sin descripción.')}</div>
           ${renderInteroperabilityMeta(item)}
@@ -1798,6 +2251,18 @@
           ${renderTagPills(item)}
           ${warnings.length ? `<div class="reason-warn">${warnings.map(w => escapeHtml(w)).join(' • ')}</div>` : ''}
           ${reasons.length ? `<div class="reason-error">${reasons.map(r => escapeHtml(r)).join(' • ')}</div>` : ''}
+          <div class="mod-actions-row">
+            <div class="mod-actions-meta">
+              ${typeBadge}
+              <span class="mod-meta-chip">v${escapeHtml(item.version || '0.0.0')}</span>
+              <span class="mod-meta-chip">${escapeHtml(item.min_capability || 'tier-1')}</span>
+              <span class="mod-meta-chip">${item.installed ? 'instalado' : 'disponible'}</span>
+            </div>
+            <div class="mod-actions-aux">
+              ${renderInteroperabilityBadge(item)}
+              ${installBtn}${uninstallBtn}
+            </div>
+          </div>
         </div>`;
     }
 
@@ -1831,7 +2296,20 @@
       if (currentMarketplaceTag) {
         filtered = filtered.filter(item => (item.tags || []).includes(currentMarketplaceTag));
       }
-      filtered.sort((a, b) => (isPersonalityModule(a) ? 0 : 1) - (isPersonalityModule(b) ? 0 : 1));
+      filtered.sort((a, b) => {
+        const personalityScore = (isPersonalityModule(a) ? 0 : 1) - (isPersonalityModule(b) ? 0 : 1);
+        if (personalityScore !== 0) return personalityScore;
+        if (currentMarketplaceSort === 'name_desc') {
+          return String(b.display_name || b.name || '').localeCompare(String(a.display_name || a.name || ''));
+        }
+        if (currentMarketplaceSort === 'status') {
+          const order = { ready: 0, installable: 1, partial: 2, blocked: 3 };
+          const aStatus = String(a.compatibility?.badge?.status || 'blocked');
+          const bStatus = String(b.compatibility?.badge?.status || 'blocked');
+          return (order[aStatus] ?? 99) - (order[bStatus] ?? 99);
+        }
+        return String(a.display_name || a.name || '').localeCompare(String(b.display_name || b.name || ''));
+      });
       return filtered;
     }
 
@@ -1846,21 +2324,16 @@
     }
 
     function renderMarketplaceTags() {
-      const tagBar = document.getElementById('marketplace-tag-bar');
-      if (!tagBar || !marketplaceState) return;
+      if (!marketplaceState) return;
       const section = marketplaceState[currentMarketplaceTab];
-      if (!section) {
-        tagBar.innerHTML = '';
-        return;
-      }
+      if (!section) return;
       const tags = collectMarketplaceTags(section);
-      if (!tags.length) {
-        tagBar.innerHTML = '';
-        return;
+      const categorySelect = document.getElementById('marketplace-category');
+      if (categorySelect) {
+        const options = ['<option value="">Todas las categorías</option>']
+          .concat(tags.map(tag => `<option value="${escapeHtml(tag)}"${currentMarketplaceTag === tag ? ' selected' : ''}>${escapeHtml(tag)}</option>`));
+        categorySelect.innerHTML = options.join('');
       }
-      tagBar.innerHTML = [`<button type="button" class="l-pill ${!currentMarketplaceTag ? 'active' : ''}" onclick="setMarketplaceTag('')">Tags</button>`]
-        .concat(tags.map(tag => `<button type="button" class="l-pill ${currentMarketplaceTag === tag ? 'active' : ''}" onclick="setMarketplaceTag('${tag.replace(/'/g, "\\'")}')">${escapeHtml(tag)}</button>`))
-        .join('');
     }
 
     function renderMarketplaceTab() {
@@ -1873,10 +2346,8 @@
       const availableEl = document.getElementById('marketplace-available');
       const noteEl = document.getElementById('marketplace-note');
       const uploadLabel = document.getElementById('marketplace-upload-label');
-      const filterBar = document.getElementById('marketplace-filter-bar');
       const uploadEnabled = !!section.upload_enabled;
 
-      filterBar.style.display = 'flex';
       installedTitle.textContent = section.installed_label || 'Instalados';
       availableTitle.textContent = section.available_label || 'Disponibles';
       noteEl.textContent = section.read_only
@@ -1895,13 +2366,13 @@
         filterAndSortItems(section.installed || []),
         renderer,
         currentMarketplaceTab === 'kits' ? 'Todavía no hay kits instalados.' : currentMarketplaceTab === 'modules' ? 'Todavía no hay módulos instalados.' : 'Nada de esta pestaña está activo.',
-        false);
+        currentMarketplaceView === 'grid');
 
       renderMarketplaceList(availableEl,
         filterAndSortItems(section.available || []),
         renderer,
         currentMarketplaceTab === 'kits' ? 'No hay más kits disponibles.' : currentMarketplaceTab === 'modules' ? 'No hay más módulos disponibles.' : 'No se encontraron entradas.',
-        true);
+        currentMarketplaceView === 'grid');
     }
 
     async function loadMarketplace() {
@@ -1916,6 +2387,21 @@
 
     document.getElementById('marketplace-search')?.addEventListener('input', (event) => {
       currentMarketplaceQuery = event.target.value.trim();
+      renderMarketplaceTab();
+    });
+    document.getElementById('marketplace-kind')?.addEventListener('change', (event) => {
+      switchMarketplaceTab(event.target.value || 'modules');
+    });
+    document.getElementById('marketplace-state')?.addEventListener('change', (event) => {
+      setMarketplaceFilter(event.target.value || 'all');
+    });
+    document.getElementById('marketplace-category')?.addEventListener('change', (event) => {
+      currentMarketplaceTag = event.target.value || '';
+      renderMarketplaceTags();
+      renderMarketplaceTab();
+    });
+    document.getElementById('marketplace-sort')?.addEventListener('change', (event) => {
+      currentMarketplaceSort = event.target.value || 'name_asc';
       renderMarketplaceTab();
     });
 
@@ -1967,3 +2453,5 @@
   </script>
 </body>
 </html>
+
+

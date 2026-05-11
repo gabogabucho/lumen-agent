@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="{{ language | default('en') }}" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#F5F8FC">
+  <title>Lumen — Workspace Governance</title>
+  <script>
+    (function() {
+      var theme = localStorage.getItem('lumen-theme');
+      if (theme) document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+  {% include "_partials/tokens.html" %}
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--lumen-font); background: var(--lumen-paper); color: var(--lumen-ink); display: flex; min-height: 100vh; }
+    main { flex: 1; padding: 24px; overflow-y: auto; }
+    .wrap { max-width: 1080px; margin: 0 auto; }
+    .card { background: var(--lumen-surface); border: 1px solid var(--lumen-line); border-radius: var(--lumen-r-md); padding: 16px; margin-bottom: 12px; }
+    .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px; }
+    .muted { color: var(--lumen-mute); font-size: 13px; }
+    .team-title { font-weight: 700; font-size: 16px; }
+    .skills { font-size: 13px; color: var(--lumen-ink-soft); margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; border-top: 1px solid var(--lumen-line); padding: 8px 6px; font-size: 13px; }
+    th { color: var(--lumen-mute); font-weight: 600; }
+    @media (max-width: 900px) { main { padding: 16px; } }
+  </style>
+</head>
+<body>
+  {% set active_settings = 'workspace' %}
+  {% include "_partials/settings_sidebar.html" %}
+  <main>
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <h1 style="margin:0;">Workspace Governance</h1>
+          <p class="muted" id="workspaceMeta">Loading...</p>
+        </div>
+      </div>
+      <div id="teams"></div>
+    </div>
+  </main>
+  <script>
+    function esc(value) {
+      return String(value || '').replace(/[&<>"']/g, function(ch) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+      });
+    }
+    async function loadGovernance() {
+      const res = await fetch('/api/workspace/governance');
+      if (!res.ok) {
+        document.getElementById('workspaceMeta').textContent = 'Access denied or workspace not ready.';
+        return;
+      }
+      const data = await res.json();
+      const gov = data.governance || {};
+      const teams = gov.teams || [];
+      document.getElementById('workspaceMeta').textContent =
+        `${gov.display_name || gov.workspace || 'Workspace'} · ${teams.length} teams`;
+
+      const container = document.getElementById('teams');
+      container.innerHTML = '';
+      teams.forEach(team => {
+        const card = document.createElement('section');
+        card.className = 'card';
+        const users = team.users || [];
+        card.innerHTML = `
+          <div class="team-title">${esc(team.display_name || team.team)} <span class="muted">(${esc(team.team)})</span></div>
+          <div class="skills">Skills: ${esc((team.enabled_skills || []).join(', ') || '-')}</div>
+          <table aria-label="Users for ${esc(team.team)}">
+            <thead><tr><th>Email</th><th>Display</th><th>Role</th></tr></thead>
+            <tbody>
+              ${users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.display_name)}</td><td>${esc(u.role || 'member')}</td></tr>`).join('')}
+              ${users.length === 0 ? '<tr><td colspan="3" class="muted">No users</td></tr>' : ''}
+            </tbody>
+          </table>
+        `;
+        container.appendChild(card);
+      });
+    }
+    loadGovernance();
+  </script>
+</body>
+</html>

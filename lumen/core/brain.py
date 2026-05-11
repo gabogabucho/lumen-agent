@@ -172,6 +172,48 @@ class Brain:
         )
         return response.decision
 
+    def _tool_key_to_skill(self, tool_name: str, action: str) -> str:
+        if tool_name.startswith("neo__"):
+            return "neo"
+        if "__" in tool_name:
+            return tool_name.split("__", 1)[0]
+        if action:
+            return tool_name
+        return tool_name
+
+    def _is_tool_allowed_for_session(self, *, tool_name: str, action: str, session: Session | None) -> tuple[bool, str]:
+        if session is None:
+            return True, ""
+        role = str(getattr(session, "role", "") or "").strip().lower()
+        if role == "admin":
+            return True, ""
+        allowed = getattr(session, "enabled_skills", None) or []
+        if not allowed:
+            return True, ""
+        if "*" in allowed:
+            return True, ""
+
+        skill_key = self._tool_key_to_skill(tool_name, action)
+        normalized_allowed = {str(item).strip() for item in allowed if str(item).strip()}
+        if skill_key in normalized_allowed:
+            return True, ""
+        return False, f"skill_not_enabled_for_team:{skill_key}"
+
+    @staticmethod
+    def _scoped_session_id(session: Session) -> str:
+        role = str(getattr(session, "role", "") or "").strip().lower()
+        workspace = str(getattr(session, "workspace", "") or "").strip() or "default"
+        team = str(getattr(session, "team", "") or "").strip() or "no-team"
+        email = str(getattr(session, "user_email", "") or "").strip().lower() or "anon"
+        raw = session.session_id
+        if role == "admin":
+            return f"global:{workspace}:{raw}"
+        if role == "team_admin":
+            return f"team:{workspace}:{team}:{raw}"
+        if role:
+            return f"user:{workspace}:{team}:{email}:{raw}"
+        return raw
+
     def _resolved_model(self, role: str = "main") -> str:
         """Route model through OpenRouter when OpenRouter creds are active.
 
@@ -845,6 +887,12 @@ class Brain:
                 provider_name = self._infer_current_provider_name(options["model"])
                 self.provider_health.record_success(provider_name, latency=elapsed)
         except Exception as e:
+            logger.exception(
+                "litellm_acompletion_failed phase=main model=%s provider=%s session=%s",
+                options.get("model") if "options" in locals() else None,
+                self._infer_current_provider_name(options.get("model")) if "options" in locals() else None,
+                getattr(session, "id", None),
+            )
             # Record failure if provider health is tracking
             if self.provider_health:
                 provider_name = self._infer_current_provider_name(
@@ -855,7 +903,7 @@ class Brain:
 
         # 6. Tool use loop — if LLM called tools, execute and send results back
         result = await self._tool_use_loop(
-            response, messages, tools, max_iterations=self._max_tool_iterations()
+            response, messages, tools, session=session, max_iterations=self._max_tool_iterations()
         )
 
         return await self._finalize_turn(session, message, result)
@@ -1039,6 +1087,7 @@ class Brain:
             result = None
             async for event in self._tool_use_loop_streaming(
                 synthetic_response, messages, tools,
+                session=session,
                 max_iterations=self._max_tool_iterations(),
             ):
                 if event.get("type") == "delta":
@@ -1055,6 +1104,7 @@ class Brain:
             if result is None:
                 result = await self._tool_use_loop(
                     synthetic_response, messages, tools,
+                    session=session,
                     max_iterations=self._max_tool_iterations(),
                 )
                 if result.get("message"):
@@ -1576,13 +1626,14 @@ class Brain:
         session.add_message("user", user_history)
         session.add_message("assistant", result["message"])
 
+        scoped_session_id = self._scoped_session_id(session)
         try:
             await self.memory.save_conversation_turn(
-                session.session_id, "user", user_history
+                scoped_session_id, "user", user_history
             )
             if result["message"]:
                 await self.memory.save_conversation_turn(
-                    session.session_id, "assistant", result["message"]
+                    scoped_session_id, "assistant", result["message"]
                 )
         except Exception:
             pass
@@ -1590,11 +1641,11 @@ class Brain:
         # Phase 2.4: Session distillation — extract durable facts after enough turns
         if (
             len(session.history) >= 4
-            and session.session_id not in self._distilled_sessions
+            and scoped_session_id not in self._distilled_sessions
         ):
-            self._distilled_sessions.add(session.session_id)
+            self._distilled_sessions.add(scoped_session_id)
             asyncio.create_task(
-                self._distiller.distill_session(session.session_id)
+                self._distiller.distill_session(scoped_session_id)
             )
 
         return result
@@ -2694,6 +2745,7 @@ class Brain:
         response,
         messages: list[dict],
         tools: list[dict] | None,
+        session: Session | None = None,
         max_iterations: int = 3,
     ) -> dict:
         """Execute the tool use loop.
@@ -2775,6 +2827,31 @@ class Brain:
                 if not connector_name and "__" in tool_name:
                     parts = tool_name.split("__", 1)
                     connector_name, action = parts[0], parts[1]
+
+                allowed, deny_reason = self._is_tool_allowed_for_session(
+                    tool_name=tool_name,
+                    action=action,
+                    session=session,
+                )
+                if not allowed:
+                    reason = f"Denied by workspace ACL ({deny_reason})"
+                    all_tool_calls.append({"name": tool_name, "error": reason})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": reason}),
+                        }
+                    )
+                    logger.info(
+                        "tool_acl_denied tool=%s role=%s team=%s user=%s reason=%s",
+                        tool_name,
+                        getattr(session, "role", None),
+                        getattr(session, "team", None),
+                        getattr(session, "user_email", None),
+                        deny_reason,
+                    )
+                    continue
 
                 confirm_decision = await self._check_tool_confirmation(
                     tool_name, action,
@@ -2887,6 +2964,11 @@ class Brain:
                     max_tokens=options["max_tokens"],
                 )
             except Exception as e:
+                logger.exception(
+                    "litellm_acompletion_failed phase=tool_loop model=%s provider=%s",
+                    options.get("model") if "options" in locals() else None,
+                    self._infer_current_provider_name(options.get("model")) if "options" in locals() else None,
+                )
                 return {
                     "message": f"I completed the action but had trouble responding: {e}",
                     "tool_calls": all_tool_calls,
@@ -2914,6 +2996,7 @@ class Brain:
         response,
         messages: list[dict],
         tools: list[dict] | None,
+        session: Session | None = None,
         max_iterations: int = 3,
     ):
         """Streaming version of _tool_use_loop that yields progress events.
@@ -2992,6 +3075,37 @@ class Brain:
                 if not conn_name and "__" in tool_name:
                     parts = tool_name.split("__", 1)
                     conn_name, act = parts[0], parts[1]
+
+                allowed, deny_reason = self._is_tool_allowed_for_session(
+                    tool_name=tool_name,
+                    action=act,
+                    session=session,
+                )
+                if not allowed:
+                    reason = f"Denied by workspace ACL ({deny_reason})"
+                    tool_error = reason
+                    all_tool_calls.append({"name": tool_name, "error": reason})
+                    yield {
+                        "type": "tool_result",
+                        "tool": tool_name,
+                        "error": reason,
+                    }
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": reason}),
+                        }
+                    )
+                    logger.info(
+                        "tool_acl_denied tool=%s role=%s team=%s user=%s reason=%s",
+                        tool_name,
+                        getattr(session, "role", None),
+                        getattr(session, "team", None),
+                        getattr(session, "user_email", None),
+                        deny_reason,
+                    )
+                    continue
 
                 confirm_decision = await self._check_tool_confirmation(
                     tool_name, act,
