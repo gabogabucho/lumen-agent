@@ -256,6 +256,67 @@ class TestWorkspaceGovernanceVisibility(unittest.TestCase):
                 web_mod._config = orig_config
                 wa._get_workspace_secret = orig_secret
 
+    def test_member_cannot_access_governance_or_reload(self):
+        from pathlib import Path
+        import lumen.channels.web as web_mod
+        import lumen.core.workspace_auth as wa
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            save_workspace_secret(tmp_path, "secret-12345678")
+            (tmp_path / "workspace.yaml").write_text(
+                yaml.dump({
+                    "name": "acme",
+                    "display_name": "Acme",
+                    "branding": {"logo": "/l.png", "primary_color": "#000", "app_name": "Acme"},
+                    "admins": [{"email": "admin@acme.com", "display_name": "Admin", "pin_hash": "$2b$12$hash"}],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+            team_dir = tmp_path / "teams" / "marketing"
+            team_dir.mkdir(parents=True)
+            (team_dir / "team.yaml").write_text(
+                yaml.dump({
+                    "name": "marketing",
+                    "display_name": "Marketing",
+                    "enabled_skills": ["chat"],
+                    "users": [{"email": "member@acme.com", "role": "member", "display_name": "Member", "pin_hash": "$2b$12$hash"}],
+                }, default_flow_style=False),
+                encoding="utf-8",
+            )
+
+            ws = load_workspace(tmp_path)
+            teams = load_teams(tmp_path)
+            idx = build_workspace_index(ws, teams)
+
+            orig_index = getattr(web_mod, "_workspace_index", None)
+            orig_lumen_dir = web_mod.LUMEN_DIR
+            orig_access = web_mod._access_mode
+            orig_config = web_mod._config
+            orig_secret = wa._get_workspace_secret
+            try:
+                web_mod._workspace_index = idx
+                web_mod.LUMEN_DIR = tmp_path
+                web_mod._access_mode = "serve"
+                web_mod._config = {"model": "test-model"}
+                wa._get_workspace_secret = lambda: "secret-12345678"
+
+                token = create_jwt("member@acme.com", "member", "marketing", "secret-12345678")
+                client = TestClient(app)
+                client.cookies.set("lumen_ws_token", token)
+
+                governance_resp = client.get("/api/workspace/governance")
+                self.assertEqual(governance_resp.status_code, 403)
+
+                reload_resp = client.post("/api/workspace/reload")
+                self.assertEqual(reload_resp.status_code, 403)
+            finally:
+                web_mod._workspace_index = orig_index
+                web_mod.LUMEN_DIR = orig_lumen_dir
+                web_mod._access_mode = orig_access
+                web_mod._config = orig_config
+                wa._get_workspace_secret = orig_secret
+
     def test_admin_sees_all_teams(self):
         from pathlib import Path
         import lumen.channels.web as web_mod

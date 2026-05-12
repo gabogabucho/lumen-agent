@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-05-11
+
+### Added
+- **Workspace mode shipped**: public roadmap now reflects workspace mode as available, including multi-user auth, team governance, and scoped workspace reload.
+- **Workspace reload endpoint**: `POST /api/workspace/reload` refreshes the live workspace index from disk so team/user YAML changes apply without a full restart.
+
+### Changed
+- **Workspace login/logout coherence**: `POST /api/workspace/login` now supports browser-first flows better by also issuing the signed session cookie when `server_secret` is configured, and `POST /api/workspace/logout` now clears both workspace cookies.
+- **Governance visibility by role**: `team_admin` users now see only their own team in workspace governance responses; `admin` keeps full visibility.
+
+### Fixed
+- **Workspace runtime compatibility**: restored the workspace index/load/reload path so runtime and tests agree on `WorkspaceIndex`, team loading, and live reload behavior.
+- **Workspace JWT auth parity**: workspace JWTs now work consistently via cookie and `Authorization: Bearer <jwt>` header.
+- **Role enforcement gaps**: explicit coverage now protects governance/reload/settings access so regular `member` users cannot reach admin/team-admin workspace surfaces.
+- **Workspace test noise**: removed deprecated per-request cookie usage from key tests, eliminating warning-only failures and making release validation cleaner.
+
 ## [1.2.0] - 2026-04-28
 
 ### Fixed

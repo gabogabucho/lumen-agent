@@ -605,36 +605,6 @@ def _request_has_owner_access(request: Request, config: dict | None = None) -> b
     return bool(payload and payload.get("scope") in {"owner", "workspace"})
 
 
-def _has_workspace_auth(request) -> bool:
-    """Check if the request carries a valid workspace JWT (cookie or header)."""
-    if _workspace_index is None:
-        return False
-    from lumen.core.workspace_auth import create_jwt, load_workspace_secret
-
-    # Try cookie first
-    token = request.cookies.get("lumen_ws_token")
-    if token:
-        secret = load_workspace_secret(LUMEN_DIR)
-        if secret:
-            from lumen.core.workspace_auth import verify_jwt
-            payload = verify_jwt(token, secret)
-            if payload:
-                return True
-
-    # Try header
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        secret = load_workspace_secret(LUMEN_DIR)
-        if secret:
-            from lumen.core.workspace_auth import verify_jwt
-            payload = verify_jwt(token, secret)
-            if payload:
-                return True
-
-    return False
-
-
 def _websocket_has_owner_access(
     websocket: WebSocket, config: dict | None = None
 ) -> bool:
@@ -1797,6 +1767,8 @@ async def api_workspace_login(request: Request):
     if _workspace_index is None:
         return JSONResponse(status_code=404, content={"ok": False, "error": "workspace_not_enabled"})
 
+    loaded = _load_config()
+
     body = await request.json()
     email = str(body.get("email") or "").strip().lower()
     pin = str(body.get("pin") or "").strip()
@@ -1829,6 +1801,24 @@ async def api_workspace_login(request: Request):
         samesite="lax",
         max_age=COOKIE_MAX_AGE_SECONDS,
     )
+    server_secret = _server_secret(loaded)
+    if server_secret:
+        response.set_cookie(
+            AUTH_COOKIE_NAME,
+            _issue_cookie(
+                "workspace",
+                server_secret,
+                claims={
+                    "email": email,
+                    "workspace": _workspace_snapshot().name,
+                    "team": user.get("team"),
+                    "role": user.get("role"),
+                },
+            ),
+            httponly=True,
+            samesite="lax",
+            max_age=COOKIE_MAX_AGE_SECONDS,
+        )
     return response
 
 
@@ -1836,6 +1826,7 @@ async def api_workspace_login(request: Request):
 async def api_workspace_logout():
     response = JSONResponse(content={"ok": True})
     response.delete_cookie("lumen_ws_token")
+    response.delete_cookie(AUTH_COOKIE_NAME)
     return response
 
 

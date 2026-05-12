@@ -552,6 +552,40 @@ class TestWorkspaceLoginEndpoint(unittest.TestCase):
         web_mod._workspace_index = orig_index
         wa._get_workspace_secret = orig_secret_loader
 
+    def test_valid_login_sets_owner_cookie_when_server_secret_exists(self):
+        from lumen.core.workspace_auth import hash_pin
+        from lumen.core.workspace import WorkspaceIndex
+        from lumen.channels.web import app
+        from starlette.testclient import TestClient
+
+        idx = WorkspaceIndex()
+        pin_hash = hash_pin("1234")
+        idx.add_user("alice@example.com", "team_admin", "marketing", "Alice", [], pin_hash)
+
+        import lumen.channels.web as web_mod
+        import lumen.core.workspace_auth as wa
+
+        orig_index = getattr(web_mod, "_workspace_index", None)
+        orig_secret_loader = wa._get_workspace_secret
+        orig_config = web_mod._config
+
+        web_mod._workspace_index = idx
+        web_mod._config = {"server_secret": "server-secret", "model": "test-model"}
+        wa._get_workspace_secret = lambda: "test-secret"
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/workspace/login",
+            json={"email": "alice@example.com", "pin": "1234"},
+        )
+        assert resp.status_code == 200
+        assert "lumen_ws_token" in resp.cookies
+        assert "lumen_owner" in resp.cookies
+
+        web_mod._workspace_index = orig_index
+        web_mod._config = orig_config
+        wa._get_workspace_secret = orig_secret_loader
+
     def test_wrong_pin_returns_401(self):
         from lumen.core.workspace_auth import hash_pin
         from lumen.core.workspace import WorkspaceIndex
@@ -658,6 +692,20 @@ class TestWorkspaceLogoutEndpoint(unittest.TestCase):
         resp = client.post("/api/workspace/logout")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+
+    def test_logout_clears_both_workspace_cookies(self):
+        from lumen.channels.web import app
+        from starlette.testclient import TestClient
+
+        client = TestClient(app)
+        client.cookies.set("lumen_ws_token", "token")
+        client.cookies.set("lumen_owner", "owner-cookie")
+
+        resp = client.post("/api/workspace/logout")
+        assert resp.status_code == 200
+        set_cookie = "\n".join(resp.headers.get_list("set-cookie"))
+        assert "lumen_ws_token=" in set_cookie
+        assert "lumen_owner=" in set_cookie
 
 
 # ── Task 2.6: Wire middleware into existing endpoints ───────────────────
@@ -801,3 +849,77 @@ class TestWorkspaceAuthOnExistingEndpoints(unittest.TestCase):
         web_mod._workspace_index = orig_index
         web_mod._access_mode = orig_access_mode
         web_mod._config = orig_config
+
+    def test_workspace_login_allows_workspace_settings_page(self):
+        from lumen.core.workspace_auth import hash_pin
+        from lumen.core.workspace import WorkspaceIndex
+        from lumen.channels.web import app
+        from starlette.testclient import TestClient
+
+        idx = WorkspaceIndex()
+        idx.add_user("lead@example.com", "team_admin", "marketing", "Lead", [], hash_pin("1234"))
+
+        import lumen.channels.web as web_mod
+        import lumen.core.workspace_auth as wa
+
+        orig_index = getattr(web_mod, "_workspace_index", None)
+        orig_access_mode = web_mod._access_mode
+        orig_config = web_mod._config
+        orig_secret = wa._get_workspace_secret
+
+        web_mod._workspace_index = idx
+        web_mod._access_mode = "serve"
+        web_mod._config = {"model": "test-model", "server_secret": "server-secret"}
+        wa._get_workspace_secret = lambda: "test-secret"
+
+        client = TestClient(app)
+        login_resp = client.post(
+            "/api/workspace/login",
+            json={"email": "lead@example.com", "pin": "1234"},
+        )
+        assert login_resp.status_code == 200
+
+        page_resp = client.get("/settings/workspace", follow_redirects=False)
+        assert page_resp.status_code == 200
+
+        web_mod._workspace_index = orig_index
+        web_mod._access_mode = orig_access_mode
+        web_mod._config = orig_config
+        wa._get_workspace_secret = orig_secret
+
+    def test_workspace_login_member_cannot_open_workspace_settings_page(self):
+        from lumen.core.workspace_auth import hash_pin
+        from lumen.core.workspace import WorkspaceIndex
+        from lumen.channels.web import app
+        from starlette.testclient import TestClient
+
+        idx = WorkspaceIndex()
+        idx.add_user("member@example.com", "member", "marketing", "Member", [], hash_pin("1234"))
+
+        import lumen.channels.web as web_mod
+        import lumen.core.workspace_auth as wa
+
+        orig_index = getattr(web_mod, "_workspace_index", None)
+        orig_access_mode = web_mod._access_mode
+        orig_config = web_mod._config
+        orig_secret = wa._get_workspace_secret
+
+        web_mod._workspace_index = idx
+        web_mod._access_mode = "serve"
+        web_mod._config = {"model": "test-model", "server_secret": "server-secret"}
+        wa._get_workspace_secret = lambda: "test-secret"
+
+        client = TestClient(app)
+        login_resp = client.post(
+            "/api/workspace/login",
+            json={"email": "member@example.com", "pin": "1234"},
+        )
+        assert login_resp.status_code == 200
+
+        page_resp = client.get("/settings/workspace", follow_redirects=False)
+        assert page_resp.status_code == 403
+
+        web_mod._workspace_index = orig_index
+        web_mod._access_mode = orig_access_mode
+        web_mod._config = orig_config
+        wa._get_workspace_secret = orig_secret
