@@ -11,7 +11,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
   <title>{{ ui.title | default('Lumen — Dashboard') }}</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   {% from "_partials/animated_eye.html" import animated_eye, eye_styles %}
   {{ eye_styles() }}
@@ -63,16 +63,33 @@
       border-radius: var(--lumen-r-sm);
       flex-shrink: 0;
     }
+    .brand-eye {
+      width: 51px;
+      height: 30px;
+      max-height: 30px;
+      flex-shrink: 0;
+    }
+    .brand-eye svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .brand-eye .e-shell { opacity: 1; }
+    .brand-eye .e-logo-glow { opacity: 0.22; }
+    .brand-eye .e-logo-core { opacity: 1; transform: none; }
+    .brand-eye .e-logo-facet { opacity: 0.85; transform: none; }
+    .brand-eye .e-logo-coral { opacity: 0.65; }
+    .brand-eye .e-logo-cut { opacity: 0.88; }
+    .brand-text {
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+    }
     .brand-text h1 {
-      font-size: 16px;
+      font-size: 20px;
       font-weight: 600;
       letter-spacing: -0.01em;
       color: var(--lumen-ink);
-    }
-    .brand-text p {
-      font-size: 11px;
-      color: var(--lumen-mute);
-      margin-top: 2px;
     }
     .icon-btn {
       background: transparent;
@@ -578,7 +595,7 @@
       background: rgba(15,21,69,0.06);
       padding: 1px 5px;
       border-radius: 4px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--lumen-font-mono);
       font-size: 0.92em;
     }
     .msg.assistant .bubble pre {
@@ -1160,10 +1177,38 @@
   <aside id="sidebar" class="sidebar">
     <div class="sidebar-head">
       <div class="brand">
-        <img src="/static/logo.png" alt="Lumen" />
+        <span class="lumen-eye brand-eye" aria-hidden="true">
+          <svg viewBox="0 0 220 130" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="lumenEyeCoreBrand" x1="70" y1="20" x2="150" y2="110" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#7d7dff"></stop>
+                <stop offset="45%" stop-color="#3d3dd6"></stop>
+                <stop offset="80%" stop-color="#24249a"></stop>
+                <stop offset="100%" stop-color="#171c66"></stop>
+              </linearGradient>
+            </defs>
+            <path class="e-shell" d="M20,65 Q50,22 110,16 Q170,22 200,65 Q170,108 110,114 Q50,108 20,65 Z"></path>
+            <ellipse class="e-logo-glow" cx="110" cy="65" rx="56" ry="42"></ellipse>
+            <polygon class="e-logo-core" style="fill:url(#lumenEyeCoreBrand)" points="110,25 147,43 156,71 134,100 97,103 69,82 63,49 84,31"></polygon>
+            <polygon class="e-logo-facet e-logo-facet-1" points="110,25 147,43 123,55 96,45"></polygon>
+            <polygon class="e-logo-facet e-logo-facet-2" points="147,43 156,71 132,82 123,55"></polygon>
+            <polygon class="e-logo-facet e-logo-facet-3" points="69,82 97,103 132,82 102,69"></polygon>
+            <polygon class="e-logo-coral" points="129,57 141,62 132,72 121,67"></polygon>
+            <polygon class="e-logo-cut" points="121,34 136,42 118,54 103,45"></polygon>
+            <path class="e-outline" d="M10,65 Q45,15 110,10 Q175,15 210,65 Q175,115 110,120 Q45,115 10,65 Z"></path>
+            <path class="e-facet" d="M35,65 Q65,30 110,24 Q155,30 185,65"></path>
+            <path class="e-facet" d="M35,65 Q65,100 110,106 Q155,100 185,65"></path>
+            <circle class="e-iris-glow" cx="110" cy="65" r="30"></circle>
+            <circle class="e-iris-outer" cx="110" cy="65" r="30"></circle>
+            <circle class="e-iris-inner" cx="110" cy="65" r="22"></circle>
+            <circle class="e-pupil" cx="110" cy="65" r="10"></circle>
+            <circle class="e-refl" cx="100" cy="56" r="4"></circle>
+            <circle class="e-refl" cx="118" cy="52" r="2"></circle>
+          </svg>
+        </span>
         <div class="brand-text sidebar-text">
           <h1>Lumen</h1>
-          <p>v{{ version }}</p>
+          <p>&nbsp;</p>
         </div>
       </div>
       <button class="icon-btn" onclick="toggleSidebar()" title="{{ ui.toggle_sidebar | default('Toggle sidebar') }}">
@@ -1175,47 +1220,47 @@
 
     <nav class="sidebar-nav">
       <div class="nav-group">
-        <div class="nav-group-title sidebar-text">Workspace</div>
+        <div class="nav-group-title sidebar-text">{{ ui.workspace_group | default('Workspace') }}</div>
         <button class="nav-btn active" id="nav-chat" onclick="showPanel('chat')">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
           </svg>
-          <span class="sidebar-text">{{ ui.chat | default('Charlas') }}</span>
+          <span class="sidebar-text">{{ ui.chat | default('Chats') }}</span>
         </button>
 
-        <a href="/memory" class="nav-btn" title="Memoria">
+        <a href="/memory" class="nav-btn" title="{{ ui.memory | default('Memory') }}">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
           </svg>
-          <span class="sidebar-text">{{ ui.memory | default('Memoria') }}</span>
+          <span class="sidebar-text">{{ ui.memory | default('Memory') }}</span>
         </a>
 
         <button class="nav-btn" id="nav-marketplace" onclick="showPanel('marketplace')">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
           </svg>
-          <span class="sidebar-text">{{ ui.marketplace | default('Módulos') }}</span>
+          <span class="sidebar-text">{{ ui.marketplace | default('Modules') }}</span>
         </button>
       </div>
 
       <div class="nav-group">
-        <div class="nav-group-title sidebar-text">Monitoring</div>
-        <a href="/agent-status" class="nav-btn" title="Estado">
+        <div class="nav-group-title sidebar-text">{{ ui.monitoring_group | default('Monitoring') }}</div>
+        <a href="/agent-status" class="nav-btn" title="{{ ui.agent_status | default('Status') }}">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
           </svg>
-          <span class="sidebar-text">{{ ui.agent_status | default('Estado') }}</span>
+          <span class="sidebar-text">{{ ui.agent_status | default('Status') }}</span>
         </a>
       </div>
 
       <div class="nav-group">
-        <div class="nav-group-title sidebar-text">System</div>
-        <a href="/settings" class="nav-btn" title="Ajustes">
+        <div class="nav-group-title sidebar-text">{{ ui.system_group | default('System') }}</div>
+        <a href="/settings" class="nav-btn" title="{{ ui.config | default('Settings') }}">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
           </svg>
-          <span class="sidebar-text">{{ ui.config | default('Ajustes') }}</span>
+          <span class="sidebar-text">{{ ui.config | default('Settings') }}</span>
         </a>
       </div>
     </nav>
@@ -1228,11 +1273,12 @@
         <svg id="theme-icon-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:none;">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
         </svg>
-        <span class="sidebar-text" id="theme-label">{{ ui.theme_dark | default('Modo oscuro') }}</span>
+        <span class="sidebar-text" id="theme-label">{{ ui.theme_dark | default('Dark theme') }}</span>
       </button>
       <div class="status-pill">
         <span class="dot"></span>
-        <span class="sidebar-text">{{ ui.active | default('Lumen está activa') }}</span>
+        <span class="sidebar-text">{{ ui.active | default('Lumen is active') }}</span>
+        <span class="sidebar-text" style="margin-left:auto;">v{{ version }}</span>
       </div>
     </div>
   </aside>
@@ -1241,8 +1287,8 @@
   <main class="main">
     <div class="topbar" id="topbar">
       <div>
-        <h2 id="topbar-title">{{ ui.chat | default('Charlas') }}</h2>
-        <p class="sub" id="topbar-sub">{{ ui.chat_sub | default('Conversa con Lumen') }}</p>
+        <h2 id="topbar-title">{{ ui.chat | default('Chats') }}</h2>
+        <p class="sub" id="topbar-sub">{{ ui.chat_sub | default('Talk with Lumen') }}</p>
       </div>
     </div>
 
@@ -1250,7 +1296,7 @@
     <div id="panel-chat" class="panel no-pad chat-panel">
       <div class="chat-layout">
         <div class="chat-center">
-          <div class="pulse-strip" id="pulse-strip" aria-hidden="true" title="{{ ui.pulse_hint | default('Lumen está escuchando') }}">
+          <div class="pulse-strip" id="pulse-strip" aria-hidden="true" title="{{ ui.pulse_hint | default('Lumen is listening') }}">
             <span class="pulse-dot"></span>
             <span class="pulse-dot"></span>
             <span class="pulse-dot"></span>
@@ -1263,8 +1309,8 @@
           <div id="chat-messages" class="chat-messages">
             <div id="chat-empty" class="chat-empty">
               {{ animated_eye(size="boot") }}
-              <div class="hello">{{ ui.greeting | default('Hola, soy Lumen.') }}</div>
-              <div class="sub">{{ ui.welcome | default('Soy un asistente modular: puedo adaptarme a lo que necesitás sumando capacidades, personalidades y herramientas a medida.') }}</div>
+              <div class="hello">{{ ui.greeting | default('Hi, I am Lumen.') }}</div>
+              <div class="sub">{{ ui.welcome | default("I'm a modular assistant: I can adapt to what you need by adding capabilities, personalities, and tools as we go.") }}</div>
             </div>
           </div>
 
@@ -1280,7 +1326,7 @@
                 id="chat-input"
                 class="l-input"
                 type="text"
-                placeholder="{{ ui.chat_placeholder | default('Escribe un mensaje...') }}"
+                placeholder="{{ ui.chat_placeholder | default('Write a message...') }}"
                 autocomplete="off"
               />
               <button type="button" class="l-btn ghost" id="new-session-btn" title="Nueva conversación">
@@ -1292,23 +1338,23 @@
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
                 </svg>
-                {{ ui.send | default('Enviar') }}
+                {{ ui.send | default('Send') }}
               </button>
             </form>
           </div>
         </div>
 
-        <aside class="sense-panel" id="sense-panel" aria-label="{{ ui.sense_title | default('Lo que sé que tengo') }}">
+        <aside class="sense-panel" id="sense-panel" aria-label="{{ ui.sense_title | default('What I Know I Have') }}">
           <div>
-            <h4>{{ ui.sense_native | default('Lo que sé que tengo') }}</h4>
+            <h4>{{ ui.sense_native | default('What I Know I Have') }}</h4>
             <div class="sense-group" id="sense-native"></div>
           </div>
           <div>
-            <h4>{{ ui.sense_adapted | default('Lo que me llegó adaptado') }}</h4>
+            <h4>{{ ui.sense_adapted | default('What Arrived Adapted') }}</h4>
             <div class="sense-group" id="sense-adapted"></div>
           </div>
           <div>
-            <h4>{{ ui.sense_opaque | default('Lo que conozco pero no alcanzo') }}</h4>
+            <h4>{{ ui.sense_opaque | default('What I Know But Cannot Reach') }}</h4>
             <div class="sense-group" id="sense-opaque"></div>
           </div>
         </aside>
@@ -1319,15 +1365,15 @@
     <div id="panel-status" class="panel hidden">
       <div class="l-card-grid cols-2">
         <div class="l-card">
-          <h3>{{ ui.personality | default('Personalidad') }}</h3>
+          <h3>{{ ui.personality | default('Personality') }}</h3>
           <p>{{ current_personality }}</p>
         </div>
         <div class="l-card">
-          <h3>{{ ui.memory_summary | default('Memoria') }}</h3>
-          <p>{{ ui.status_sub | default('Lo que Lumen sabe sobre ti y lo que tiene disponible ahora.') }}</p>
+          <h3>{{ ui.memory_summary | default('Memory') }}</h3>
+          <p>{{ ui.status_sub | default('What Lumen knows about you and what is available right now.') }}</p>
         </div>
         <div class="l-card">
-          <h3>{{ ui.model | default('Modelo') }}</h3>
+          <h3>{{ ui.model | default('Model') }}</h3>
           <p>{{ model }}</p>
         </div>
       </div>
@@ -1338,7 +1384,7 @@
       <div class="market-head">
         <div>
           <p style="font-size:13px;color:var(--lumen-ink-soft);max-width:560px;line-height:1.55;">
-            {{ ui.marketplace_sub | default('Explora e instala nuevas capacidades y personalidades para Lumen.') }}
+            {{ ui.marketplace_sub | default('Explore and install new capabilities and personalities for Lumen.') }}
           </p>
         </div>
         <label id="marketplace-upload-label" class="upload-label hidden">
@@ -1351,61 +1397,61 @@
       </div>
 
       <div class="market-toolbar">
-        <label for="marketplace-search" class="sr-only">Buscar módulos</label>
-        <input id="marketplace-search" class="l-input market-search" type="search" placeholder="{{ ui.marketplace_search | default('Buscar por nombre, descripción o tag...') }}" aria-label="Buscar módulos" />
-        <select id="marketplace-kind" class="l-input market-select" aria-label="Tipo de catálogo">
-          <option value="modules">{{ ui.tab_modules | default('Módulos') }}</option>
+        <label for="marketplace-search" class="sr-only">Search modules</label>
+        <input id="marketplace-search" class="l-input market-search" type="search" placeholder="{{ ui.marketplace_search | default('Search by name, description, or tag...') }}" aria-label="Search modules" />
+        <select id="marketplace-kind" class="l-input market-select" aria-label="Catalog type">
+          <option value="modules">{{ ui.tab_modules | default('Modules') }}</option>
           <option value="kits">{{ ui.tab_kits | default('Kits') }}</option>
           <option value="skills">Skills</option>
         </select>
-        <select id="marketplace-state" class="l-input market-select" aria-label="Estado de instalación">
-          <option value="all">{{ ui.filter_all | default('Todo') }}</option>
-          <option value="installed">{{ ui.filter_installed | default('Instalados') }}</option>
-          <option value="available">{{ ui.filter_available | default('Disponibles') }}</option>
+        <select id="marketplace-state" class="l-input market-select" aria-label="Install status">
+          <option value="all">{{ ui.filter_all | default('All') }}</option>
+          <option value="installed">{{ ui.filter_installed | default('Installed') }}</option>
+          <option value="available">{{ ui.filter_available | default('Available') }}</option>
         </select>
-        <select id="marketplace-category" class="l-input market-select market-category" aria-label="Categoría">
-          <option value="">Todas las categorías</option>
+        <select id="marketplace-category" class="l-input market-select market-category" aria-label="Category">
+          <option value="">All categories</option>
         </select>
         <button type="button" id="marketplace-filters-toggle" class="l-pill market-tool-btn active" onclick="toggleMarketplaceFilters()">
-          Filtros
+          Filters
         </button>
         <div class="market-view-switch">
-          <button type="button" id="view-grid" class="market-view-btn active" onclick="setMarketplaceView('grid')" aria-label="Vista grilla">
+          <button type="button" id="view-grid" class="market-view-btn active" onclick="setMarketplaceView('grid')" aria-label="Grid view">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
           </button>
-          <button type="button" id="view-list" class="market-view-btn" onclick="setMarketplaceView('list')" aria-label="Vista lista">
+          <button type="button" id="view-list" class="market-view-btn" onclick="setMarketplaceView('list')" aria-label="List view">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
           </button>
         </div>
-        <select id="marketplace-sort" class="l-input market-select market-sort" aria-label="Orden">
-          <option value="name_asc">Nombre A-Z</option>
-          <option value="name_desc">Nombre Z-A</option>
-          <option value="status">Compatibilidad</option>
+        <select id="marketplace-sort" class="l-input market-select market-sort" aria-label="Sort">
+          <option value="name_asc">Name A-Z</option>
+          <option value="name_desc">Name Z-A</option>
+          <option value="status">Compatibility</option>
         </select>
       </div>
 
       <div class="legend">
-        <strong>Compatibilidad</strong>
-        <span><i class="compat-dot ready"></i> lista</span>
-        <span><i class="compat-dot installable"></i> instalable</span>
-        <span><i class="compat-dot partial"></i> parcial</span>
-        <span><i class="compat-dot blocked"></i> bloqueada</span>
+        <strong>Compatibility</strong>
+        <span><i class="compat-dot ready"></i> ready</span>
+        <span><i class="compat-dot installable"></i> installable</span>
+        <span><i class="compat-dot partial"></i> partial</span>
+        <span><i class="compat-dot blocked"></i> blocked</span>
       </div>
 
       <div id="marketplace-note" style="font-size:12px;color:var(--lumen-mute);margin-bottom:var(--lumen-s-4);"></div>
 
-      <h3 id="marketplace-installed-title" class="section-title">{{ ui.installed | default('Instalados') }}</h3>
-      <div id="marketplace-installed" class="mod-list"><p class="empty-block">Cargando…</p></div>
+      <h3 id="marketplace-installed-title" class="section-title">{{ ui.installed | default('Installed') }}</h3>
+      <div id="marketplace-installed" class="mod-list"><p class="empty-block">{{ ui.loading_short | default('Loading...') }}</p></div>
 
-      <h3 id="marketplace-available-title" class="section-title">{{ ui.available | default('Disponibles') }}</h3>
-      <div id="marketplace-available" class="mod-grid"><p class="empty-block">Cargando…</p></div>
+      <h3 id="marketplace-available-title" class="section-title">{{ ui.available | default('Available') }}</h3>
+      <div id="marketplace-available" class="mod-grid"><p class="empty-block">{{ ui.loading_short | default('Loading...') }}</p></div>
     </div>
 
     <!-- Config Panel -->
     <div id="panel-config" class="panel hidden">
       <div class="settings-stack">
         <div class="l-card">
-          <h3>{{ ui.config | default('Ajustes') }}</h3>
+          <h3>{{ ui.config | default('Settings') }}</h3>
           <p style="margin-bottom:var(--lumen-s-4);">{{ ui.config_sub | default('Actualiza proveedor, modelo y credenciales sin volver a onboarding.') }}</p>
           <div class="settings-provider-card" style="margin-bottom:var(--lumen-s-4);">
             <div class="settings-provider-head">
@@ -1437,7 +1483,7 @@
                 <input id="settings-provider" name="provider" class="l-input" type="text" value="{{ provider }}" autocomplete="off" />
               </div>
               <div class="field">
-                <label for="settings-model">{{ ui.model | default('Modelo') }}</label>
+                <label for="settings-model">{{ ui.model | default('Model') }}</label>
                 <input id="settings-model" name="model" class="l-input" type="text" value="{{ model }}" autocomplete="off" required />
                 <div id="model-picker-wrapper" class="model-picker-wrapper hidden">
                   <div class="model-picker-head">
@@ -1489,7 +1535,7 @@
             <p id="current-provider">{{ provider }}</p>
           </div>
           <div class="l-card">
-            <h3>{{ ui.model | default('Modelo') }}</h3>
+            <h3>{{ ui.model | default('Model') }}</h3>
             <p id="current-model">{{ model }}</p>
           </div>
           <div class="l-card">
@@ -1505,7 +1551,7 @@
             <p>{{ language }}</p>
           </div>
           <div class="l-card">
-            <h3>{{ ui.personality | default('Personalidad') }}</h3>
+            <h3>{{ ui.personality | default('Personality') }}</h3>
             <p>{{ current_personality }}</p>
           </div>
         </div>
@@ -1565,10 +1611,10 @@
 
     // === Panel navigation ===
     const PANEL_TITLES = {
-      chat:        ['{{ ui.chat | default("Charlas") }}',         '{{ ui.chat_sub | default("Conversa con Lumen") }}'],
-      status:      ['{{ ui.status | default("Memoria") }}',       '{{ ui.status_sub | default("Lo que Lumen sabe sobre ti") }}'],
-      marketplace: ['{{ ui.marketplace | default("Módulos") }}',  '{{ ui.marketplace_sub_top | default("Capacidades disponibles para sumar") }}'],
-      config:      ['{{ ui.config | default("Ajustes") }}',       '{{ ui.config_sub | default("Modelo, idioma y personalidad") }}'],
+      chat:        ['{{ ui.chat | default("Chats") }}',         '{{ ui.chat_sub | default("Talk with Lumen") }}'],
+      status:      ['{{ ui.status | default("Memory") }}',       '{{ ui.status_sub | default("What Lumen knows about you") }}'],
+      marketplace: ['{{ ui.marketplace | default("Modules") }}',  '{{ ui.marketplace_sub_top | default("Available capabilities to add") }}'],
+      config:      ['{{ ui.config | default("Settings") }}',       '{{ ui.config_sub | default("Model, language, and personality") }}'],
     };
     const PANEL_STORAGE_KEY = 'lumen-dashboard-panel';
     function showPanel(name) {
@@ -1623,6 +1669,33 @@
     const openRouterStatusPill = document.getElementById('openrouter-status-pill');
     const openRouterConnectionState = document.getElementById('openrouter-connection-state');
     const openRouterModelDisplay = document.getElementById('openrouter-model-display');
+    const MARKET_I18N = {
+      adoption: {{ ui.adoption | default('Adoption') | tojson }},
+      install: {{ ui.install | default('Install') | tojson }},
+      uninstall: {{ ui.uninstall | default('Remove') | tojson }},
+      installed_chip: {{ ui.installed | default('installed') | tojson }},
+      available_chip: {{ ui.available | default('available') | tojson }},
+      module_label: {{ ui.module_label | default('Module') | tojson }},
+      kit_label: {{ ui.kit_label | default('Kit') | tojson }},
+      no_description: {{ ui.no_description | default('No description.') | tojson }},
+      all_categories: {{ ui.all_categories | default('All categories') | tojson }},
+      readonly_note: {{ ui.market_note_readonly | default('Read-only discovery. Compatibility is calculated server-side.') | tojson }},
+      kits_note: {{ ui.market_note_kits | default('Kits transform Lumen as a whole: personality, experience, and later also skins.') | tojson }},
+      modules_note: {{ ui.market_note_modules | default('Modules add complete functionality. MCP integrations are shown here as modules.') | tojson }},
+      skills_note: {{ ui.market_note_skills | default('Skills teach criteria and usage, but do not execute on their own.') | tojson }},
+      empty_installed_kits: {{ ui.empty_installed_kits | default('No installed kits yet.') | tojson }},
+      empty_installed_modules: {{ ui.empty_installed_modules | default('No installed modules yet.') | tojson }},
+      empty_installed_skills: {{ ui.empty_installed_skills | default('Nothing from this tab is active.') | tojson }},
+      empty_available_kits: {{ ui.empty_available_kits | default('No more kits available.') | tojson }},
+      empty_available_modules: {{ ui.empty_available_modules | default('No more modules available.') | tojson }},
+      empty_available_skills: {{ ui.empty_available_skills | default('No entries found.') | tojson }},
+      installing: {{ ui.installing | default('Installing...') | tojson }},
+      install_failed: {{ ui.install_failed | default('We could not install this module.') | tojson }},
+      uninstall_confirm_prefix: {{ ui.uninstall_confirm_prefix | default('Are you sure you want to remove') | tojson }},
+      uninstall_failed: {{ ui.uninstall_failed | default('Could not uninstall module.') | tojson }},
+      upload_failed: {{ ui.upload_failed | default('This module could not be installed.') | tojson }},
+      loading: {{ ui.loading_short | default('Loading...') | tojson }},
+    };
 
     if (chatCenter && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       chatCenter.addEventListener('mousemove', (event) => {
@@ -2203,13 +2276,13 @@
       const interoperability = item.interoperability || {};
       if (!interoperability.level) return '';
       const installPath = interoperability.install_path || 'unknown';
-      return `<div class="meta-stack"><div class="meta-row"><span class="meta-label">Adopción</span><span class="meta-value">${renderInteroperabilityBadge(item)} via ${escapeHtml(installPath)}</span></div><div class="mod-meta">${escapeHtml(interoperability.summary || '')}</div></div>`;
+      return `<div class="meta-stack"><div class="meta-row"><span class="meta-label">${escapeHtml(MARKET_I18N.adoption)}</span><span class="meta-value">${renderInteroperabilityBadge(item)} via ${escapeHtml(installPath)}</span></div><div class="mod-meta">${escapeHtml(interoperability.summary || '')}</div></div>`;
     }
 
     function renderReadOnlyCard(item, emptyLabel) {
       const reasons = item.compatibility?.reasons || [];
       const installBtn = item.actions?.can_install
-        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small install-cta">Instalar</button>` : '';
+        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small install-cta">${escapeHtml(MARKET_I18N.install)}</button>` : '';
       return `
         <div class="mod-card">
           <div class="mod-card-top">
@@ -2231,7 +2304,7 @@
               <span class="mod-meta-chip">Skill</span>
               <span class="mod-meta-chip">v${escapeHtml(item.version || '0.0.0')}</span>
               <span class="mod-meta-chip">${escapeHtml(item.min_capability || 'tier-1')}</span>
-              <span class="mod-meta-chip">${item.installed ? 'instalado' : 'disponible'}</span>
+              <span class="mod-meta-chip">${item.installed ? escapeHtml(MARKET_I18N.installed_chip) : escapeHtml(MARKET_I18N.available_chip)}</span>
             </div>
             <div class="mod-actions-aux">${installBtn}</div>
           </div>
@@ -2242,15 +2315,15 @@
       const reasons = item.compatibility?.reasons || [];
       const warnings = item.compatibility?.warnings || [];
       const personality = isPersonalityModule(item);
-      const typeLabel = item.kind === 'kit' ? 'Kit' : 'Módulo';
+      const typeLabel = item.kind === 'kit' ? MARKET_I18N.kit_label : MARKET_I18N.module_label;
       const personalityBadge = personality
         ? '<span class="badge badge-personality">Personalidad</span>'
         : '';
       const typeBadge = `<span class="badge">${typeLabel}</span>`;
       const installBtn = item.actions?.can_install
-        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small install-cta">Instalar</button>` : '';
+        ? `<button onclick="installModule('${item.name}', this)" class="l-btn small install-cta">${escapeHtml(MARKET_I18N.install)}</button>` : '';
       const uninstallBtn = item.actions?.can_uninstall
-        ? `<button onclick="uninstallModule('${item.name}')" class="l-btn small ghost">Quitar</button>` : '';
+        ? `<button onclick="uninstallModule('${item.name}')" class="l-btn small ghost">${escapeHtml(MARKET_I18N.uninstall)}</button>` : '';
       return `
         <div class="mod-card ${personality ? 'is-personality' : ''}">
           <div class="mod-card-top">
@@ -2262,7 +2335,7 @@
             </div>
             <div class="mod-actions">${renderCompatBadge(item)}</div>
           </div>
-          <div class="mod-desc">${escapeHtml(item.description || 'Sin descripción.')}</div>
+          <div class="mod-desc">${escapeHtml(item.description || MARKET_I18N.no_description)}</div>
           ${renderInteroperabilityMeta(item)}
           ${renderSourcePills(item)}
           ${renderTagPills(item)}
@@ -2273,7 +2346,7 @@
               ${typeBadge}
               <span class="mod-meta-chip">v${escapeHtml(item.version || '0.0.0')}</span>
               <span class="mod-meta-chip">${escapeHtml(item.min_capability || 'tier-1')}</span>
-              <span class="mod-meta-chip">${item.installed ? 'instalado' : 'disponible'}</span>
+              <span class="mod-meta-chip">${item.installed ? escapeHtml(MARKET_I18N.installed_chip) : escapeHtml(MARKET_I18N.available_chip)}</span>
             </div>
             <div class="mod-actions-aux">
               ${renderInteroperabilityBadge(item)}
@@ -2347,7 +2420,7 @@
       const tags = collectMarketplaceTags(section);
       const categorySelect = document.getElementById('marketplace-category');
       if (categorySelect) {
-        const options = ['<option value="">Todas las categorías</option>']
+        const options = [`<option value="">${escapeHtml(MARKET_I18N.all_categories)}</option>`]
           .concat(tags.map(tag => `<option value="${escapeHtml(tag)}"${currentMarketplaceTag === tag ? ' selected' : ''}>${escapeHtml(tag)}</option>`));
         categorySelect.innerHTML = options.join('');
       }
@@ -2365,30 +2438,30 @@
       const uploadLabel = document.getElementById('marketplace-upload-label');
       const uploadEnabled = !!section.upload_enabled;
 
-      installedTitle.textContent = section.installed_label || 'Instalados';
-      availableTitle.textContent = section.available_label || 'Disponibles';
+      installedTitle.textContent = section.installed_label || MARKET_I18N.installed_chip;
+      availableTitle.textContent = section.available_label || MARKET_I18N.available_chip;
       noteEl.textContent = section.read_only
-        ? 'Descubrimiento de solo lectura. La compatibilidad se calcula en el servidor.'
+        ? MARKET_I18N.readonly_note
         : currentMarketplaceTab === 'kits'
-        ? 'Los kits transforman Lumen como un todo: personalidad, experiencia y más adelante también skins.'
+        ? MARKET_I18N.kits_note
         : currentMarketplaceTab === 'modules'
-        ? 'Los módulos agregan funcionalidades completas. Las integraciones MCP se presentan acá como módulos.'
-        : 'Las skills enseñan criterio y uso, pero no ejecutan por sí solas.';
+        ? MARKET_I18N.modules_note
+        : MARKET_I18N.skills_note;
       uploadLabel.classList.toggle('hidden', !uploadEnabled);
 
-      const renderer = currentMarketplaceTab === 'skills' ? item => renderReadOnlyCard(item, 'Sin descripción.') : renderKitCard;
+      const renderer = currentMarketplaceTab === 'skills' ? item => renderReadOnlyCard(item, MARKET_I18N.no_description) : renderKitCard;
       renderMarketplaceTags();
 
       renderMarketplaceList(installedEl,
         filterAndSortItems(section.installed || []),
         renderer,
-        currentMarketplaceTab === 'kits' ? 'Todavía no hay kits instalados.' : currentMarketplaceTab === 'modules' ? 'Todavía no hay módulos instalados.' : 'Nada de esta pestaña está activo.',
+        currentMarketplaceTab === 'kits' ? MARKET_I18N.empty_installed_kits : currentMarketplaceTab === 'modules' ? MARKET_I18N.empty_installed_modules : MARKET_I18N.empty_installed_skills,
         currentMarketplaceView === 'grid');
 
       renderMarketplaceList(availableEl,
         filterAndSortItems(section.available || []),
         renderer,
-        currentMarketplaceTab === 'kits' ? 'No hay más kits disponibles.' : currentMarketplaceTab === 'modules' ? 'No hay más módulos disponibles.' : 'No se encontraron entradas.',
+        currentMarketplaceTab === 'kits' ? MARKET_I18N.empty_available_kits : currentMarketplaceTab === 'modules' ? MARKET_I18N.empty_available_modules : MARKET_I18N.empty_available_skills,
         currentMarketplaceView === 'grid');
     }
 
@@ -2423,30 +2496,30 @@
     });
 
     async function installModule(name, btn) {
-      if (btn) { btn.disabled = true; btn.textContent = 'Instalando…'; }
+      if (btn) { btn.disabled = true; btn.textContent = MARKET_I18N.installing; }
       try {
         const res = await fetch(`/api/modules/install/${name}`, { method: 'POST' });
         const data = await res.json();
         if (data.status === 'installed') {
           loadMarketplace();
         } else {
-          alert('No pudimos instalar este módulo.');
-          if (btn) { btn.disabled = false; btn.textContent = 'Instalar'; }
+          alert(MARKET_I18N.install_failed);
+          if (btn) { btn.disabled = false; btn.textContent = MARKET_I18N.install; }
         }
       } catch (e) {
-        alert('No se pudo instalar el módulo.');
-        if (btn) { btn.disabled = false; btn.textContent = 'Instalar'; }
+        alert(MARKET_I18N.install_failed);
+        if (btn) { btn.disabled = false; btn.textContent = MARKET_I18N.install; }
       }
     }
 
     async function uninstallModule(name) {
-      if (!confirm(`¿Seguro que quieres quitar ${name}?`)) return;
+      if (!confirm(`${MARKET_I18N.uninstall_confirm_prefix} ${name}?`)) return;
       try {
         const res = await fetch(`/api/modules/uninstall/${name}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.status === 'uninstalled') loadMarketplace();
       } catch (e) {
-        alert('No se pudo desinstalar el módulo.');
+        alert(MARKET_I18N.uninstall_failed);
       }
     }
 
@@ -2460,10 +2533,10 @@
         if (result.status === 'installed') {
           loadMarketplace();
         } else {
-          alert('Este módulo no se pudo instalar.');
+          alert(MARKET_I18N.upload_failed);
         }
       } catch (e) {
-        alert('Este módulo no se pudo instalar.');
+        alert(MARKET_I18N.upload_failed);
       }
       input.value = '';
     }

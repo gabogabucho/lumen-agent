@@ -10,8 +10,8 @@
   <meta name="theme-color" content="#F5F8FC">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
-  <title>Lumen — Seguridad</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <title>Lumen — {{ 'Seguridad' if language == 'es' else 'Security' }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -201,7 +201,7 @@
       background: rgba(108,52,148,0.10); color: #8b5cf6;
       border: 1px solid rgba(108,52,148,0.20);
       font-size: 12px; font-weight: 500;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--lumen-font-mono);
     }
 
     /* === Toast === */
@@ -226,6 +226,7 @@
   </style>
 </head>
 <body>
+  {% set sec = ui_locale.get('security', {}) if ui_locale else {} %}
 
   <!-- Sidebar -->
   {% set active_settings = 'security' %}
@@ -235,8 +236,8 @@
   <main class="main">
     <div class="topbar">
       <div>
-        <h2>Ajustes &rsaquo; Seguridad</h2>
-        <p class="sub">Configurá las políticas de seguridad y confirmación de herramientas</p>
+        <h2>{{ sec.get('title', 'Settings › Security') }}</h2>
+        <p class="sub">{{ sec.get('subtitle', 'Configure security policies and tool confirmations') }}</p>
       </div>
     </div>
 
@@ -244,13 +245,13 @@
       <div class="settings-stack">
         <!-- Confirmation toggles -->
         <div class="l-card">
-          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.6-4A12 12 0 0 1 12 3a12 12 0 0 1-8.6 3A12 12 0 0 0 3 9c0 5.6 3.8 10.3 9 11.6C17.2 19.3 21 14.6 21 9c0-1-.1-2-.4-3z"/></svg></span><h3>Confirmaciones</h3></div>
-          <p style="margin-bottom:var(--lumen-s-4);">Controlá qué acciones requieren confirmación antes de ejecutarse.</p>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.6-4A12 12 0 0 1 12 3a12 12 0 0 1-8.6 3A12 12 0 0 0 3 9c0 5.6 3.8 10.3 9 11.6C17.2 19.3 21 14.6 21 9c0-1-.1-2-.4-3z"/></svg></span><h3>{{ sec.get('confirmations', 'Confirmations') }}</h3></div>
+          <p style="margin-bottom:var(--lumen-s-4);">{{ sec.get('confirmations_sub', 'Control which actions require confirmation before execution.') }}</p>
 
           <div class="toggle-row">
             <div>
-              <div class="toggle-row-label">Confirmar eliminaciones</div>
-              <div class="toggle-row-hint">Pedir confirmación antes de eliminar archivos o directorios</div>
+              <div class="toggle-row-label">{{ sec.get('confirm_deletions', 'Confirm deletions') }}</div>
+              <div class="toggle-row-hint">{{ sec.get('confirm_deletions_hint', 'Ask confirmation before deleting files or directories') }}</div>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="toggle-confirm-deletions" />
@@ -260,8 +261,8 @@
 
           <div class="toggle-row">
             <div>
-              <div class="toggle-row-label">Confirmar comandos de terminal</div>
-              <div class="toggle-row-hint">Pedir confirmación antes de ejecutar comandos en la terminal</div>
+              <div class="toggle-row-label">{{ sec.get('confirm_terminal', 'Confirm terminal commands') }}</div>
+              <div class="toggle-row-hint">{{ sec.get('confirm_terminal_hint', 'Ask confirmation before running terminal commands') }}</div>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="toggle-confirm-terminal" />
@@ -271,8 +272,8 @@
 
           <div class="toggle-row">
             <div>
-              <div class="toggle-row-label">Confirmar acciones del sistema</div>
-              <div class="toggle-row-hint">Pedir confirmación antes de modificar configuración del sistema o instalar paquetes</div>
+              <div class="toggle-row-label">{{ sec.get('confirm_system', 'Confirm system actions') }}</div>
+              <div class="toggle-row-hint">{{ sec.get('confirm_system_hint', 'Ask confirmation before modifying system settings or installing packages') }}</div>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="toggle-confirm-system" />
@@ -282,8 +283,8 @@
 
           <div class="toggle-row">
             <div>
-              <div class="toggle-row-label">Auto-aprobar herramientas de solo lectura</div>
-              <div class="toggle-row-hint">Las herramientas de lectura (búsqueda, lectura de archivos) no necesitan confirmación</div>
+              <div class="toggle-row-label">{{ sec.get('auto_approve_readonly', 'Auto-approve read-only tools') }}</div>
+              <div class="toggle-row-hint">{{ sec.get('auto_approve_readonly_hint', 'Read-only tools (search, file read) do not require confirmation') }}</div>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="toggle-auto-approve-ro" />
@@ -294,27 +295,27 @@
 
         <!-- Timeout -->
         <div class="l-card">
-          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8v5l3 2m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></span><h3>Timeout de confirmación</h3></div>
-          <p style="margin-bottom:var(--lumen-s-4);">Tiempo máximo de espera (en segundos) para una confirmación del usuario. Si expira, la acción se cancela automáticamente.</p>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8v5l3 2m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></span><h3>{{ sec.get('timeout_title', 'Confirmation timeout') }}</h3></div>
+          <p style="margin-bottom:var(--lumen-s-4);">{{ sec.get('timeout_sub', 'Maximum wait time (in seconds) for user confirmation. If it expires, the action is canceled automatically.') }}</p>
           <div class="field" style="max-width:200px;">
-            <label for="input-timeout">Segundos</label>
+            <label for="input-timeout">{{ sec.get('seconds', 'Seconds') }}</label>
             <input id="input-timeout" class="l-input" type="number" min="5" max="300" step="5" />
           </div>
         </div>
 
         <!-- Privileged tools -->
         <div class="l-card">
-          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10 14L21 3m0 0h-7m7 0v7M5 7h5v5H5zM4 17h6v3H4z"/></svg></span><h3>Herramientas privilegiadas</h3></div>
-          <p>Estas herramientas tienen el nivel de riesgo más alto y siempre requieren confirmación.</p>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10 14L21 3m0 0h-7m7 0v7M5 7h5v5H5zM4 17h6v3H4z"/></svg></span><h3>{{ sec.get('privileged_title', 'Privileged tools') }}</h3></div>
+          <p>{{ sec.get('privileged_sub', 'These tools have the highest risk level and always require confirmation.') }}</p>
           <div class="tools-list" id="privileged-tools">
-            <span class="field-hint">Cargando…</span>
+            <span class="field-hint">{{ sec.get('loading', 'Loading…') }}</span>
           </div>
         </div>
 
         <!-- Save -->
         <div class="settings-actions">
-          <button id="btn-save" type="button" class="l-btn">Guardar cambios</button>
-          <span id="save-message" class="settings-message">Cargando configuración…</span>
+          <button id="btn-save" type="button" class="l-btn">{{ sec.get('save', 'Save changes') }}</button>
+          <span id="save-message" class="settings-message">{{ sec.get('loading_config', 'Loading configuration…') }}</span>
         </div>
       </div>
     </div>
@@ -323,6 +324,18 @@
   <div class="toast-container" id="toast-container"></div>
 
   <script>
+    const I18N_SECURITY = {
+      load_error: {{ sec.get('load_error', 'Could not load configuration') | tojson }},
+      no_privileged: {{ sec.get('no_privileged', 'No privileged tools configured.') | tojson }},
+      loaded_msg: {{ sec.get('loaded_msg', 'Configuration loaded. Update values and save.') | tojson }},
+      load_error_prefix: {{ sec.get('load_error_prefix', 'Load error: ') | tojson }},
+      saving: {{ sec.get('saving', 'Saving…') | tojson }},
+      save_error: {{ sec.get('save_error', 'Error while saving') | tojson }},
+      saved_msg: {{ sec.get('saved_msg', 'Configuration saved successfully.') | tojson }},
+      updated_toast: {{ sec.get('updated_toast', 'Security updated') | tojson }},
+      error_prefix: {{ sec.get('error_prefix', 'Error: ') | tojson }},
+      save_failed_toast: {{ sec.get('save_failed_toast', 'Could not save') | tojson }},
+    };
     // === Toast ===
     function showToast(message, type = 'success') {
       const container = document.getElementById('toast-container');
@@ -344,7 +357,7 @@
     async function loadSecurity() {
       try {
         const res = await fetch('/api/security');
-        if (!res.ok) throw new Error('No se pudo cargar la configuración');
+        if (!res.ok) throw new Error(I18N_SECURITY.load_error);
         const data = await res.json();
 
         document.getElementById('toggle-confirm-deletions').checked = !!data.confirm_deletions;
@@ -357,14 +370,14 @@
         const tools = data.privileged_tool_names || [];
         const container = document.getElementById('privileged-tools');
         if (tools.length === 0) {
-          container.innerHTML = '<span class="field-hint">No hay herramientas privilegiadas configuradas.</span>';
+          container.innerHTML = `<span class="field-hint">${I18N_SECURITY.no_privileged}</span>`;
         } else {
           container.innerHTML = tools.map(t => `<span class="tools-chip">${escapeHtml(t)}</span>`).join('');
         }
 
-        setSaveMessage('Configuración cargada. Modificá los valores y guardá.');
+        setSaveMessage(I18N_SECURITY.loaded_msg);
       } catch (e) {
-        setSaveMessage('Error al cargar: ' + e.message, 'error');
+        setSaveMessage(I18N_SECURITY.load_error_prefix + e.message, 'error');
       }
     }
 
@@ -379,7 +392,7 @@
     document.getElementById('btn-save').addEventListener('click', async () => {
       const btn = document.getElementById('btn-save');
       btn.disabled = true;
-      setSaveMessage('Guardando…');
+      setSaveMessage(I18N_SECURITY.saving);
 
       const payload = {
         confirm_deletions: document.getElementById('toggle-confirm-deletions').checked,
@@ -396,13 +409,13 @@
           body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (!res.ok || data.status !== 'ok') throw new Error(data.error || 'Error al guardar');
+        if (!res.ok || data.status !== 'ok') throw new Error(data.error || I18N_SECURITY.save_error);
 
-        setSaveMessage('Configuración guardada correctamente.', 'success');
-        showToast('Seguridad actualizada', 'success');
+        setSaveMessage(I18N_SECURITY.saved_msg, 'success');
+        showToast(I18N_SECURITY.updated_toast, 'success');
       } catch (e) {
-        setSaveMessage('Error: ' + e.message, 'error');
-        showToast('No se pudo guardar', 'error');
+        setSaveMessage(I18N_SECURITY.error_prefix + e.message, 'error');
+        showToast(I18N_SECURITY.save_failed_toast, 'error');
       } finally {
         btn.disabled = false;
       }

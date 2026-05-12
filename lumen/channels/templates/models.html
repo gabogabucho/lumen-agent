@@ -10,8 +10,8 @@
   <meta name="theme-color" content="#F5F8FC">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
-  <title>Lumen — Modelos</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <title>Lumen — {{ 'Modelos' if language == 'es' else 'Models' }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -236,7 +236,7 @@
     }
     .resolved-chip-model {
       font-size: 13px; font-weight: 500; color: var(--lumen-ink);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--lumen-font-mono);
     }
 
     /* === Toast === */
@@ -270,8 +270,8 @@
   <main class="main">
     <div class="topbar">
       <div>
-        <h2>Ajustes &rsaquo; Modelos</h2>
-        <p class="sub">Configurá qué modelo usa cada rol del agente</p>
+        <h2>{{ ('Ajustes &rsaquo; Modelos') if language == 'es' else ('Settings › Models') }}</h2>
+        <p class="sub">{{ 'Configurá qué modelo usa cada rol del agente' if language == 'es' else 'Configure which model each agent role uses' }}</p>
       </div>
     </div>
 
@@ -279,15 +279,15 @@
       <div class="settings-stack">
         <!-- Current config card -->
         <div class="l-card">
-          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h10M4 17h7"/></svg></span><h3>Modelo principal y fallback</h3></div>
-          <p style="margin-bottom:var(--lumen-s-4);">El modelo principal es el que usa Lumen para todo. El fallback entra si el principal falla.</p>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h10M4 17h7"/></svg></span><h3>{{ 'Modelo principal y fallback' if language == 'es' else 'Primary model and fallback' }}</h3></div>
+          <p style="margin-bottom:var(--lumen-s-4);">{{ 'El modelo principal es el que usa Lumen para todo. El fallback entra si el principal falla.' if language == 'es' else 'The primary model is used for everything. Fallback is used if the primary fails.' }}</p>
           <div class="settings-grid">
             <div class="field">
-              <label for="model-default">Modelo principal</label>
+              <label for="model-default">{{ 'Modelo principal' if language == 'es' else 'Primary model' }}</label>
               <input id="model-default" name="default" class="l-input" type="text" autocomplete="off" />
             </div>
             <div class="field">
-              <label for="model-fallback">Modelo fallback</label>
+              <label for="model-fallback">{{ 'Modelo fallback' if language == 'es' else 'Fallback model' }}</label>
               <input id="model-fallback" name="fallback" class="l-input" type="text" autocomplete="off" />
             </div>
           </div>
@@ -295,11 +295,11 @@
 
         <!-- Toggle card -->
         <div class="l-card">
-          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 7h10M7 12h6M7 17h4"/></svg></span><h3>Enrutamiento por rol</h3></div>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 7h10M7 12h6M7 17h4"/></svg></span><h3>{{ 'Enrutamiento por rol' if language == 'es' else 'Role routing' }}</h3></div>
           <div class="toggle-row">
             <div>
-              <div class="toggle-row-label">Usar el mismo modelo para todos los roles</div>
-              <div class="toggle-row-hint">Si está activado, el modelo principal se usa para planificar, ejecutar, resumir y responder.</div>
+              <div class="toggle-row-label">{{ 'Usar el mismo modelo para todos los roles' if language == 'es' else 'Use the same model for all roles' }}</div>
+              <div class="toggle-row-hint">{{ 'Si está activado, el modelo principal se usa para planificar, ejecutar, resumir y responder.' if language == 'es' else 'If enabled, the primary model is used for planning, execution, summarization, and response.' }}</div>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="toggle-use-default" checked />
@@ -312,23 +312,23 @@
             <div class="settings-grid" style="margin-top:var(--lumen-s-4);">
               <div class="field">
                 <label for="role-planner">Planner</label>
-                <input id="role-planner" name="planner" class="l-input" type="text" placeholder="Modelo para planner" autocomplete="off" />
-                <div class="field-hint">Planifica tareas y descompone problemas</div>
+                <input id="role-planner" name="planner" class="l-input" type="text" placeholder="{{ 'Modelo para planner' if language == 'es' else 'Model for planner' }}" autocomplete="off" />
+                <div class="field-hint">{{ 'Planifica tareas y descompone problemas' if language == 'es' else 'Plans tasks and breaks down problems' }}</div>
               </div>
               <div class="field">
                 <label for="role-executor">Executor</label>
-                <input id="role-executor" name="executor" class="l-input" type="text" placeholder="Modelo para executor" autocomplete="off" />
-                <div class="field-hint">Ejecuta tareas y genera código</div>
+                <input id="role-executor" name="executor" class="l-input" type="text" placeholder="{{ 'Modelo para executor' if language == 'es' else 'Model for executor' }}" autocomplete="off" />
+                <div class="field-hint">{{ 'Ejecuta tareas y genera código' if language == 'es' else 'Executes tasks and generates code' }}</div>
               </div>
               <div class="field">
                 <label for="role-summarizer">Summarizer</label>
-                <input id="role-summarizer" name="summarizer" class="l-input" type="text" placeholder="Modelo para summarizer" autocomplete="off" />
-                <div class="field-hint">Resume conversaciones y extrae conclusiones</div>
+                <input id="role-summarizer" name="summarizer" class="l-input" type="text" placeholder="{{ 'Modelo para summarizer' if language == 'es' else 'Model for summarizer' }}" autocomplete="off" />
+                <div class="field-hint">{{ 'Resume conversaciones y extrae conclusiones' if language == 'es' else 'Summarizes conversations and extracts conclusions' }}</div>
               </div>
               <div class="field">
                 <label for="role-responder">Responder</label>
-                <input id="role-responder" name="responder" class="l-input" type="text" placeholder="Modelo para responder" autocomplete="off" />
-                <div class="field-hint">Responde al usuario directamente</div>
+                <input id="role-responder" name="responder" class="l-input" type="text" placeholder="{{ 'Modelo para responder' if language == 'es' else 'Model for responder' }}" autocomplete="off" />
+                <div class="field-hint">{{ 'Responde al usuario directamente' if language == 'es' else 'Responds directly to the user' }}</div>
               </div>
             </div>
           </div>
@@ -336,16 +336,16 @@
 
         <!-- Save -->
         <div class="settings-actions">
-          <button id="btn-save" type="button" class="l-btn">Guardar cambios</button>
-          <span id="save-message" class="settings-message">Cargando configuración…</span>
+          <button id="btn-save" type="button" class="l-btn">{{ 'Guardar cambios' if language == 'es' else 'Save changes' }}</button>
+          <span id="save-message" class="settings-message">{{ 'Cargando configuración…' if language == 'es' else 'Loading configuration…' }}</span>
         </div>
 
         <!-- Resolved models (read-only) -->
         <div class="l-card">
-          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M12 5v14"/></svg></span><h3>Modelos resueltos por rol</h3></div>
-          <p>Modelo que se usa efectivamente para cada rol (después de aplicar la configuración).</p>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M12 5v14"/></svg></span><h3>{{ 'Modelos resueltos por rol' if language == 'es' else 'Resolved models by role' }}</h3></div>
+          <p>{{ 'Modelo que se usa efectivamente para cada rol (después de aplicar la configuración).' if language == 'es' else 'Model effectively used for each role (after applying configuration).' }}</p>
           <div id="resolved-models" class="resolved-grid">
-            <p class="field-hint">Cargando…</p>
+            <p class="field-hint">{{ 'Cargando…' if language == 'es' else 'Loading…' }}</p>
           </div>
         </div>
       </div>
@@ -387,7 +387,7 @@
     async function loadModels() {
       try {
         const res = await fetch('/api/models');
-        if (!res.ok) throw new Error('No se pudo cargar la configuración');
+        if (!res.ok) throw new Error('{{ "No se pudo cargar la configuración" if language == "es" else "Could not load configuration" }}');
         const data = await res.json();
 
         document.getElementById('model-default').value = data.default || '';
@@ -403,9 +403,9 @@
         }
 
         renderResolved(data.resolved || {});
-        setSaveMessage('Configuración cargada. Modificá los valores y guardá.');
+        setSaveMessage('{{ "Configuración cargada. Modificá los valores y guardá." if language == "es" else "Configuration loaded. Update values and save." }}');
       } catch (e) {
-        setSaveMessage('Error al cargar: ' + e.message, 'error');
+        setSaveMessage('{{ "Error al cargar: " if language == "es" else "Load error: " }}' + e.message, 'error');
       }
     }
 
@@ -418,7 +418,7 @@
         responder: 'Responder',
       };
       if (!resolved || Object.keys(resolved).length === 0) {
-        container.innerHTML = '<p class="field-hint">No hay modelos resueltos.</p>';
+        container.innerHTML = '<p class="field-hint">{{ "No hay modelos resueltos." if language == "es" else "No resolved models." }}</p>';
         return;
       }
       container.innerHTML = Object.entries(resolved).map(([role, model]) => `
@@ -433,7 +433,7 @@
     document.getElementById('btn-save').addEventListener('click', async () => {
       const btn = document.getElementById('btn-save');
       btn.disabled = true;
-      setSaveMessage('Guardando…');
+      setSaveMessage('{{ "Guardando…" if language == "es" else "Saving…" }}');
 
       const payload = {
         default: document.getElementById('model-default').value.trim(),
@@ -457,16 +457,16 @@
           body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (!res.ok || data.status !== 'ok') throw new Error(data.error || 'Error al guardar');
+        if (!res.ok || data.status !== 'ok') throw new Error(data.error || '{{ "Error al guardar" if language == "es" else "Error while saving" }}');
 
-        setSaveMessage('Configuración guardada correctamente.', 'success');
-        showToast('Modelos actualizados', 'success');
+        setSaveMessage('{{ "Configuración guardada correctamente." if language == "es" else "Configuration saved successfully." }}', 'success');
+        showToast('{{ "Modelos actualizados" if language == "es" else "Models updated" }}', 'success');
 
         // Reload to show fresh resolved
         loadModels();
       } catch (e) {
-        setSaveMessage('Error: ' + e.message, 'error');
-        showToast('No se pudo guardar', 'error');
+        setSaveMessage('{{ "Error: " if language == "es" else "Error: " }}' + e.message, 'error');
+        showToast('{{ "No se pudo guardar" if language == "es" else "Could not save" }}', 'error');
       } finally {
         btn.disabled = false;
       }

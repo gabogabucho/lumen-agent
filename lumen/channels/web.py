@@ -841,13 +841,25 @@ def ensure_server_bootstrap(*, host: str = "0.0.0.0", port: int = 3000) -> str:
 
 def _load_ui_locale(language: str | None) -> dict:
     lang = str(language or "en").strip().lower() or "en"
-    ui_path = PKG_DIR / "locales" / lang / "ui.yaml"
-    if not ui_path.exists() and lang != "en":
-        ui_path = PKG_DIR / "locales" / "en" / "ui.yaml"
-    if not ui_path.exists():
-        return {}
-    loaded = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
-    return loaded if isinstance(loaded, dict) else {}
+    locale_dir = PKG_DIR / "locales" / lang
+    ui_json_path = locale_dir / "ui.json"
+    if ui_json_path.exists():
+        try:
+            loaded_json = json.loads(ui_json_path.read_text(encoding="utf-8")) or {}
+            if isinstance(loaded_json, dict):
+                return loaded_json
+        except Exception:
+            pass
+
+    # Fallback seguro al locale por defecto.
+    fallback_path = PKG_DIR / "locales" / "en" / "ui.json"
+    if fallback_path.exists():
+        try:
+            loaded_fallback = json.loads(fallback_path.read_text(encoding="utf-8")) or {}
+            return loaded_fallback if isinstance(loaded_fallback, dict) else {}
+        except Exception:
+            pass
+    return {}
 
 
 def _merge_save_config(updates: dict, *, removals: set[str] | None = None) -> dict:
@@ -1983,7 +1995,10 @@ async def page_workspace_settings(request: Request):
     return templates.TemplateResponse(
         request,
         "settings_workspace.html",
-        context={"language": _config.get("language", "en")},
+        context={
+            "language": _config.get("language", "en"),
+            "ui_locale": _locale,
+        },
     )
 
 
@@ -2010,10 +2025,13 @@ async def page_settings_general(request: Request):
         "settings_general.html",
         context={
             "config": loaded,
+            "ui": _locale,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
             "provider": loaded.get("provider", ""),
             "model": loaded.get("model", ""),
             "api_key_env": loaded.get("api_key_env", ""),
+            "api_base": loaded.get("api_base", ""),
             "has_api_key": bool(loaded.get("api_key")),
             "current_personality": personality_data.get("name", "default"),
             "openrouter_connected": openrouter_connected,
@@ -2038,7 +2056,9 @@ async def page_models(request: Request):
         context={
             "config": loaded,
             "ui": ui,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
+            "version": __version__,
         },
     )
 
@@ -2065,7 +2085,9 @@ async def page_tools(request: Request):
         context={
             "config": loaded,
             "ui": ui,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
+            "version": __version__,
         },
     )
 
@@ -2086,7 +2108,9 @@ async def page_security(request: Request):
         context={
             "config": loaded,
             "ui": ui,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
+            "version": __version__,
         },
     )
 
@@ -2107,7 +2131,9 @@ async def page_channels(request: Request):
         context={
             "config": loaded,
             "ui": ui,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
+            "version": __version__,
         },
     )
 
@@ -2128,7 +2154,9 @@ async def page_outputs(request: Request):
         context={
             "config": loaded,
             "ui": ui,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
+            "version": __version__,
         },
     )
 
@@ -2149,6 +2177,7 @@ async def page_confirmations(request: Request):
         context={
             "config": loaded,
             "ui": ui,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
             "locale": _locale.get("confirmations", {}),
         },
@@ -2171,7 +2200,9 @@ async def page_agent_status(request: Request):
         context={
             "config": loaded,
             "ui": ui,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
+            "version": __version__,
         },
     )
 
@@ -2192,7 +2223,9 @@ async def page_memory(request: Request):
         context={
             "config": loaded,
             "ui": ui,
+            "ui_locale": _locale,
             "language": _config.get("language", "en"),
+            "version": __version__,
         },
     )
 
@@ -2243,6 +2276,19 @@ async def api_settings(request: Request):
     elif "api_base" in body:
         removals.add("api_base")
 
+    raw_language = _normalize_optional_text(body.get("language"))
+    if raw_language:
+        selected_language = raw_language.lower()
+        if selected_language not in {"en", "es"}:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "error": "Language must be one of: en, es.",
+                },
+            )
+        updates["language"] = selected_language
+
     _config = _merge_save_config(updates, removals=removals)
     await _refresh_runtime_from_config(loaded)
 
@@ -2253,6 +2299,7 @@ async def api_settings(request: Request):
             "model": _config.get("model", ""),
             "api_key_env": _config.get("api_key_env", ""),
             "api_base": _config.get("api_base", ""),
+            "language": _config.get("language", "en"),
             "has_api_key": bool(_config.get("api_key")),
         },
     }

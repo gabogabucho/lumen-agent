@@ -10,8 +10,8 @@
   <meta name="theme-color" content="#F5F8FC">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
-  <title>Lumen — Outputs</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <title>Lumen — {{ 'Outputs' if language == 'es' else 'Outputs' }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -130,7 +130,7 @@
     .output-type-card .type-tag {
       display: inline-block; padding: 2px 8px;
       border-radius: var(--lumen-r-pill); font-size: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--lumen-font-mono);
       background: var(--lumen-paper-2); color: var(--lumen-mute);
       border: 1px solid var(--lumen-line);
     }
@@ -159,6 +159,7 @@
   </style>
 </head>
 <body>
+  {% set out = ui_locale.get('outputs', {}) if ui_locale else {} %}
 
   <!-- Sidebar -->
   {% set active_settings = 'outputs' %}
@@ -168,18 +169,17 @@
   <main class="main">
     <div class="topbar">
       <div>
-        <h2>Ajustes &rsaquo; Outputs</h2>
-        <p class="sub">Tipos de salida estructurados disponibles</p>
+        <h2>{{ out.get('title', 'Settings › Outputs') }}</h2>
+        <p class="sub">{{ out.get('subtitle', 'Available structured output types') }}</p>
       </div>
     </div>
 
     <div class="panel">
       <!-- Available output types -->
       <div class="l-card" style="margin-bottom: var(--lumen-s-5);">
-        <h3>Tipos de output disponibles</h3>
+        <h3>{{ out.get('available_title', 'Available output types') }}</h3>
         <p style="color:var(--lumen-ink-soft);margin-bottom:var(--lumen-s-4);line-height:1.55;">
-          Lumen puede devolver diferentes tipos de salida estructurada segun la herramienta o accion que genero el resultado.
-          Cuando los conectores devuelvan objetos <code>StructuredOutput</code>, se mostraran aca.
+          {{ out.get('available_sub', 'Lumen can return different structured output types depending on the tool or action that produced the result. When connectors return StructuredOutput objects, they will appear here.') }}
         </p>
         <div class="l-card-grid cols-3" id="output-types-grid">
           <!-- Rendered by JS -->
@@ -188,11 +188,11 @@
 
       <!-- Outputs list (empty state) -->
       <div class="l-card">
-        <h3>Outputs generados</h3>
+        <h3>{{ out.get('generated_title', 'Generated outputs') }}</h3>
         <div id="outputs-list">
           <div class="empty-block">
-            No hay outputs estructurados todavia.<br>
-            Los outputs aparecern aca cuando las herramientas devuelvan resultados tipados.
+            {{ out.get('empty_title', 'No structured outputs yet.') }}<br>
+            {{ out.get('empty_sub', 'Outputs will appear here when tools return typed results.') }}
           </div>
         </div>
       </div>
@@ -204,33 +204,33 @@
     const OUTPUT_TYPES = {
       text: {
         icon: 'T',
-        label: 'Text',
-        description: 'Respuesta de texto plano. El formato por defecto para conversaciones.',
+        label: {{ out.get('type_text_label', 'Text') | tojson }},
+        description: {{ out.get('type_text_desc', 'Plain text response. Default format for conversations.') | tojson }},
       },
       document: {
         icon: 'D',
-        label: 'Document',
-        description: 'Documento estructurado en Markdown o HTML. Ideal para reportes y documentacion.',
+        label: {{ out.get('type_document_label', 'Document') | tojson }},
+        description: {{ out.get('type_document_desc', 'Structured document in Markdown or HTML. Ideal for reports and documentation.') | tojson }},
       },
       notification: {
         icon: 'N',
-        label: 'Notification',
-        description: 'Notificacion con nivel (info, warning, error). Para alertas del sistema.',
+        label: {{ out.get('type_notification_label', 'Notification') | tojson }},
+        description: {{ out.get('type_notification_desc', 'Notification with level (info, warning, error). For system alerts.') | tojson }},
       },
       web: {
         icon: 'W',
-        label: 'Web',
-        description: 'Contenido HTML renderizable. Para dashboards embebidos y vistas interactivas.',
+        label: {{ out.get('type_web_label', 'Web') | tojson }},
+        description: {{ out.get('type_web_desc', 'Renderable HTML content. For embedded dashboards and interactive views.') | tojson }},
       },
       image: {
         icon: 'I',
-        label: 'Image',
-        description: 'Imagen generada o recuperada. Soporta URL o base64.',
+        label: {{ out.get('type_image_label', 'Image') | tojson }},
+        description: {{ out.get('type_image_desc', 'Generated or retrieved image. Supports URL or base64.') | tojson }},
       },
       plot: {
         icon: 'P',
-        label: 'Plot',
-        description: 'Grafico o chart en formato JSON (matplotlib/plotly). Para visualizaciones de datos.',
+        label: {{ out.get('type_plot_label', 'Plot') | tojson }},
+        description: {{ out.get('type_plot_desc', 'Chart in JSON format (matplotlib/plotly). For data visualization.') | tojson }},
       },
     };
 
@@ -254,7 +254,7 @@
     async function loadOutputs() {
       try {
         const res = await fetch('/api/outputs');
-        if (!res.ok) throw new Error('Error al cargar outputs');
+        if (!res.ok) throw new Error({{ out.get('load_error', 'Error loading outputs') | tojson }});
         const data = await res.json();
 
         // Render available types from API
@@ -276,8 +276,8 @@
           }).join('');
         } else {
           list.innerHTML = `<div class="empty-block">
-            No hay outputs estructurados todavia.<br>
-            Los outputs aparecern aca cuando las herramientas devuelvan resultados tipados.
+            {{ out.get('empty_title', 'No structured outputs yet.') }}<br>
+            {{ out.get('empty_sub', 'Outputs will appear here when tools return typed results.') }}
           </div>`;
         }
       } catch (e) {

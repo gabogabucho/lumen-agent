@@ -10,8 +10,8 @@
   <meta name="theme-color" content="#F5F8FC">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
-  <title>Lumen — Estado del Agente</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <title>Lumen — {{ 'Estado del Agente' if language == 'es' else 'Agent Status' }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -38,8 +38,8 @@
     }
     .brand { display: flex; align-items: center; gap: var(--lumen-s-3); overflow: hidden; }
     .brand img { width: 36px; height: 36px; border-radius: var(--lumen-r-sm); flex-shrink: 0; }
+    .brand-text { min-height: 36px; display: flex; align-items: center; }
     .brand-text h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--lumen-ink); }
-    .brand-text p { font-size: 11px; color: var(--lumen-mute); margin-top: 2px; }
     .icon-btn {
       background: transparent; border: none; color: var(--lumen-ink-soft);
       padding: 6px; border-radius: var(--lumen-r-sm); cursor: pointer;
@@ -50,7 +50,21 @@
     .icon-btn svg { width: 18px; height: 18px; }
     nav.sidebar-nav {
       flex: 1; padding: var(--lumen-s-3); display: flex;
-      flex-direction: column; gap: 4px; overflow-y: auto;
+      flex-direction: column; gap: 10px; overflow-y: auto;
+    }
+    .nav-group {
+      display: flex; flex-direction: column; gap: 4px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--lumen-line);
+    }
+    .nav-group:last-child { border-bottom: none; padding-bottom: 0; }
+    .nav-group-title {
+      padding: 2px 10px 6px;
+      font-family: var(--lumen-font-mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--lumen-mute);
+      opacity: 0.9;
     }
     .nav-btn {
       display: flex; align-items: center; gap: var(--lumen-s-3);
@@ -125,7 +139,7 @@
       line-height: 1.2;
     }
     .stat-card .stat-value.mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--lumen-font-mono);
       font-size: 16px;
     }
     .stat-card .stat-sub {
@@ -201,6 +215,9 @@
   </style>
 </head>
 <body>
+  {% set nav = ui_locale.get('app_nav', {}) if ui_locale else {} %}
+  {% set st = ui_locale.get('agent_status', {}) if ui_locale else {} %}
+  {% set dash = ui_locale.get('dashboard', {}) if ui_locale else {} %}
 
   <!-- Sidebar -->
   <aside id="sidebar" class="sidebar">
@@ -209,65 +226,62 @@
         <img src="/static/logo.png" alt="Lumen" />
         <div class="brand-text sidebar-text">
           <h1>Lumen</h1>
-          <p>Diagnóstico</p>
+          <p>&nbsp;</p>
         </div>
       </div>
-      <button class="icon-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+      <button class="icon-btn" onclick="toggleSidebar()" title="{{ nav.get('toggle_sidebar', 'Toggle sidebar') }}">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
         </svg>
       </button>
     </div>
     <nav class="sidebar-nav">
+      <div class="nav-group">
+        <div class="nav-group-title sidebar-text">{{ dash.get('workspace_group', 'Workspace') }}</div>
       <a href="/dashboard" class="nav-btn">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
         </svg>
-        <span class="sidebar-text">Charlas</span>
+        <span class="sidebar-text">{{ nav.get('chats', 'Chats') }}</span>
       </a>
-      <a href="/dashboard?panel=config" class="nav-btn">
+      <a href="/memory" class="nav-btn">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
         </svg>
-        <span class="sidebar-text">Ajustes</span>
+        <span class="sidebar-text">{{ nav.get('memory', 'Memory') }}</span>
       </a>
-      <a href="/settings/models" class="nav-btn">
+      <a href="/dashboard?panel=marketplace" class="nav-btn">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
         </svg>
-        <span class="sidebar-text">Modelos</span>
+        <span class="sidebar-text">{{ dash.get('marketplace', 'Modules') }}</span>
       </a>
-      <a href="/settings/providers" class="nav-btn">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
-        </svg>
-        <span class="sidebar-text">Providers</span>
-      </a>
-      <a href="/settings/tools" class="nav-btn">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-        </svg>
-        <span class="sidebar-text">Tools</span>
-      </a>
-      <a href="/settings/security" class="nav-btn">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-        </svg>
-        <span class="sidebar-text">Seguridad</span>
-      </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title sidebar-text">{{ dash.get('monitoring_group', 'Monitoring') }}</div>
       <a href="/agent-status" class="nav-btn active">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
         </svg>
-        <span class="sidebar-text">Estado</span>
+        <span class="sidebar-text">{{ nav.get('status', 'Status') }}</span>
       </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title sidebar-text">{{ dash.get('system_group', 'System') }}</div>
+      <a href="/settings" class="nav-btn">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="sidebar-text">{{ nav.get('settings', 'Settings') }}</span>
+      </a>
+      </div>
     </nav>
     <div class="sidebar-foot">
       <div class="status-pill">
         <span class="dot"></span>
-        <span class="sidebar-text">Lumen está activa</span>
+        <span class="sidebar-text">{{ nav.get('lumen_active', 'Lumen is active') }}</span>
+        <span class="sidebar-text" style="margin-left:auto;">v{{ version }}</span>
       </div>
     </div>
   </aside>
@@ -276,12 +290,12 @@
   <main class="main">
     <div class="topbar">
       <div style="flex:1;">
-        <h2>Estado del Agente</h2>
-        <p class="sub">Diagnóstico en tiempo real del sistema</p>
+        <h2>{{ st.get('title', 'Agent Status') }}</h2>
+        <p class="sub">{{ st.get('subtitle', 'Real-time system diagnostics') }}</p>
       </div>
       <div class="refresh-indicator" id="refresh-indicator">
         <span class="spin"></span>
-        <span>Live 5s</span>
+        <span>{{ st.get('live_5s', 'Live 5s') }}</span>
       </div>
     </div>
 
@@ -289,51 +303,51 @@
       <div class="l-card-grid cols-3">
         <!-- Version + Uptime -->
         <div class="stat-card">
-          <span class="stat-label">Versión</span>
+          <span class="stat-label">{{ st.get('version', 'Version') }}</span>
           <span class="stat-value" id="stat-version">—</span>
-          <span class="stat-sub" id="stat-uptime">Cargando…</span>
+          <span class="stat-sub" id="stat-uptime">{{ st.get('loading', 'Loading…') }}</span>
         </div>
 
         <!-- Model -->
         <div class="stat-card">
-          <span class="stat-label">Modelo activo</span>
+          <span class="stat-label">{{ st.get('active_model', 'Active model') }}</span>
           <span class="stat-value mono" id="stat-model">—</span>
           <span class="stat-sub" id="stat-provider-badge"></span>
         </div>
 
         <!-- Provider status -->
         <div class="stat-card">
-          <span class="stat-label">Provider</span>
+          <span class="stat-label">{{ st.get('provider', 'Provider') }}</span>
           <span class="stat-value" id="stat-provider">—</span>
           <span class="stat-sub" id="stat-provider-status-badge"></span>
         </div>
 
         <!-- Active modules -->
         <div class="stat-card">
-          <span class="stat-label">Módulos activos</span>
+          <span class="stat-label">{{ st.get('active_modules', 'Active modules') }}</span>
           <span class="stat-value" id="stat-modules">0</span>
           <span class="stat-sub" id="stat-modules-sub"></span>
         </div>
 
         <!-- Tools count -->
         <div class="stat-card">
-          <span class="stat-label">Herramientas</span>
+          <span class="stat-label">{{ st.get('tools', 'Tools') }}</span>
           <span class="stat-value" id="stat-tools">0</span>
-          <span class="stat-sub">registradas</span>
+          <span class="stat-sub">{{ st.get('registered', 'registered') }}</span>
         </div>
 
         <!-- Memory -->
         <div class="stat-card">
-          <span class="stat-label">Memoria</span>
+          <span class="stat-label">{{ st.get('memory', 'Memory') }}</span>
           <span class="stat-value" id="stat-memories">0</span>
-          <span class="stat-sub" id="stat-sessions">0 sesiones</span>
+          <span class="stat-sub" id="stat-sessions">0 {{ st.get('sessions', 'sessions') }}</span>
         </div>
       </div>
 
       <!-- Warnings -->
       <div style="margin-top: var(--lumen-s-4);" id="warnings-container">
         <div class="warnings-card" id="warnings-card" style="display:none;">
-          <h3>Advertencias</h3>
+          <h3>{{ st.get('warnings', 'Warnings') }}</h3>
           <div id="warnings-list"></div>
         </div>
       </div>
@@ -341,6 +355,12 @@
   </main>
 
   <script>
+    const I18N_STATUS = {
+      active_for: {{ st.get('active_for', 'Active for') | tojson }},
+      total: {{ st.get('total', 'total') | tojson }},
+      all_active: {{ st.get('all_active', 'all active') | tojson }},
+      sessions: {{ st.get('sessions', 'sessions') | tojson }},
+    };
     // === Helpers ===
     function escapeHtml(text) {
       const div = document.createElement('div');
@@ -356,10 +376,10 @@
     }
 
     function statusLabel(status) {
-      if (status === 'healthy') return 'Saludable';
-      if (status === 'degraded') return 'Degradado';
-      if (status === 'down') return 'Caído';
-      return 'Desconocido';
+      if (status === 'healthy') return {{ st.get('healthy', 'Healthy') | tojson }};
+      if (status === 'degraded') return {{ st.get('degraded', 'Degraded') | tojson }};
+      if (status === 'down') return {{ st.get('down', 'Down') | tojson }};
+      return {{ st.get('unknown', 'Unknown') | tojson }};
     }
 
     function formatUptime(seconds) {
@@ -391,7 +411,7 @@
       document.getElementById('stat-version').textContent = data.version || '—';
       const uptime = data.uptime_seconds || 0;
       document.getElementById('stat-uptime').innerHTML = uptime > 0
-        ? `Activo hace <strong>${formatUptime(uptime)}</strong>`
+        ? `${I18N_STATUS.active_for} <strong>${formatUptime(uptime)}</strong>`
         : '—';
 
       // Model
@@ -412,7 +432,7 @@
       const totalModules = data.total_modules || 0;
       document.getElementById('stat-modules').textContent = String(activeModules);
       document.getElementById('stat-modules-sub').textContent =
-        totalModules > activeModules ? `${totalModules} totales` : 'todos activos';
+        totalModules > activeModules ? `${totalModules} ${I18N_STATUS.total}` : I18N_STATUS.all_active;
 
       // Tools
       const tools = data.tools || [];
@@ -423,7 +443,7 @@
       const totalMemories = memory.total_memories || memory.total || 0;
       const sessions = memory.sessions || 0;
       document.getElementById('stat-memories').textContent = String(totalMemories);
-      document.getElementById('stat-sessions').textContent = `${sessions} sesiones`;
+      document.getElementById('stat-sessions').textContent = `${sessions} ${I18N_STATUS.sessions}`;
 
       // Warnings
       const warnings = data.warnings || [];
@@ -443,7 +463,7 @@
     async function loadStatus() {
       try {
         const res = await fetch('/api/agent/status');
-        if (!res.ok) throw new Error('Error al cargar estado');
+        if (!res.ok) throw new Error({{ st.get('load_error', 'Error loading status') | tojson }});
         const data = await res.json();
         renderStatus(data);
       } catch (e) {

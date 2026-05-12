@@ -11,7 +11,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
   <title>Lumen — Providers</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -222,7 +222,7 @@
     .toast.error { background: var(--lumen-danger); color: white; }
     @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .mono { font-family: var(--lumen-font-mono); font-size: 12px; }
 
     @media (max-width: 720px) {
       aside.sidebar { width: 64px; }

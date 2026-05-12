@@ -10,8 +10,8 @@
   <meta name="theme-color" content="#F5F8FC">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
-  <title>Lumen — Ajustes Generales</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <title>Lumen — {{ 'Ajustes Generales' if language == 'es' else 'General Settings' }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -131,13 +131,15 @@
   </style>
 </head>
 <body>
+  {% set sg = ui.get('settings_general', {}) if ui else {} %}
+  {% set dash = ui.get('dashboard', {}) if ui else {} %}
   {% set active_settings = 'general' %}
   {% include "_partials/settings_sidebar.html" %}
 
   <main>
     <div class="page-header">
-      <h2>General</h2>
-      <p>Proveedor, modelo, credenciales y preferencias</p>
+      <h2>{{ sg.get('title', 'General') }}</h2>
+      <p>{{ sg.get('subtitle', 'Provider, model, credentials and preferences') }}</p>
     </div>
 
     <div class="settings-layout">
@@ -146,51 +148,58 @@
           <div class="or-head">
             <div>
               <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 12h16M12 4v16M4 7h16M4 17h16"/></svg></span><h3>OpenRouter</h3></div>
-              <p>Conectá o renová la autorización. También podés editar manualmente abajo.</p>
+              <p>{{ sg.get('openrouter_sub', 'Connect or renew authorization. You can also edit values manually below.') }}</p>
             </div>
-            <span class="status-pill {{ 'connected' if openrouter_connected else '' }}">{{ 'Conectado' if openrouter_connected else 'No conectado' }}</span>
+            <span class="status-pill {{ 'connected' if openrouter_connected else '' }}">{{ sg.get('connected', 'Connected') if openrouter_connected else sg.get('not_connected', 'Not connected') }}</span>
           </div>
           <div class="settings-grid">
             <div class="field">
-              <label>Estado</label>
-              <p style="font-size:13px;color:var(--lumen-ink-soft);">{{ 'Autorizado con OpenRouter' if openrouter_connected else 'Todavía no autorizado desde el dashboard' }}</p>
+              <label>{{ sg.get('status_label', 'Status') }}</label>
+              <p style="font-size:13px;color:var(--lumen-ink-soft);">{{ sg.get('authorized', 'Authorized with OpenRouter') if openrouter_connected else sg.get('not_authorized', 'Not yet authorized from dashboard') }}</p>
             </div>
             <div class="field">
-              <label>Modelo para conectar</label>
+              <label>{{ sg.get('connect_model_label', 'Model to connect') }}</label>
               <p style="font-size:13px;color:var(--lumen-ink-soft);">{{ openrouter_model }}</p>
             </div>
           </div>
           <div class="settings-actions">
-            <a class="l-btn" href="/oauth/openrouter/start?language={{ language }}&model={{ openrouter_model }}&port=3000&redirect_to=%2Fsettings%2Fgeneral">{{ 'Reautorizar OpenRouter' if openrouter_connected else 'Conectar OpenRouter' }}</a>
-            <span style="font-size:12px;color:var(--lumen-mute);">Usa el flujo de autorización existente.</span>
+            <a class="l-btn" href="/oauth/openrouter/start?language={{ language }}&model={{ openrouter_model }}&port=3000&redirect_to=%2Fsettings%2Fgeneral">{{ sg.get('reauthorize_openrouter', 'Reauthorize OpenRouter') if openrouter_connected else sg.get('connect_openrouter', 'Connect OpenRouter') }}</a>
+            <span style="font-size:12px;color:var(--lumen-mute);">{{ sg.get('openrouter_hint', 'Use the existing authorization flow.') }}</span>
           </div>
         </div>
 
         <div class="l-card">
-          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 6h16M4 12h16M4 18h10"/></svg></span><h3>Configuración manual</h3></div>
+          <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 6h16M4 12h16M4 18h10"/></svg></span><h3>{{ sg.get('manual_title', 'Manual configuration') }}</h3></div>
           <form id="settings-form" class="settings-form" style="margin-top:16px;">
             <div class="settings-grid">
               <div class="field">
-                <label for="settings-provider">Proveedor</label>
+                <label for="settings-provider">{{ sg.get('provider_label', 'Provider') }}</label>
                 <input id="settings-provider" name="provider" class="l-input" type="text" value="{{ provider }}" autocomplete="off" />
               </div>
               <div class="field">
-                <label for="settings-model">Modelo</label>
+                <label for="settings-model">{{ sg.get('model_label', 'Model') }}</label>
                 <input id="settings-model" name="model" class="l-input" type="text" value="{{ model }}" autocomplete="off" required />
               </div>
               <div class="field">
-                <label for="settings-api-key-env">API key env</label>
+                <label for="settings-api-key-env">{{ sg.get('api_key_env_label', 'API key env') }}</label>
                 <input id="settings-api-key-env" name="api_key_env" class="l-input" type="text" value="{{ api_key_env }}" autocomplete="off" />
               </div>
               <div class="field">
-                <label for="settings-api-key">API key</label>
-                <input id="settings-api-key" name="api_key" class="l-input" type="password" value="" autocomplete="new-password" placeholder="Deja vacío para mantener la actual" />
+                <label for="settings-api-key">{{ sg.get('api_key_label', 'API key') }}</label>
+                <input id="settings-api-key" name="api_key" class="l-input" type="password" value="" autocomplete="new-password" placeholder="{{ sg.get('api_key_placeholder', 'Leave empty to keep current value') }}" />
+              </div>
+              <div class="field">
+                <label for="settings-language">{{ sg.get('language_label', 'Language') }}</label>
+                <select id="settings-language" name="language" class="l-input">
+                  <option value="es" {{ 'selected' if language == 'es' else '' }}>{{ sg.get('language_es', 'Spanish') }}</option>
+                  <option value="en" {{ 'selected' if language == 'en' else '' }}>{{ sg.get('language_en', 'English') }}</option>
+                </select>
               </div>
             </div>
-            <div class="field-hint">Guardar sin API key mantiene la clave guardada. Vaciar api_key_env quita esa variable del config.</div>
+            <div class="field-hint">{{ sg.get('save_hint', 'Saving without API key keeps the stored key. Clearing api_key_env removes that config variable.') }}</div>
             <div class="settings-actions">
-              <button id="settings-submit" type="submit" class="l-btn">Guardar cambios</button>
-              <span id="settings-message" class="settings-message">Listo para actualizar la configuración.</span>
+              <button id="settings-submit" type="submit" class="l-btn">{{ sg.get('save_btn', 'Save changes') }}</button>
+              <span id="settings-message" class="settings-message">{{ sg.get('ready_msg', 'Ready to update settings.') }}</span>
             </div>
           </form>
         </div>
@@ -199,8 +208,8 @@
       <aside class="settings-col">
         <div class="l-card theme-row">
           <div>
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5z"/></svg></span><h3>Tema</h3></div>
-            <p style="font-size:13px;color:var(--lumen-mute);">Lumen nace en luz. Podés pasar a oscuro cuando quieras.</p>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5z"/></svg></span><h3>{{ dash.get('theme', 'Theme') }}</h3></div>
+            <p style="font-size:13px;color:var(--lumen-mute);">{{ dash.get('theme_sub', 'Lumen is born in light. You can switch to dark whenever you want.') }}</p>
           </div>
           <button class="theme-toggle" onclick="toggleTheme()">
             <svg id="theme-icon-light" fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20" height="20">
@@ -209,33 +218,33 @@
             <svg id="theme-icon-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20" height="20" style="display:none;">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
             </svg>
-            <span id="theme-label">Tema oscuro</span>
+            <span id="theme-label">{{ dash.get('theme_dark', 'Dark theme') }}</span>
           </button>
         </div>
 
         <div class="l-card-grid">
           <div class="l-card">
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16v4H4zM4 13h16v4H4z"/></svg></span><h3>Proveedor</h3></div>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16v4H4zM4 13h16v4H4z"/></svg></span><h3>{{ sg.get('provider_label', 'Provider') }}</h3></div>
             <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ provider }}</p>
           </div>
           <div class="l-card">
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M12 5v14"/></svg></span><h3>Modelo</h3></div>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 12h14M12 5v14"/></svg></span><h3>{{ sg.get('model_label', 'Model') }}</h3></div>
             <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ model }}</p>
           </div>
           <div class="l-card">
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 10l5-5 5 5M12 5v14"/></svg></span><h3>API key env</h3></div>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 10l5-5 5 5M12 5v14"/></svg></span><h3>{{ sg.get('api_key_env_label', 'API key env') }}</h3></div>
             <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ api_key_env or '—' }}</p>
           </div>
           <div class="l-card">
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 11V8a4 4 0 1 1 8 0v3m-9 0h10v8H7z"/></svg></span><h3>API key</h3></div>
-            <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ 'guardada' if has_api_key else 'no guardada' }}</p>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 11V8a4 4 0 1 1 8 0v3m-9 0h10v8H7z"/></svg></span><h3>{{ sg.get('api_key_label', 'API key') }}</h3></div>
+            <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ sg.get('stored', 'stored') if has_api_key else sg.get('not_stored', 'not stored') }}</p>
           </div>
           <div class="l-card">
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 5h10M9 5s0 5-5 9c3 0 6 2 7 5M14 9h6M17 9v10"/></svg></span><h3>Idioma</h3></div>
-            <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ language }}</p>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 12h16M4 6h16M4 18h10"/></svg></span><h3>{{ sg.get('api_base_label', 'API base') }}</h3></div>
+            <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ api_base or 'default' }}</p>
           </div>
           <div class="l-card">
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3l2 4 4 .7-3 3 .7 4-3.7-2-3.7 2 .7-4-3-3 4-.7z"/></svg></span><h3>Personalidad</h3></div>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3l2 4 4 .7-3 3 .7 4-3.7-2-3.7 2 .7-4-3-3 4-.7z"/></svg></span><h3>{{ sg.get('personality_label', 'Personality') }}</h3></div>
             <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ current_personality }}</p>
           </div>
         </div>
@@ -258,7 +267,7 @@
       const label = document.getElementById('theme-label');
       if (light) light.style.display = theme === 'light' ? 'inline' : 'none';
       if (dark) dark.style.display = theme === 'dark' ? 'inline' : 'none';
-      if (label) label.textContent = theme === 'light' ? 'Tema oscuro' : 'Tema claro';
+      if (label) label.textContent = theme === 'light' ? '{{ dash.get("theme_dark", "Dark theme") }}' : '{{ dash.get("theme_light", "Light theme") }}';
     }
     const savedTheme = localStorage.getItem('lumen-theme') || 'light';
     document.documentElement.setAttribute('data-theme', savedTheme);
@@ -269,7 +278,7 @@
       const formData = new FormData(this);
       const data = Object.fromEntries(formData.entries());
       const msg = document.getElementById('settings-message');
-      msg.textContent = 'Guardando...';
+      msg.textContent = '{{ sg.get("saving_msg", "Saving...") }}';
       try {
         const resp = await fetch('/api/settings', {
           method: 'POST',
@@ -277,13 +286,13 @@
           body: JSON.stringify(data),
         });
         if (resp.ok) {
-          msg.textContent = 'Guardado correctamente.';
+          msg.textContent = '{{ sg.get("saved_msg", "Saved successfully.") }}';
           setTimeout(() => window.location.reload(), 500);
         } else {
-          msg.textContent = 'Error al guardar.';
+          msg.textContent = '{{ sg.get("save_error_msg", "Error while saving.") }}';
         }
       } catch (err) {
-        msg.textContent = 'Error de red.';
+        msg.textContent = '{{ sg.get("network_error_msg", "Network error.") }}';
       }
     });
   </script>

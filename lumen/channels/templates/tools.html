@@ -10,8 +10,8 @@
   <meta name="theme-color" content="#F5F8FC">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
-  <title>Lumen — Tools</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <title>Lumen — {{ 'Herramientas' if language == 'es' else 'Tools' }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -183,7 +183,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .mono { font-family: var(--lumen-font-mono); font-size: 12px; }
 
     @media (max-width: 720px) {
       aside.sidebar { width: 64px; }
@@ -204,19 +204,19 @@
   <main class="main">
     <div class="topbar">
       <div style="flex:1;">
-        <h2>Ajustes &rsaquo; Tools</h2>
-        <p class="sub">Clasificación de riesgo y confirmación de herramientas</p>
+        <h2>{{ ('Ajustes &rsaquo; Herramientas') if language == 'es' else ('Settings › Tools') }}</h2>
+        <p class="sub">{{ 'Clasificación de riesgo y confirmación de herramientas' if language == 'es' else 'Risk classification and tool confirmation' }}</p>
       </div>
       <div class="refresh-indicator" id="refresh-indicator">
         <span class="spin"></span>
-        <span>Auto-refresh 30s</span>
+        <span>{{ 'Auto-refresco 30s' if language == 'es' else 'Auto-refresh 30s' }}</span>
       </div>
     </div>
 
     <div class="panel">
       <!-- Filter buttons -->
       <div class="filter-bar" id="filter-bar">
-        <button class="filter-btn active" data-risk="all" onclick="setFilter('all', this)">Todos</button>
+        <button class="filter-btn active" data-risk="all" onclick="setFilter('all', this)">{{ 'Todos' if language == 'es' else 'All' }}</button>
         <button class="filter-btn" data-risk="read_only" onclick="setFilter('read_only', this)">Read Only</button>
         <button class="filter-btn" data-risk="mutating" onclick="setFilter('mutating', this)">Mutating</button>
         <button class="filter-btn" data-risk="destructive" onclick="setFilter('destructive', this)">Destructive</button>
@@ -224,19 +224,19 @@
       </div>
 
       <div class="l-card">
-        <h3>Herramientas registradas</h3>
+        <h3>{{ 'Herramientas registradas' if language == 'es' else 'Registered tools' }}</h3>
         <div style="overflow-x:auto;">
           <table class="tool-table" id="tools-table">
             <thead>
               <tr>
-                <th>Tool</th>
+                <th>{{ 'Herramienta' if language == 'es' else 'Tool' }}</th>
                 <th>Risk</th>
-                <th>Confirm</th>
-                <th class="hide-mobile">Descripción</th>
+                <th>{{ 'Confirmación' if language == 'es' else 'Confirm' }}</th>
+                <th class="hide-mobile">{{ 'Descripción' if language == 'es' else 'Description' }}</th>
               </tr>
             </thead>
             <tbody id="tools-body">
-              <tr><td colspan="4"><div class="empty-block">Cargando tools…</div></td></tr>
+              <tr><td colspan="4"><div class="empty-block">{{ 'Cargando tools…' if language == 'es' else 'Loading tools…' }}</div></td></tr>
             </tbody>
           </table>
         </div>
@@ -244,8 +244,8 @@
 
       <!-- Summary -->
       <div class="summary-row" id="summary-row">
-        <div class="summary-chip">Total: <strong id="summary-total">—</strong></div>
-        <div class="summary-chip">Requieren confirmación: <strong id="summary-confirm">—</strong></div>
+        <div class="summary-chip">{{ 'Total' if language == 'es' else 'Total' }}: <strong id="summary-total">—</strong></div>
+        <div class="summary-chip">{{ 'Requieren confirmación' if language == 'es' else 'Require confirmation' }}: <strong id="summary-confirm">—</strong></div>
       </div>
     </div>
   </main>
@@ -285,17 +285,17 @@
         : allTools.filter(t => t.risk === activeFilter);
 
       if (filtered.length === 0) {
-        body.innerHTML = '<tr><td colspan="4"><div class="empty-block">No hay herramientas con este filtro.</div></td></tr>';
+        body.innerHTML = '<tr><td colspan="4"><div class="empty-block">{{ "No hay herramientas con este filtro." if language == "es" else "No tools for this filter." }}</div></td></tr>';
         return;
       }
 
       body.innerHTML = filtered.map(t => {
         const riskBadge = `<span class="risk-badge ${t.risk}">${riskLabels[t.risk] || t.risk}</span>`;
         const confirm = t.confirm_required
-          ? '<span class="confirm-yes">Sí</span>'
-          : '<span class="confirm-no">No</span>';
+          ? '<span class="confirm-yes">{{ "Sí" if language == "es" else "Yes" }}</span>'
+          : '<span class="confirm-no">{{ "No" if language == "es" else "No" }}</span>';
         return `<tr>
-          <td style="font-weight:600;color:var(--lumen-ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">${escapeHtml(t.tool)}</td>
+          <td style="font-weight:600;color:var(--lumen-ink);font-family:var(--lumen-font-mono);">${escapeHtml(t.tool)}</td>
           <td>${riskBadge}</td>
           <td>${confirm}</td>
           <td class="hide-mobile" style="color:var(--lumen-mute);">${escapeHtml(t.description || '—')}</td>
@@ -307,7 +307,7 @@
     async function loadTools() {
       try {
         const res = await fetch('/api/tools');
-        if (!res.ok) throw new Error('Error al cargar tools');
+        if (!res.ok) throw new Error('{{ "Error al cargar tools" if language == "es" else "Error loading tools" }}');
         allTools = await res.json();
 
         document.getElementById('summary-total').textContent = allTools.length;
@@ -316,7 +316,7 @@
         renderTools();
       } catch (e) {
         document.getElementById('tools-body').innerHTML =
-          `<tr><td colspan="4"><div class="empty-block">Error: ${escapeHtml(e.message)}</div></td></tr>`;
+          `<tr><td colspan="4"><div class="empty-block">{{ "Error" if language == "es" else "Error" }}: ${escapeHtml(e.message)}</div></td></tr>`;
       }
     }
 

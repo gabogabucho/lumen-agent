@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -296,10 +297,29 @@ async def bootstrap_runtime(
         brain.load_flows(onboarding_flow_path)
     _load_pending_artifact_setup_flows(brain, pkg_dir=pkg_dir, config=config, lumen_dir=lumen_dir)
 
-    ui_path = pkg_dir / "locales" / lang / "ui.yaml"
+    locale_dir = pkg_dir / "locales" / lang
+    ui_json_path = locale_dir / "ui.json"
     locale = {}
-    if ui_path.exists():
-        locale = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
+
+    if ui_json_path.exists():
+        try:
+            loaded_json = json.loads(ui_json_path.read_text(encoding="utf-8")) or {}
+            if isinstance(loaded_json, dict):
+                locale = loaded_json
+        except Exception:
+            locale = {}
+
+    if not locale:
+        fallback_path = pkg_dir / "locales" / "en" / "ui.json"
+        if fallback_path.exists():
+            try:
+                loaded_fallback = json.loads(
+                    fallback_path.read_text(encoding="utf-8")
+                ) or {}
+                if isinstance(loaded_fallback, dict):
+                    locale = loaded_fallback
+            except Exception:
+                locale = {}
 
     return RuntimeBootstrap(
         brain=brain,

@@ -10,8 +10,8 @@
   <meta name="theme-color" content="#F5F8FC">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
-  <title>Lumen — Canales</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <title>Lumen — {{ 'Canales' if language == 'es' else 'Channels' }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -174,7 +174,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .mono { font-family: var(--lumen-font-mono); font-size: 12px; }
 
     @media (max-width: 720px) {
       aside.sidebar { width: 64px; }
@@ -186,6 +186,7 @@
   </style>
 </head>
 <body>
+  {% set chn = ui_locale.get('channels', {}) if ui_locale else {} %}
 
   <!-- Sidebar -->
   {% set active_settings = 'channels' %}
@@ -195,32 +196,32 @@
   <main class="main">
     <div class="topbar">
       <div style="flex:1;">
-        <h2>Ajustes &rsaquo; Canales</h2>
-        <p class="sub">Estado de los canales de comunicacion registrados</p>
+        <h2>{{ chn.get('title', 'Settings › Channels') }}</h2>
+        <p class="sub">{{ chn.get('subtitle', 'Status of registered communication channels') }}</p>
       </div>
       <div class="refresh-indicator" id="refresh-indicator">
         <span class="spin"></span>
-        <span>Auto-refresh 15s</span>
+        <span>{{ chn.get('auto_refresh_15s', 'Auto-refresh 15s') }}</span>
       </div>
     </div>
 
     <div class="panel">
       <div class="l-card">
-        <h3>Canales registrados</h3>
+        <h3>{{ chn.get('registered_title', 'Registered channels') }}</h3>
         <div style="overflow-x:auto;">
           <table class="channel-table" id="channels-table">
             <thead>
               <tr>
-                <th>Canal</th>
-                <th>Tipo</th>
-                <th>Estado</th>
-                <th class="hide-mobile">Mensajes</th>
-                <th class="hide-mobile">Ultima actividad</th>
-                <th class="hide-mobile">Error</th>
+                <th>{{ chn.get('col_channel', 'Channel') }}</th>
+                <th>{{ chn.get('col_type', 'Type') }}</th>
+                <th>{{ chn.get('col_status', 'Status') }}</th>
+                <th class="hide-mobile">{{ chn.get('col_messages', 'Messages') }}</th>
+                <th class="hide-mobile">{{ chn.get('col_last_activity', 'Last activity') }}</th>
+                <th class="hide-mobile">{{ chn.get('col_error', 'Error') }}</th>
               </tr>
             </thead>
             <tbody id="channels-body">
-              <tr><td colspan="6"><div class="empty-block">Cargando canales...</div></td></tr>
+              <tr><td colspan="6"><div class="empty-block">{{ chn.get('loading', 'Loading channels...') }}</div></td></tr>
             </tbody>
           </table>
         </div>
@@ -228,8 +229,8 @@
 
       <!-- Summary -->
       <div class="summary-row" id="summary-row">
-        <div class="summary-chip">Total: <strong id="summary-total">--</strong></div>
-        <div class="summary-chip">Conectados: <strong id="summary-connected">--</strong></div>
+        <div class="summary-chip">{{ chn.get('total', 'Total') }}: <strong id="summary-total">--</strong></div>
+        <div class="summary-chip">{{ chn.get('connected', 'Connected') }}: <strong id="summary-connected">--</strong></div>
       </div>
     </div>
   </main>
@@ -243,16 +244,18 @@
     }
 
     const statusLabels = {
-      connected: 'Conectado',
-      available: 'Disponible',
-      disconnected: 'Desconectado',
-      error: 'Error',
+      connected: {{ chn.get('status_connected', 'Connected') | tojson }},
+      available: {{ chn.get('status_available', 'Available') | tojson }},
+      disconnected: {{ chn.get('status_disconnected', 'Disconnected') | tojson }},
+      error: {{ chn.get('status_error', 'Error') | tojson }},
     };
 
     const typeLabels = {
-      internal: 'Interno',
-      module: 'Modulo',
+      internal: {{ chn.get('type_internal', 'Internal') | tojson }},
+      module: {{ chn.get('type_module', 'Module') | tojson }},
     };
+    const EMPTY_CHANNELS_TEXT = {{ chn.get('empty', 'No channels registered.') | tojson }};
+    const ERROR_LABEL = {{ chn.get('status_error', 'Error') | tojson }};
 
     function formatTime(ts) {
       if (!ts) return '--';
@@ -265,7 +268,7 @@
       const body = document.getElementById('channels-body');
 
       if (!channels || channels.length === 0) {
-        body.innerHTML = '<tr><td colspan="6"><div class="empty-block">No hay canales registrados.</div></td></tr>';
+        body.innerHTML = `<tr><td colspan="6"><div class="empty-block">${EMPTY_CHANNELS_TEXT}</div></td></tr>`;
         document.getElementById('summary-total').textContent = '0';
         document.getElementById('summary-connected').textContent = '0';
         return;
@@ -297,12 +300,12 @@
     async function loadChannels() {
       try {
         const res = await fetch('/api/channels');
-        if (!res.ok) throw new Error('Error al cargar canales');
+        if (!res.ok) throw new Error({{ chn.get('load_error', 'Error loading channels') | tojson }});
         const data = await res.json();
         renderChannels(data.channels);
       } catch (e) {
         document.getElementById('channels-body').innerHTML =
-          `<tr><td colspan="6"><div class="empty-block">Error: ${escapeHtml(e.message)}</div></td></tr>`;
+          `<tr><td colspan="6"><div class="empty-block">${ERROR_LABEL}: ${escapeHtml(e.message)}</div></td></tr>`;
       }
     }
 

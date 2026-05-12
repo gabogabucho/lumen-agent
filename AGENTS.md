@@ -26,6 +26,13 @@
 - Persistencia de navegación interna:
   - al refrescar, conserva panel activo (`chat`, `marketplace`, `status`, `config`)
   - fallback seguro a `chat` si el panel guardado es inválido
+- Navegación lateral unificada en vistas de operación:
+  - `dashboard`, `memory` y `agent-status` comparten el mismo patrón visual (`Workspace / Monitoring / System`)
+  - `Memory`, `Modules` y `Status` ya no fuerzan el “menú de settings”; `Settings` sí redirige al área de ajustes
+- Branding del sidebar actualizado:
+  - cabecera muestra solo `Lumen`
+  - versión dinámica (`v{__version__}`) movida al footer junto a `Lumen is active`
+  - favicon migrado a SVG del ojo de Lumen (`/static/favicon.svg`) y aplicado en templates web
 
 ### Accesibilidad y hardening UI
 - Labels accesibles añadidos en controles de marketplace.
@@ -38,6 +45,18 @@
 - Resultado final: **20/20**.
 - Reporte actualizado en:
   - `docs/phases/IMPECCABLE-AUDIT-REPORT.md`
+
+### i18n UI (EN/ES)
+- Infra i18n UI cargada desde JSON:
+  - `lumen/locales/en/ui.json`
+  - `lumen/locales/es/ui.json`
+- Se normalizaron rutas de settings y páginas operativas para usar `ui_locale`.
+- Dashboard EN/ES corregido para evitar mezcla de textos:
+  - menú lateral (Chats/Memory/Modules/Status/Settings)
+  - grupos de navegación (`Workspace / Monitoring / System`)
+  - panel derecho de capacidades (`sense_native`, `sense_adapted`, `sense_opaque`)
+- Se añadieron/ajustaron claves de locale para páginas:
+  - `memory`, `agent_status`, `security`, `outputs`, `channels`, `confirmations_page`.
 
 ## Arranque local (sin Docker)
 

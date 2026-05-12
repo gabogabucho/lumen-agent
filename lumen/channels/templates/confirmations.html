@@ -20,8 +20,9 @@
       } catch (e) {}
     })();
   </script>
-  <title>Lumen — Confirmaciones de Herramientas</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  {% set cfm = ui_locale.get('confirmations_page', {}) if ui_locale else {} %}
+  <title>Lumen — {{ cfm.get('page_title', 'Tool Confirmations') }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>    * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -106,36 +107,36 @@
 
   <main>
     <div class="page-header">
-      <h2>Confirmaciones de Herramientas</h2>
-      <p>Revisa decisiones de aprobacion pendientes e historial</p>
+      <h2>{{ cfm.get('title', 'Tool Confirmations') }}</h2>
+      <p>{{ cfm.get('subtitle', 'Review pending approval decisions and history') }}</p>
     </div>
 
     <div class="section">
       <div class="section-header">
-        <h3>Pendientes</h3>
+        <h3>{{ cfm.get('pending', 'Pending') }}</h3>
         <span id="pending-badge" class="badge badge-warn">0</span>
       </div>
       <div id="pending-list" class="empty-state">
-        No hay confirmaciones pendientes
+        {{ cfm.get('no_pending', 'No pending confirmations') }}
       </div>
     </div>
 
     <div class="section">
       <div class="section-header">
-        <h3>Historial</h3>
+        <h3>{{ cfm.get('history', 'History') }}</h3>
       </div>
       <div style="overflow-x: auto;">
         <table>
           <thead>
             <tr>
-              <th>Herramienta</th>
-              <th>Riesgo</th>
-              <th>Decision</th>
-              <th>Hora</th>
+              <th>{{ cfm.get('col_tool', 'Tool') }}</th>
+              <th>{{ cfm.get('col_risk', 'Risk') }}</th>
+              <th>{{ cfm.get('col_decision', 'Decision') }}</th>
+              <th>{{ cfm.get('col_time', 'Time') }}</th>
             </tr>
           </thead>
           <tbody id="history-body">
-            <tr><td colspan="4" class="empty-state">Sin historial</td></tr>
+            <tr><td colspan="4" class="empty-state">{{ cfm.get('no_history', 'No history') }}</td></tr>
           </tbody>
         </table>
       </div>
@@ -162,7 +163,7 @@
             </div>`;
           });
         } else {
-          pendingList.innerHTML = 'No hay confirmaciones pendientes';
+          pendingList.innerHTML = {{ cfm.get('no_pending', 'No pending confirmations') | tojson }};
           pendingList.classList.add('empty-state');
         }
 

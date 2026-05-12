@@ -11,7 +11,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
   <title>Lumen — Setup</title>
-  <link rel="icon" type="image/png" href="/static/logo.png">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   {% include "_partials/tokens.html" %}
@@ -98,7 +98,7 @@
 
     .entry-name, .provider-name { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: var(--lumen-ink); }
     .entry-description, .provider-model { font-size: 13px; color: var(--lumen-ink-soft); line-height: 1.55; }
-    .provider-model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .provider-model { font-family: var(--lumen-font-mono); }
 
     .entry-tag, .provider-tag {
       display: inline-block;
@@ -173,7 +173,7 @@
       border: 1px solid var(--lumen-line);
       border-radius: var(--lumen-r-sm);
       color: var(--lumen-ink);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--lumen-font-mono);
       font-size: 14px;
       outline: none;
       transition: border-color 180ms ease, box-shadow 180ms ease;

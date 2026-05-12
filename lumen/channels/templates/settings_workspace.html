@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#F5F8FC">
-  <title>Lumen — Workspace Governance</title>
+  <title>Lumen — {{ 'Gobernanza de Workspace' if language == 'es' else 'Workspace Governance' }}</title>
   <script>
     (function() {
       var theme = localStorage.getItem('lumen-theme');
@@ -35,8 +35,8 @@
     <div class="wrap">
       <div class="head">
         <div>
-          <h1 style="margin:0;">Workspace Governance</h1>
-          <p class="muted" id="workspaceMeta">Loading...</p>
+          <h1 style="margin:0;">{{ 'Gobernanza de Workspace' if language == 'es' else 'Workspace Governance' }}</h1>
+          <p class="muted" id="workspaceMeta">{{ 'Cargando...' if language == 'es' else 'Loading...' }}</p>
         </div>
       </div>
       <div id="teams"></div>
@@ -51,14 +51,14 @@
     async function loadGovernance() {
       const res = await fetch('/api/workspace/governance');
       if (!res.ok) {
-        document.getElementById('workspaceMeta').textContent = 'Access denied or workspace not ready.';
+        document.getElementById('workspaceMeta').textContent = '{{ "Acceso denegado o workspace no listo." if language == "es" else "Access denied or workspace not ready." }}';
         return;
       }
       const data = await res.json();
       const gov = data.governance || {};
       const teams = gov.teams || [];
       document.getElementById('workspaceMeta').textContent =
-        `${gov.display_name || gov.workspace || 'Workspace'} · ${teams.length} teams`;
+        `${gov.display_name || gov.workspace || '{{ "Workspace" if language == "es" else "Workspace" }}'} · ${teams.length} {{ "equipos" if language == "es" else "teams" }}`;
 
       const container = document.getElementById('teams');
       container.innerHTML = '';
@@ -68,12 +68,12 @@
         const users = team.users || [];
         card.innerHTML = `
           <div class="team-title">${esc(team.display_name || team.team)} <span class="muted">(${esc(team.team)})</span></div>
-          <div class="skills">Skills: ${esc((team.enabled_skills || []).join(', ') || '-')}</div>
-          <table aria-label="Users for ${esc(team.team)}">
-            <thead><tr><th>Email</th><th>Display</th><th>Role</th></tr></thead>
+          <div class="skills">{{ 'Skills' if language == 'es' else 'Skills' }}: ${esc((team.enabled_skills || []).join(', ') || '-')}</div>
+          <table aria-label="{{ 'Usuarios de' if language == 'es' else 'Users for' }} ${esc(team.team)}">
+            <thead><tr><th>Email</th><th>{{ 'Nombre' if language == 'es' else 'Display' }}</th><th>{{ 'Rol' if language == 'es' else 'Role' }}</th></tr></thead>
             <tbody>
-              ${users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.display_name)}</td><td>${esc(u.role || 'member')}</td></tr>`).join('')}
-              ${users.length === 0 ? '<tr><td colspan="3" class="muted">No users</td></tr>' : ''}
+              ${users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.display_name)}</td><td>${esc(u.role || '{{ "miembro" if language == "es" else "member" }}')}</td></tr>`).join('')}
+              ${users.length === 0 ? '<tr><td colspan="3" class="muted">{{ "Sin usuarios" if language == "es" else "No users" }}</td></tr>' : ''}
             </tbody>
           </table>
         `;
