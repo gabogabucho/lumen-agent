@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 130" role="img" aria-label="Lumen eye">
+  <defs>
+    <linearGradient id="lumenEyeCoreFav" x1="70" y1="20" x2="150" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7d7dff"/>
+      <stop offset="45%" stop-color="#3d3dd6"/>
+      <stop offset="80%" stop-color="#24249a"/>
+      <stop offset="100%" stop-color="#171c66"/>
+    </linearGradient>
+  </defs>
+  <path d="M20,65 Q50,22 110,16 Q170,22 200,65 Q170,108 110,114 Q50,108 20,65 Z" fill="rgba(61,61,214,0.08)" stroke="rgba(15,21,69,0.18)" stroke-width="1"/>
+  <ellipse cx="110" cy="65" rx="56" ry="42" fill="#5fb5d6" opacity="0.22"/>
+  <polygon points="110,25 147,43 156,71 134,100 97,103 69,82 63,49 84,31" fill="url(#lumenEyeCoreFav)"/>
+  <polygon points="110,25 147,43 123,55 96,45" fill="rgba(255,255,255,0.24)"/>
+  <polygon points="147,43 156,71 132,82 123,55" fill="rgba(255,255,255,0.24)"/>
+  <polygon points="69,82 97,103 132,82 102,69" fill="rgba(255,255,255,0.24)"/>
+  <polygon points="129,57 141,62 132,72 121,67" fill="#1976d2" opacity="0.75"/>
+  <polygon points="121,34 136,42 118,54 103,45" fill="rgba(244,244,255,0.82)"/>
+  <path d="M10,65 Q45,15 110,10 Q175,15 210,65 Q175,115 110,120 Q45,115 10,65 Z" fill="none" stroke="#334b69" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M35,65 Q65,30 110,24 Q155,30 185,65" fill="none" stroke="#5e6f88" stroke-width="1.25" opacity="0.7"/>
+  <path d="M35,65 Q65,100 110,106 Q155,100 185,65" fill="none" stroke="#5e6f88" stroke-width="1.25" opacity="0.7"/>
+  <circle cx="110" cy="65" r="30" fill="#5fb5d6" opacity="0.18"/>
+  <circle cx="110" cy="65" r="30" fill="none" stroke="#5fb5d6" stroke-width="2" opacity="0.9"/>
+  <circle cx="110" cy="65" r="22" fill="#5fb5d6" opacity="0.42"/>
+  <circle cx="110" cy="65" r="10" fill="#0b1e3a"/>
+  <circle cx="100" cy="56" r="4" fill="#fff" opacity="0.9"/>
+  <circle cx="118" cy="52" r="2" fill="#fff" opacity="0.9"/>
+</svg>
