@@ -51,3 +51,8 @@ lumen/modules/*
 
 # Internal dev archives (not for remote)
 dev-archive/
+
+# Local agent capabilities & context (should not be versioned)
+.agents/
+.codex/
+.lumen-local/

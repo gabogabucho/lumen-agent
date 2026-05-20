@@ -1,3 +1,0 @@
-model: "ollama/llama3"
-provider: "ollama"
-api_base: "http://localhost:11434/v1"
