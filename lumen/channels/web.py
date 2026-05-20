@@ -3147,6 +3147,8 @@ async def api_chat(request: Request):
                         yield f"event: tool_status\ndata: {json.dumps({'iteration': chunk.get('iteration'), 'max_iterations': chunk.get('max_iterations'), 'tools_this_round': chunk.get('tools_this_round'), 'total_so_far': chunk.get('total_so_far')})}\n\n"
                     elif chunk.get("type") == "tool_confirm_result":
                         yield f"event: tool_confirm_result\ndata: {json.dumps({'tool': chunk.get('tool'), 'decision': chunk.get('decision'), 'reason': chunk.get('reason', '')})}\n\n"
+                    elif chunk.get("type") == "reasoning":
+                        yield f"event: reasoning\ndata: {json.dumps({'content': chunk.get('content', '')})}\n\n"
 
                     # Schedule next brain chunk
                     pending_brain = asyncio.ensure_future(anext(brain_iter, None))
@@ -3349,28 +3351,20 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 )
                 continue
 
-            await websocket.send_text(json.dumps({"type": "typing", "status": True}))
-
             try:
-                result = await _brain.think(user_text, session)
-                await websocket.send_text(
-                    json.dumps(
-                        {
-                            "type": "message",
-                            "role": "assistant",
-                            "content": result.get("message", ""),
-                        }
-                    )
-                )
+                brain_stream = _brain.think_stream(user_text, session)
+                await websocket.send_text(json.dumps({"type": "typing", "status": True}))
+                async for chunk in brain_stream:
+                    await websocket.send_text(json.dumps({"type": chunk["type"], **chunk}))
             except Exception:
-                logger.exception("websocket_think_failed session_id=%s", session_id)
+                logger.exception("websocket_think_stream_failed session_id=%s", session_id)
                 await websocket.send_text(
                     json.dumps(
                         {
                             "type": "message",
                             "role": "assistant",
                             "content": (
-                                "Tuve un error temporal procesando la respuesta, "
+                                "Tuve un error temporal procesando tu mensaje, "
                                 "pero la conexión sigue activa."
                             ),
                         }

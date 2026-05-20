@@ -1085,6 +1085,11 @@ class Brain:
             delta = choice.delta
             finish_reason = choice.finish_reason
 
+            # Emit reasoning/thinking tokens (DeepSeek R1, Claude extended thinking, etc.)
+            rc = getattr(delta, "reasoning_content", None)
+            if rc:
+                yield {"type": "reasoning", "content": rc}
+
             if delta.content:
                 full_content += delta.content
                 if has_tool_calls:

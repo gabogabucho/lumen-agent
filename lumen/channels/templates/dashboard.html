@@ -564,6 +564,72 @@
     }
     .msg.assistant .bubble p { margin: 0 0 8px 0; }
     .msg.assistant .bubble p:last-child { margin-bottom: 0; }
+
+    .tool-bubble {
+      background: var(--lumen-lavender);
+      border: 1px solid rgba(93, 115, 171, 0.18);
+      border-radius: var(--lumen-r-md);
+      padding: 10px 14px;
+      font-size: 13px;
+      animation: msgIn 0.25s ease-out;
+    }
+    .tool-bubble .tool-header {
+      color: var(--lumen-blue);
+      margin-bottom: 4px;
+    }
+    .tool-bubble .tool-detail {
+      color: var(--lumen-ink-soft);
+      font-size: 12px;
+      border-top: 1px solid rgba(93, 115, 171, 0.12);
+      padding-top: 6px;
+      margin-top: 6px;
+    }
+    .reasoning-bubble {
+      background: var(--lumen-lavender);
+      border: 1px solid rgba(120, 100, 180, 0.18);
+      border-radius: var(--lumen-r-md);
+      padding: 0;
+      font-size: 13px;
+      animation: msgIn 0.25s ease-out;
+    }
+    .reasoning-bubble summary {
+      cursor: pointer;
+      padding: 10px 14px;
+      color: var(--lumen-blue);
+      font-size: 13px;
+      user-select: none;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .reasoning-bubble summary::-webkit-details-marker { display: none; }
+    .reasoning-bubble summary::before {
+      content: '▸';
+      font-size: 11px;
+      transition: transform 0.15s ease;
+    }
+    .reasoning-bubble[open] summary::before {
+      transform: rotate(90deg);
+    }
+    .reasoning-bubble .reasoning-content {
+      color: var(--lumen-ink-soft);
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 0 14px 10px;
+      border-top: 1px solid rgba(120, 100, 180, 0.10);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    @keyframes reasoningPulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+    .reasoning-bubble.streaming summary .reasoning-dots {
+      animation: reasoningPulse 1.5s ease-in-out infinite;
+    }
     .msg.assistant .bubble h1,
     .msg.assistant .bubble h2,
     .msg.assistant .bubble h3 { margin: 10px 0 6px 0; font-weight: 600; line-height: 1.25; }
@@ -1695,6 +1761,49 @@
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
+    function addToolCall(icon, title, detail) {
+      if (chatEmpty && chatEmpty.parentNode) chatEmpty.remove();
+      const wrapper = document.createElement('div');
+      wrapper.className = 'msg assistant tool-call';
+      wrapper.innerHTML = `<div class="tool-bubble">
+          <div class="tool-header">${icon} <strong>${escapeHtml(title)}</strong></div>
+          ${detail ? '<div class="tool-detail">' + escapeHtml(detail) + '</div>' : ''}
+        </div>`;
+      chatMessages.appendChild(wrapper);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    let activeReasoningEl = null;
+    function addReasoning(text) {
+      if (chatEmpty && chatEmpty.parentNode) chatEmpty.remove();
+      if (!activeReasoningEl) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'msg assistant tool-call';
+        wrapper.innerHTML = `<details class="reasoning-bubble streaming">
+            <summary>💭 Pensando…<span class="reasoning-dots"> …</span></summary>
+            <div class="reasoning-content"></div>
+          </details>`;
+        chatMessages.appendChild(wrapper);
+        activeReasoningEl = wrapper.querySelector('.reasoning-content');
+      }
+      activeReasoningEl.textContent += text;
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    function finalizeReasoning() {
+      if (activeReasoningEl) {
+        const bubble = activeReasoningEl.closest('.reasoning-bubble');
+        if (bubble) {
+          bubble.classList.remove('streaming');
+          const summary = bubble.querySelector('summary');
+          if (summary) {
+            const dots = summary.querySelector('.reasoning-dots');
+            if (dots) dots.remove();
+          }
+        }
+        activeReasoningEl = null;
+      }
+    }
+
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
@@ -1853,6 +1962,7 @@
         }
         if (data.type === 'message' && data.role === 'assistant') {
           typingIndicator.classList.add('hidden');
+          finalizeReasoning();
           addMessage('assistant', data.content);
           pulse('heartbeat');
         }
@@ -1869,6 +1979,55 @@
           chatMessages.innerHTML = '';
           chatMessages.appendChild(chatEmpty);
           addMessage('assistant', data.message);
+        }
+
+        // --- Intermediate streaming events ---
+        if (data.type === 'error') {
+          typingIndicator.classList.add('hidden');
+          addMessage('assistant', '⚠️ ' + data.error || 'Ocurrió un error inesperado.');
+          return;
+        }
+
+        if (data.type === 'done') {
+          typingIndicator.classList.add('hidden');
+          finalizeReasoning();
+          return;
+        }
+
+        if (data.type === 'reasoning') {
+          addReasoning(data.content || '');
+          return;
+        }
+
+        if (data.type === 'tool_progress') {
+          finalizeReasoning();
+          addToolCall('🔧', 'Ejecutando ' + data.tool + '…');
+          return;
+        }
+
+        if (data.type === 'tool_result') {
+          addToolCall('✓', data.tool, data.truncated_result || (data.error ? 'Error: ' + data.error : 'Completado'));
+          return;
+        }
+
+        if (data.type === 'tool_status') {
+          addToolCall('⟳', 'Iteración ' + data.iteration + '/' + data.max_iterations + ' (' + data.tools_this_round + ' herramientas)');
+          return;
+        }
+
+        if (data.type === 'tool_confirm_request') {
+          addToolCall('?', data.tool + ' requiere aprobación', 'Esperando respuesta…');
+          return;
+        }
+
+        if (data.type === 'tool_confirm_result') {
+          addToolCall(data.tool, data.decision + ' — ' + (data.reason || '—'));
+          return;
+        }
+
+        if (data.type === 'tool_confirm_response') {
+          // WS sends confirm responses back; skip silently
+          return;
         }
       });
 
