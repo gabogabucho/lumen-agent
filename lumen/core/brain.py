@@ -660,7 +660,7 @@ class Brain:
         # 2. Build context — Consciousness + Personality + Body + Catalog + State
         context = {
             "consciousness": self.consciousness.as_context(),
-            "personality": self.personality.as_context(),
+            "personality": self.personality.as_context(slot_values=session.slots),
             "body": self.registry.as_context(),
             "catalog": self.catalog.as_context(
                 installed_names={
