@@ -2721,6 +2721,7 @@ async def page_settings_general(request: Request):
             "current_personality": personality_data.get("name", "default"),
             "openrouter_connected": openrouter_connected,
             "openrouter_model": openrouter_model,
+            "ui": _locale.get("dashboard", {}),
         },
     )
 

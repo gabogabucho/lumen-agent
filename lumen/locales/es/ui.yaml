@@ -40,7 +40,10 @@ dashboard:
   available: "Disponibles"
   upload_zip: "Subir ZIP"
   connection_lost: "Se perdió la conexión. Recargá la página."
-
+  api_key_placeholder: "Deja vacío para mantener la actual"
+  api_key_hint: "Guardar sin API key mantiene la clave guardada. Vaciar api_key_env quita esa variable del config."
+  save: "Guardar cambios"
+  settings_ready: "Listo para actualizar la configuración."
 awakening:
   iam: "Yo soy <span>Lumen</span>."
   ready: "Lumen está lista."

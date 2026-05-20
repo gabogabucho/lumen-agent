@@ -10,8 +10,8 @@
   <meta name="theme-color" content="#F5F8FC">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Lumen">
-  <title>Lumen — Ajustes Generales</title>
-  <link rel="icon" href="/static/logo.png" type="image/png">
+  <title>{{ ui.title | default('Lumen') }} — {{ ui.config | default('Ajustes Generales') }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% include "_partials/tokens.html" %}
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -184,12 +184,19 @@
               </div>
               <div class="field">
                 <label for="settings-api-key">API key</label>
-                <input id="settings-api-key" name="api_key" class="l-input" type="password" value="" autocomplete="new-password" placeholder="Deja vacío para mantener la actual" />
+                <input id="settings-api-key" name="api_key" class="l-input" type="password" value="" autocomplete="new-password" placeholder="{{ ui.api_key_placeholder | default('Deja vacío para mantener la actual') }}" />
+              </div>
+              <div class="field">
+                <label for="settings-language">{{ ui.language_label | default('Idioma') }}</label>
+                <select id="settings-language" name="language" class="l-input">
+                  <option value="es" {% if language == 'es' %}selected{% endif %}>Español</option>
+                  <option value="en" {% if language == 'en' %}selected{% endif %}>English</option>
+                </select>
               </div>
             </div>
-            <div class="field-hint">Guardar sin API key mantiene la clave guardada. Vaciar api_key_env quita esa variable del config.</div>
+            <div class="field-hint">{{ ui.api_key_hint | default('Guardar sin API key mantiene la clave guardada. Vaciar api_key_env quita esa variable del config.') }}</div>
             <div class="settings-actions">
-              <button id="settings-submit" type="submit" class="l-btn">Guardar cambios</button>
+              <button id="settings-submit" type="submit" class="l-btn">{{ ui.save | default('Guardar cambios') }}</button>
               <span id="settings-message" class="settings-message">Listo para actualizar la configuración.</span>
             </div>
           </form>
@@ -228,14 +235,14 @@
           </div>
           <div class="l-card">
             <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 11V8a4 4 0 1 1 8 0v3m-9 0h10v8H7z"/></svg></span><h3>API key</h3></div>
-            <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ 'guardada' if has_api_key else 'no guardada' }}</p>
+            <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ 'Guardada' if has_api_key else 'No guardada' }}</p>
           </div>
           <div class="l-card">
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 5h10M9 5s0 5-5 9c3 0 6 2 7 5M14 9h6M17 9v10"/></svg></span><h3>Idioma</h3></div>
-            <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ language }}</p>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 5h10M9 5s0 5-5 9c3 0 6 2 7 5M14 9h6M17 9v10"/></svg></span><h3>{{ ui.language_label | default('Idioma') }}</h3></div>
+            <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ 'Español' if language == 'es' else 'English' }}</p>
           </div>
           <div class="l-card">
-            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3l2 4 4 .7-3 3 .7 4-3.7-2-3.7 2 .7-4-3-3 4-.7z"/></svg></span><h3>Personalidad</h3></div>
+            <div class="section-head"><span class="section-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3l2 4 4 .7-3 3 .7 4-3.7-2-3.7 2 .7-4-3-3 4-.7z"/></svg></span><h3>{{ ui.personality | default('Personalidad') }}</h3></div>
             <p style="font-size:13px;color:var(--lumen-ink-soft);margin-top:4px;">{{ current_personality }}</p>
           </div>
         </div>
