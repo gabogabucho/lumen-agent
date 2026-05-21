@@ -545,10 +545,23 @@ app.get('/chat/:id', async (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
+    const connected = connectionState === 'connected' && !!sock?.user;
+    const rawId = sock?.user?.id || null;
+    const number = rawId ? rawId.replace(/:.*@/, '@').replace(/@.*/, '') : null;
+    let session_status = 'disconnected';
+    if (connected) {
+        session_status = 'authenticated';
+    } else if (sock && !sock.user) {
+        session_status = 'pending_qr';
+    }
+
     res.json({
         status: connectionState,
         queueLength: messageQueue.length,
         uptime: process.uptime(),
+        connected,
+        number,
+        session_status,
     });
 });
 

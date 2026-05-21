@@ -1593,13 +1593,48 @@ async def health_check():
             best = _brain.provider_health.get_best_provider()
             provider_status = best.status.value if best else "unknown"
 
-    return {
+    whatsapp_info = None
+    try:
+        wa_runtime_dir = LUMEN_DIR / "modules" / "x-lumen-comunicacion-whatsapp"
+        wa_runtime_file = wa_runtime_dir / "runtime.json"
+        if wa_runtime_file.exists():
+            wa_state = json.loads(wa_runtime_file.read_text(encoding="utf-8"))
+            health_blob = wa_state.get("whatsapp_health")
+            if health_blob:
+                updated_at = health_blob.get("updated_at", 0)
+                if time.time() - updated_at > 30:
+                    whatsapp_info = {
+                        "status": "unknown",
+                        "number": None,
+                        "session_status": "unknown",
+                    }
+                else:
+                    whatsapp_info = {
+                        "status": health_blob.get("status", "unknown"),
+                        "number": health_blob.get("number"),
+                        "session_status": health_blob.get("session_status", "unknown"),
+                    }
+            else:
+                whatsapp_info = {
+                    "status": "unknown",
+                    "number": None,
+                    "session_status": "unknown",
+                }
+    except Exception:
+        whatsapp_info = None
+
+    response = {
         "ok": _brain is not None,
         "version": __version__,
         "modules_ready": modules_ready,
         "model": model,
         "provider_status": provider_status,
     }
+
+    if whatsapp_info is not None:
+        response["whatsapp"] = whatsapp_info
+
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)

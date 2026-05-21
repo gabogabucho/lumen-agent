@@ -18,6 +18,7 @@ MODULE_NAME = "x-lumen-comunicacion-whatsapp"
 BRIDGE_SOURCE_DIR = Path(__file__).parent
 DEFAULT_BRIDGE_PORT = 3100
 POLL_INTERVAL = 2
+HEALTH_POLL_INTERVAL = 5
 HEALTH_TIMEOUT = 30  # seconds to wait for bridge to become ready
 
 
@@ -80,6 +81,7 @@ class WhatsAppRuntime:
     def __init__(self, context):
         self.context = context
         self._poll_task: asyncio.Task | None = None
+        self._health_task: asyncio.Task | None = None
         self._bridge_proc: subprocess.Popen | None = None
         self._stopping = False
 
@@ -198,6 +200,9 @@ class WhatsAppRuntime:
         self._poll_task = asyncio.create_task(
             self._poll_loop(), name=f"{MODULE_NAME}-poll"
         )
+        self._health_task = asyncio.create_task(
+            self._poll_health(), name=f"{MODULE_NAME}-health"
+        )
 
     async def stop(self):
         self._stopping = True
@@ -208,6 +213,14 @@ class WhatsAppRuntime:
             except asyncio.CancelledError:
                 pass
             self._poll_task = None
+
+        if self._health_task is not None:
+            self._health_task.cancel()
+            try:
+                await self._health_task
+            except asyncio.CancelledError:
+                pass
+            self._health_task = None
 
         if self._bridge_proc is not None:
             try:
@@ -302,6 +315,33 @@ class WhatsAppRuntime:
                 )
                 self.context.write_runtime_state(state)
                 await asyncio.sleep(POLL_INTERVAL)
+
+    async def _poll_health(self):
+        while not self._stopping:
+            try:
+                health = await asyncio.to_thread(
+                    _bridge_get, self._bridge_port(), "/health"
+                )
+                state = self.context.read_runtime_state()
+                state["whatsapp_health"] = {
+                    "status": health.get("status", "unknown"),
+                    "connected": health.get("connected", False),
+                    "number": health.get("number"),
+                    "session_status": health.get("session_status", "unknown"),
+                    "updated_at": time(),
+                }
+                self.context.write_runtime_state(state)
+            except Exception:
+                state = self.context.read_runtime_state()
+                state["whatsapp_health"] = {
+                    "status": "unknown",
+                    "connected": False,
+                    "number": None,
+                    "session_status": "unknown",
+                    "updated_at": time(),
+                }
+                self.context.write_runtime_state(state)
+            await asyncio.sleep(HEALTH_POLL_INTERVAL)
 
     async def _handle_message(self, msg: dict):
         chat_id = msg.get("chatId", "")
