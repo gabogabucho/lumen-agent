@@ -524,6 +524,14 @@ def _build_bridge_env(context, port: int) -> dict:
     if allowed:
         env["WHATSAPP_ALLOWED_USERS"] = str(allowed)
 
+    pairing_phone = context.resolve_setting("pairing_phone", "LUMEN_PAIRING_PHONE")
+    if pairing_phone:
+        env["LUMEN_PAIRING_PHONE"] = str(pairing_phone)
+
+    pairing_device = context.resolve_setting("pairing_device_name", "LUMEN_PAIRING_DEVICE_NAME")
+    if pairing_device:
+        env["LUMEN_PAIRING_DEVICE_NAME"] = str(pairing_device)
+
     return env
 
 

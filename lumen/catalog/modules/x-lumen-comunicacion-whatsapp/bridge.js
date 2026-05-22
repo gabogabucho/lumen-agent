@@ -18,7 +18,7 @@
  * node bridge.js --port 3100 --session ~/.lumen/whatsapp/session
  */
 
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage, requestPairingCode } from '@whiskeysockets/baileys';
 import express from 'express';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -54,6 +54,8 @@ const AUDIO_CACHE_DIR = path.join(process.env.HOME || '~', '.lumen', 'whatsapp',
 const PAIR_ONLY = args.includes('--pair-only');
 const WHATSAPP_MODE = getArg('mode', process.env.WHATSAPP_MODE || 'self-chat'); // "bot" or "self-chat"
 const ALLOWED_USERS = parseAllowedUsers(process.env.WHATSAPP_ALLOWED_USERS || '');
+const LUMEN_PAIRING_PHONE = process.env.LUMEN_PAIRING_PHONE || '';
+const LUMEN_PAIRING_DEVICE_NAME = process.env.LUMEN_PAIRING_DEVICE_NAME || 'Lumen Companion';
 
 // Lumen handles its own message formatting — no prefix by default.
 const DEFAULT_REPLY_PREFIX = '';
@@ -143,7 +145,7 @@ async function startSocket() {
         auth: state,
         logger,
         printQRInTerminal: false,
-        browser: ['Lumen', 'Chrome', '120.0'],
+        browser: [LUMEN_PAIRING_DEVICE_NAME, 'Chrome', '120.0'],
         syncFullHistory: false,
         markOnlineOnConnect: false,
         // Required for Baileys 7.x: without this, incoming messages that need
@@ -154,6 +156,18 @@ async function startSocket() {
             return { conversation: '' };
         },
     });
+
+    // Pairing code mode (Baileys v7): request a numeric code instead of QR
+    if (LUMEN_PAIRING_PHONE && !state.creds?.me?.id) {
+        try {
+            const pairingCode = await sock.requestPairingCode(LUMEN_PAIRING_PHONE);
+            console.log(`[PAIRING CODE] ${pairingCode}`);
+            writeFileSync('/tmp/whatsapp-pairing-code', pairingCode);
+        } catch (err) {
+            console.log(`[WARN] Failed to request pairing code: ${err.message}`);
+            // Fall back to QR if pairing code fails
+        }
+    }
 
     sock.ev.on('creds.update', () => { saveCreds(); lidToPhone = buildLidMap(); });
 
@@ -563,6 +577,22 @@ app.get('/health', (req, res) => {
         number,
         session_status,
     });
+});
+
+// Pairing code endpoint
+app.get('/pairing-code', (req, res) => {
+    try {
+        const code = existsSync('/tmp/whatsapp-pairing-code')
+            ? readFileSync('/tmp/whatsapp-pairing-code', 'utf-8')
+            : null;
+        if (code) {
+            res.json({ code });
+        } else {
+            res.status(404).json({ error: 'No pairing code available' });
+        }
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to read pairing code' });
+    }
 });
 
 // ---------------------------------------------------------------------------
