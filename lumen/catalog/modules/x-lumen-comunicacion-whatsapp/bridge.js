@@ -132,6 +132,8 @@ const MAX_RECENT_IDS = 50;
 
 let sock = null;
 let connectionState = 'disconnected';
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 // ---------------------------------------------------------------------------
 // WhatsApp socket
@@ -183,20 +185,40 @@ async function startSocket() {
         if (connection === 'close') {
             const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
             connectionState = 'disconnected';
+
+            // Destroy the old socket before reconnecting to avoid session conflicts
+            if (sock) {
+                try { sock.end(); } catch (e) {}
+                sock = null;
+            }
+
             if (reason === DisconnectReason.loggedOut) {
                 console.log('[ERROR] Logged out. Delete session and restart to re-authenticate.');
                 process.exit(1);
-            } else {
-                // 515 = restart requested (common after pairing). Always reconnect.
-                if (reason === 515) {
-                    console.log('[INFO] WhatsApp requested restart (code 515). Reconnecting...');
-                } else {
-                    console.log(`[WARN] Connection closed (reason: ${reason}). Reconnecting in 3s...`);
-                }
-                setTimeout(startSocket, reason === 515 ? 1000 : 3000);
             }
+
+            reconnectAttempts += 1;
+            if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+                console.log(`[ERROR] Too many reconnect attempts (${MAX_RECONNECT_ATTEMPTS}). Exiting.`);
+                process.exit(1);
+            }
+
+            // 515 = restart requested (common after pairing). Always reconnect quickly.
+            // 440 = connection replaced (conflict). Wait longer to avoid competing with the other session.
+            let delayMs = 3000;
+            if (reason === DisconnectReason.restartRequired) {
+                delayMs = 1000;
+                console.log('[INFO] WhatsApp requested restart (code 515). Reconnecting...');
+            } else if (reason === DisconnectReason.connectionReplaced) {
+                delayMs = 10000;
+                console.log(`[WARN] Connection replaced (code 440). Another session is active. Reconnecting in ${delayMs / 1000}s...`);
+            } else {
+                console.log(`[WARN] Connection closed (reason: ${reason}). Reconnecting in ${delayMs / 1000}s... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+            }
+            setTimeout(startSocket, delayMs);
         } else if (connection === 'open') {
             connectionState = 'connected';
+            reconnectAttempts = 0; // reset on successful connection
             console.log('[OK] WhatsApp connected!');
             if (PAIR_ONLY) {
                 console.log('[OK] Pairing complete. Credentials saved.');
