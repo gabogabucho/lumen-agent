@@ -509,16 +509,7 @@ def _start_gateway_inbox_watcher(
                 break
             if new_size <= offset:
                 continue
-            logger.info("New inbox data for %s: offset=%d new_size=%d", module_name, offset, new_size)
-        while True:
-            await asyncio.sleep(1)
-            try:
-                new_size = inbox_path.stat().st_size
-            except OSError:
-                break
-            if new_size <= offset:
-                continue
-            _logger.info("New data detected: offset=%d new_size=%d", offset, new_size)
+            logger.info("New data detected: offset=%d new_size=%d", offset, new_size)
             with inbox_path.open("r", encoding="utf-8") as f:
                 f.seek(offset)
                 for line in f:
