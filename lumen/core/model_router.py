@@ -18,10 +18,17 @@ VALID_ROLES = ("planner", "executor", "summarizer", "responder", "main")
 
 @dataclass
 class ModelRouterConfig:
-    """Configuration for model routing."""
+    """Configuration for model routing.
+
+    IMPORTANT: The default fallback is empty ("") so that callers never
+    accidentally route LLM calls to a third-party provider the user never
+    configured.  When no explicit fallback is set, the configured *default*
+    model is used as its own fallback — this mirrors the user's intent
+    ("use the model I chose").
+    """
     default: str = "deepseek/deepseek-chat"
     roles: dict[str, str] = field(default_factory=dict)
-    fallback: str = "google/gemini-2.0-flash"
+    fallback: str = ""  # empty = use default model as fallback
     use_default_for_all: bool = True  # toggle: use default model for everything
 
     @classmethod
@@ -36,22 +43,34 @@ class ModelRouterConfig:
           config["models"]["use_default_for_all"]
 
         Falls back to config["model"] (legacy single-model) if models section missing.
+
+        Key design principle: the fallback MUST default to the same model
+        the user configured.  We never route calls to a provider the user
+        didn't explicitly choose (e.g. google/gemini-2.0-flash when the
+        user only has a Tokaine key).
         """
-        if not config or not isinstance(config, dict):
+        if config is None or not isinstance(config, dict):
             return cls()
 
         models_cfg = config.get("models")
         if not isinstance(models_cfg, dict):
-            # Legacy: single model in config root
-            return cls(default=config.get("model", cls.default))
+            # Legacy: single model in config root — no explicit fallback
+            # configured, so use the same model as its own fallback.
+            default_model = config.get("model", cls.default)
+            return cls(default=default_model, fallback=default_model)
+
+        default_model = models_cfg.get("default", config.get("model", cls.default))
+        # If no explicit fallback configured, use the same default model
+        # rather than a hardcoded third-party model.
+        fallback_model = models_cfg.get("fallback", default_model)
 
         return cls(
-            default=models_cfg.get("default", config.get("model", cls.default)),
+            default=default_model,
             roles={
                 k: v for k, v in models_cfg.get("roles", {}).items()
                 if k in VALID_ROLES and isinstance(v, str)
             },
-            fallback=models_cfg.get("fallback", cls.fallback),
+            fallback=fallback_model,
             use_default_for_all=models_cfg.get("use_default_for_all", True),
         )
 

@@ -220,17 +220,19 @@ class ConfigFromDictTests(unittest.TestCase):
 
     def test_legacy_single_model(self):
         """from_config falls back to config['model'] when no models section."""
-        config = {"model": "gpt-4o-mini"}
+        config = {"model": "openai/qwen-flagship"}
         cfg = ModelRouterConfig.from_config(config)
-        self.assertEqual(cfg.default, "gpt-4o-mini")
-        self.assertEqual(cfg.fallback, "google/gemini-2.0-flash")  # default fallback
+        self.assertEqual(cfg.default, "openai/qwen-flagship")
+        # Fallback defaults to the same model as default (not a third-party model)
+        self.assertEqual(cfg.fallback, "openai/qwen-flagship")
         self.assertTrue(cfg.use_default_for_all)  # default toggle
 
     def test_none_config_returns_defaults(self):
         """from_config with None returns all defaults."""
         cfg = ModelRouterConfig.from_config(None)
         self.assertEqual(cfg.default, "deepseek/deepseek-chat")
-        self.assertEqual(cfg.fallback, "google/gemini-2.0-flash")
+        # Fallback defaults to empty — callers should use the default model
+        self.assertEqual(cfg.fallback, "")
         self.assertTrue(cfg.use_default_for_all)
         self.assertEqual(cfg.roles, {})
 
@@ -238,7 +240,8 @@ class ConfigFromDictTests(unittest.TestCase):
         """from_config with {} returns all defaults."""
         cfg = ModelRouterConfig.from_config({})
         self.assertEqual(cfg.default, "deepseek/deepseek-chat")
-        self.assertEqual(cfg.fallback, "google/gemini-2.0-flash")
+        # With an empty dict and no 'model' key, fallback mirrors default
+        self.assertEqual(cfg.fallback, "deepseek/deepseek-chat")
         self.assertTrue(cfg.use_default_for_all)
 
     def test_models_section_with_string_value_ignored(self):
@@ -252,7 +255,8 @@ class ConfigFromDictTests(unittest.TestCase):
         config = {"models": {"default": "claude-sonnet-4-20250514"}}
         cfg = ModelRouterConfig.from_config(config)
         self.assertEqual(cfg.default, "claude-sonnet-4-20250514")
-        self.assertEqual(cfg.fallback, "google/gemini-2.0-flash")
+        # Fallback defaults to same model when not explicitly configured
+        self.assertEqual(cfg.fallback, "claude-sonnet-4-20250514")
         self.assertTrue(cfg.use_default_for_all)
         self.assertEqual(cfg.roles, {})
 
@@ -349,7 +353,8 @@ class SetDefaultFallbackTests(unittest.TestCase):
     def test_set_fallback_empty_returns_false(self):
         router = ModelRouter()
         self.assertFalse(router.set_fallback(""))
-        self.assertEqual(router.get_fallback(), "google/gemini-2.0-flash")
+        # Default fallback is now "" (empty), set_fallback("") doesn't change it
+        self.assertEqual(router.get_fallback(), "")
 
     def test_set_fallback_none_returns_false(self):
         router = ModelRouter()
@@ -365,7 +370,8 @@ class ListRolesTests(unittest.TestCase):
         self.assertIn("default", roles)
         self.assertIn("fallback", roles)
         self.assertEqual(roles["default"], "deepseek/deepseek-chat")
-        self.assertEqual(roles["fallback"], "google/gemini-2.0-flash")
+        # Default fallback is now "" (empty string)
+        self.assertEqual(roles["fallback"], "")
 
     def test_list_roles_includes_configured_roles(self):
         cfg = ModelRouterConfig(

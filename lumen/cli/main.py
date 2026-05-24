@@ -495,10 +495,10 @@ def install():
         default="1",
     )
 
-    model_map = {
+model_map = {
         "1": ("deepseek/deepseek-chat", "DEEPSEEK_API_KEY", "DeepSeek API key"),
-        "2": ("gpt-4o-mini", "OPENAI_API_KEY", "OpenAI API key"),
-        "3": ("claude-sonnet-4-20250514", "ANTHROPIC_API_KEY", "Anthropic API key"),
+        "2": ("openai/gpt-4o-mini", "OPENAI_API_KEY", "OpenAI API key"),
+        "3": ("anthropic/claude-sonnet-4-20250514", "ANTHROPIC_API_KEY", "Anthropic API key"),
         "4": ("ollama/llama3", None),
     }
 

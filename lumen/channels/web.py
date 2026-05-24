@@ -1071,9 +1071,19 @@ async def _refresh_runtime_from_config(previous_config: dict | None = None) -> b
 
     _config = latest_config
     _locale = _load_ui_locale(_config.get("language", "en"))
-    _brain.model = _config.get("model", _brain.model)
     _brain.api_key_env = _config.get("api_key_env")
     _brain.language = str(_config.get("language") or "en").lower()
+
+    # CRITICAL: Keep model_router, model, and provider_health in sync.
+    # model_router is the SINGLE SOURCE OF TRUTH for which model to use.
+    # brain.model is derived from it, never set independently.
+    if hasattr(_brain, "model_router") and _brain.model_router is not None:
+        _brain.model_router.update_config(ModelRouterConfig.from_config(_config))
+        _brain.model = _brain.model_router.get_model("main")
+    else:
+        _brain.model = _config.get("model", _brain.model)
+    if hasattr(_brain, "provider_health") and _brain.provider_health is not None:
+        _brain.provider_health = ProviderHealthTracker.from_config(_config)
 
     if getattr(_brain, "marketplace", None) is not None:
         _brain.marketplace.config = _config

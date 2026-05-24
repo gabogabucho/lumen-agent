@@ -78,7 +78,17 @@ class Brain:
         self.connectors = connectors
         self.registry = registry
         self.catalog = catalog or Catalog()
-        self.model = model
+        # ── Model resolution: SINGLE SOURCE OF TRUTH ──
+        # The model_router is the canonical source for which model to use.
+        # self.model is kept as a convenience alias but ALWAYS derives from
+        # model_router.get_model("main") so there is never a mismatch.
+        self._model_router_config = ModelRouterConfig.from_config(config)
+        self.model_router = model_router or ModelRouter(self._model_router_config)
+        # If an explicit model was passed (e.g. CLI override), apply it;
+        # otherwise, derive from the router config.
+        if model and model != self.model_router.get_model("main"):
+            self.model_router.set_default(model)
+        self.model = self.model_router.get_model("main")
         self.flows = flows or []
         self.mcp_manager = mcp_manager
         self.marketplace = marketplace
@@ -87,9 +97,6 @@ class Brain:
         self.api_key_env = api_key_env
         self.flow_action_handler = flow_action_handler
         self.config = config or {}
-        self.model_router = model_router or ModelRouter(
-            ModelRouterConfig.from_config(config)
-        )
         self.provider_health = provider_health or ProviderHealthTracker.from_config(config)
         self.tool_policy = ToolPolicy()
         self.tool_policy.load_defaults()
@@ -100,7 +107,7 @@ class Brain:
         self._cached_lessons_text: str = ""  # Pre-loaded lessons for prompt injection
         self.workspace_index = workspace_index  # For ACL checks (Phase 3)
         self._last_user_email: str = ""  # Current user for ACL (set per-request)
-        self._distiller = SessionDistiller(memory=self.memory, model=self.model)
+        self._distiller = SessionDistiller(memory=self.memory, model=self._resolved_model())
         self._distilled_sessions: set[str] = set()
 
     async def _persist_tool_output(
