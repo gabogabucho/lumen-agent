@@ -815,47 +815,81 @@ def workspace_skill_disable(
 
 @config_app.command("set")
 def config_set(
-    key: str = typer.Argument(help="Module key (e.g. otto.store_id)"),
+    key: str = typer.Argument(help="Config key: <module>.<key> for secrets or <key> for global config"),
     value: str = typer.Argument(help="Value to set"),
     instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
     data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
 ):
-    """Set a module config value. Usage: lumen config set <module>.<key> <value>"""
+    """Set a config value.
+
+    For module secrets, use: lumen config set <module>.<key> <value>
+    For global config, use: lumen config set <key> <value>
+
+    Examples:
+      lumen config set owner_password mypassword
+      lumen config set x-lumen-comunicacion-whatsapp.LUMEN_PAIRING_PHONE 5491112345678
+    """
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+
     parts = key.split(".", 1)
-    if len(parts) != 2 or not parts[0] or not parts[1]:
-        console.print("[red]Invalid key format. Use: <module>.<key>[/red]")
-        raise typer.Exit(1)
 
-    module_name, config_key = parts
-    _resolve_config_paths(instance, data_dir)
+    if len(parts) == 2 and parts[0] and parts[1]:
+        # Module secret: module.key = value
+        module_name, config_key = parts
+        from lumen.core.secrets_store import configure_paths
+        configure_paths(lumen_dir=lumen_dir)
+        from lumen.core.secrets_store import save_module
+        save_module(module_name, {config_key: value})
+        console.print(f"[green]✓[/green] {module_name}.{config_key} = {_redact(value)}")
+    else:
+        # Global config key: key = value (written to config.yaml)
+        config_path = lumen_dir / "config.yaml"
+        config = _load_persisted_config(config_path)
+        config[key] = value
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(yaml.dump(config, default_flow_style=False), encoding="utf-8")
+        console.print(f"[green]✓[/green] {key} = {_redact(value)}")
 
-    from lumen.core.secrets_store import save_module
-    save_module(module_name, {config_key: value})
-    console.print(f"[green]✓[/green] {module_name}.{config_key} = {_redact(value)}")
+        # Try live reload if server is running
+        if _request_live_reload(lumen_dir, timeout=3.0):
+            console.print("[dim]Live runtime reloaded.[/dim]")
 
 
 @config_app.command("get")
 def config_get(
-    key: str = typer.Argument(help="Module key (e.g. otto.store_id)"),
+    key: str = typer.Argument(help="Config key: <module>.<key> for secrets or <key> for global config"),
     instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
     data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
 ):
-    """Get a module config value. Usage: lumen config get <module>.<key>"""
+    """Get a config value.
+
+    For module secrets, use: lumen config get <module>.<key>
+    For global config, use: lumen config get <key>
+    """
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+
     parts = key.split(".", 1)
-    if len(parts) != 2 or not parts[0] or not parts[1]:
-        console.print("[red]Invalid key format. Use: <module>.<key>[/red]")
-        raise typer.Exit(1)
-
-    module_name, config_key = parts
-    _resolve_config_paths(instance, data_dir)
-
-    from lumen.core.secrets_store import load_module
-    secrets = load_module(module_name)
-    if config_key in secrets:
-        console.print(secrets[config_key])
+    if len(parts) == 2 and parts[0] and parts[1]:
+        # Module secret
+        module_name, config_key = parts
+        from lumen.core.secrets_store import configure_paths
+        configure_paths(lumen_dir=lumen_dir)
+        from lumen.core.secrets_store import load_module
+        secrets = load_module(module_name)
+        if config_key in secrets:
+            console.print(secrets[config_key])
+        else:
+            console.print(f"[dim]Key {key} not found.[/dim]")
+            raise typer.Exit(1)
     else:
-        console.print(f"[dim]Key {key} not found.[/dim]")
-        raise typer.Exit(1)
+        # Global config key
+        config_path = lumen_dir / "config.yaml"
+        config = _load_persisted_config(config_path)
+        if key in config:
+            console.print(str(config[key]))
+        else:
+            console.print(f"[dim]Key {key} not found in config.[/dim]")
+            raise typer.Exit(1)
 
 
 @config_app.command("delete")
@@ -864,18 +898,33 @@ def config_delete(
     instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
     data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
 ):
-    """Delete a module config value. Usage: lumen config delete <module>.<key>"""
+    """Delete a config value.
+
+    For module secrets, use: lumen config delete <module>.<key>
+    For global config, use: lumen config delete <key>
+    """
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+
     parts = key.split(".", 1)
-    if len(parts) != 2 or not parts[0] or not parts[1]:
-        console.print("[red]Invalid key format. Use: <module>.<key>[/red]")
-        raise typer.Exit(1)
-
-    module_name, config_key = parts
-    _resolve_config_paths(instance, data_dir)
-
-    from lumen.core.secrets_store import delete_module_key
-    delete_module_key(module_name, config_key)
-    console.print(f"[green]✓[/green] Deleted {module_name}.{config_key}")
+    if len(parts) == 2 and parts[0] and parts[1]:
+        # Module secret
+        module_name, config_key = parts
+        from lumen.core.secrets_store import configure_paths
+        configure_paths(lumen_dir=lumen_dir)
+        from lumen.core.secrets_store import delete_module_key
+        delete_module_key(module_name, config_key)
+        console.print(f"[green]✓[/green] Deleted {module_name}.{config_key}")
+    else:
+        # Global config key
+        config_path = lumen_dir / "config.yaml"
+        config = _load_persisted_config(config_path)
+        if key in config:
+            del config[key]
+            config_path.write_text(yaml.dump(config, default_flow_style=False), encoding="utf-8")
+            console.print(f"[green]✓[/green] Deleted {key} from config")
+        else:
+            console.print(f"[dim]Key {key} not found in config.[/dim]")
+            raise typer.Exit(1)
 
 
 @config_app.command("list")
@@ -1212,10 +1261,96 @@ def module_install(
     if result.get("status") == "installed":
         name = result.get("name", ref)
         console.print(f"[green]✓[/green] Installed {name}")
+    elif result.get("status") == "already_installed":
+        name = result.get("name", ref)
+        console.print(f"[yellow]⊙[/yellow] Already installed: {name}")
+        pending = result.get("pending_setup")
+        if pending:
+            console.print(f"  [dim]Run [bold]lumen module setup {name}[/bold] to configure.[/dim]")
     else:
         error = result.get("error", "Unknown error")
         console.print(f"[red]✗[/red] {error}")
         raise typer.Exit(1)
+
+
+@module_app.command("activate")
+def module_activate(
+    name: str = typer.Argument(help="Module name (e.g. x-lumen-comunicacion-whatsapp)"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
+):
+    """Activate an installed module — register it and start its runtime.
+
+    If a Lumen server is running, it will be reloaded to pick up the module.
+    Otherwise, the module is registered for the next startup.
+
+    Examples:
+      lumen module activate x-lumen-comunicacion-whatsapp
+      lumen module activate x-lumen-comunicacion-whatsapp --data-dir /opt/lumen
+    """
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    config_path = lumen_dir / "config.yaml"
+    config = _load_persisted_config(config_path)
+
+    if not _is_runtime_configured(config):
+        console.print("[red]Lumen is not configured.[/red]")
+        console.print("Run [bold]lumen run[/bold] to start the setup wizard.")
+        raise typer.Exit(1)
+
+    from lumen.core.installer import Installer
+    from lumen.core.connectors import ConnectorRegistry
+    from lumen.core.module_manifest import load_module_manifest, resolve_module_manifest_path
+
+    installer = Installer(
+        PKG_DIR,
+        ConnectorRegistry(),
+        memory=None,
+        lumen_dir=lumen_dir,
+        config=config,
+    )
+
+    # Resolve the module directory — could be in installed_dir or pkg_dir
+    module_dir = installer._resolve_module_dir(name)
+    if not module_dir.exists() or resolve_module_manifest_path(module_dir) is None:
+        console.print(f"[red]Module '{name}' is not installed.[/red]")
+        console.print(f"[dim]Run [bold]lumen module install {name}[/bold] first.[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Activating module {name}...[/dim]")
+
+    # Try to reload a live running instance first
+    if _request_live_reload(lumen_dir, timeout=5.0):
+        console.print(f"[green]✓[/green] Module {name} activated (live reload)")
+        return
+
+    # Offline: try to bootstrap runtime and sync modules
+    try:
+        runtime = asyncio.run(
+            bootstrap_runtime(
+                config,
+                pkg_dir=PKG_DIR,
+                lumen_dir=lumen_dir,
+                active_channels=["web"],
+            )
+        )
+    except Exception as e:
+        console.print(f"[red]Failed to bootstrap runtime: {e}[/red]")
+        raise typer.Exit(1)
+
+    if runtime is None or runtime.brain is None:
+        console.print("[red]Failed to activate runtime.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        asyncio.run(sync_runtime_modules(
+            runtime.brain, config=config, pkg_dir=PKG_DIR, lumen_dir=lumen_dir
+        ))
+        asyncio.run(runtime.brain.memory.close())
+    except Exception as e:
+        console.print(f"[yellow]⚠[/yellow] Module activated but runtime sync had issues: {e}")
+        return
+
+    console.print(f"[green]✓[/green] Module {name} activated")
 
 
 # ── api-key commands ─────────────────────────────────────────────────────────
@@ -1282,7 +1417,15 @@ def apikey_revoke(
         console.print(f"[dim]No key found with prefix '{prefix}'.[/dim]")
 
 
-@app.command("channels")
+channels_app = typer.Typer(
+    name="channels",
+    help="Manage communication channels (WhatsApp, Telegram, etc.).",
+    no_args_is_help=True,
+)
+app.add_typer(channels_app, name="channels")
+
+
+@channels_app.command("list")
 def channels_list():
     """Show status of all registered communication channels."""
     console.print("\n[bold]Channels[/bold]\n")
@@ -1317,6 +1460,129 @@ def channels_list():
 
     console.print(f"\n  [dim]Total: {len(all_channels)} channels ({len(known_channels)} internal, {len(module_channels)} module)[/dim]")
     console.print("  [dim]Module channels are registered as gateway modules via lumen module install.[/dim]\n")
+
+
+# Map of well-known channel names to their gateway module names
+_CHANNEL_MODULE_MAP = {
+    "whatsapp": "x-lumen-comunicacion-whatsapp",
+    "telegram": "x-lumen-comunicacion-telegram",
+}
+
+
+@channels_app.command("enable")
+def channels_enable(
+    channel: str = typer.Argument(help="Channel name (e.g. whatsapp, telegram)"),
+    instance: str = typer.Option(None, "--instance", "-i", help="Named instance"),
+    data_dir: str = typer.Option(None, "--data-dir", "-d", help="Custom data dir"),
+):
+    """Enable a communication channel by activating its gateway module.
+
+    This installs the module (if not installed) and activates it.
+    For WhatsApp, also shows the pairing code or QR instructions.
+
+    Examples:
+      lumen channels enable whatsapp
+      lumen channels enable telegram
+    """
+    from lumen.core.installer import Installer
+    from lumen.core.connectors import ConnectorRegistry
+    from lumen.core.module_manifest import resolve_module_manifest_path
+
+    lumen_dir = resolve_lumen_dir(instance=instance, data_dir=data_dir)
+    config_path = lumen_dir / "config.yaml"
+    config = _load_persisted_config(config_path)
+
+    if not _is_runtime_configured(config):
+        console.print("[red]Lumen is not configured.[/red]")
+        console.print("Run [bold]lumen run[/bold] to start the setup wizard.")
+        raise typer.Exit(1)
+
+    # Resolve module name from channel name
+    module_name = _CHANNEL_MODULE_MAP.get(channel.lower(), channel)
+
+    installer = Installer(
+        PKG_DIR,
+        ConnectorRegistry(),
+        memory=None,
+        lumen_dir=lumen_dir,
+        config=config,
+    )
+
+    # Check if already installed
+    if installer.is_installed(module_name):
+        console.print(f"[dim]Module {module_name} is already installed. Activating...[/dim]")
+    else:
+        # Try to install from catalog
+        console.print(f"[dim]Installing module {module_name} from catalog...[/dim]")
+        result = installer.install_from_catalog(module_name)
+        if result.get("status") == "not_found":
+            # Try local path fallback
+            local_path = PKG_DIR / "catalog" / "modules" / module_name
+            if local_path.exists():
+                result = installer.install_from_local_path(local_path)
+            else:
+                console.print(f"[red]Channel module '{module_name}' not found in catalog.[/red]")
+                console.print(f"[dim]Available channels: {', '.join(_CHANNEL_MODULE_MAP.keys())}[/dim]")
+                raise typer.Exit(1)
+
+        status = result.get("status")
+        if status == "installed":
+            console.print(f"[green]✓[/green] Installed {module_name}")
+        elif status == "already_installed":
+            console.print(f"[yellow]⊙[/yellow] Already installed: {module_name}")
+        else:
+            error = result.get("error", "Unknown error")
+            console.print(f"[red]✗[/red] Failed to install {module_name}: {error}")
+            raise typer.Exit(1)
+
+        # Persist config changes from install
+        config = _load_persisted_config(config_path)
+
+    # Try to activate in live runtime
+    console.print(f"[dim]Activating {module_name}...[/dim]")
+    if _request_live_reload(lumen_dir, timeout=5.0):
+        console.print(f"[green]✓[/green] Channel '{channel}' enabled ({module_name} activated in live runtime)")
+    else:
+        # Offline activation: bootstrap and sync
+        try:
+            runtime = asyncio.run(
+                bootstrap_runtime(
+                    config,
+                    pkg_dir=PKG_DIR,
+                    lumen_dir=lumen_dir,
+                    active_channels=["web"],
+                )
+            )
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Could not bootstrap runtime: {e}")
+            console.print(f"[dim]Module {module_name} is installed and will activate on next server start.[/dim]")
+            return
+
+        if runtime and runtime.brain:
+            try:
+                asyncio.run(sync_runtime_modules(
+                    runtime.brain, config=config, pkg_dir=PKG_DIR, lumen_dir=lumen_dir
+                ))
+                console.print(f"[green]✓[/green] Channel '{channel}' enabled ({module_name} activated)")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Activation sync issue: {e}")
+                console.print(f"[dim]Module {module_name} is installed and will activate on next server start.[/dim]")
+            finally:
+                try:
+                    asyncio.run(runtime.brain.memory.close())
+                except Exception:
+                    pass
+        else:
+            console.print(f"[dim]Module {module_name} is installed and will activate on next server start.[/dim]")
+
+    # Show channel-specific hints
+    if channel.lower() == "whatsapp":
+        console.print("\n[bold]WhatsApp Setup[/bold]")
+        console.print("  Set your pairing phone and device name:")
+        console.print("  [dim]lumen config set x-lumen-comunicacion-whatsapp.LUMEN_PAIRING_PHONE <number>[/dim]")
+        console.print("  [dim]lumen config set x-lumen-comunicacion-whatsapp.LUMEN_PAIRING_DEVICE_NAME <name>[/dim]")
+        console.print("  Then restart Lumen or run [bold]lumen reload[/bold]")
+        console.print("  The pairing code or QR will appear in the server logs.")
 
 
 @app.command()

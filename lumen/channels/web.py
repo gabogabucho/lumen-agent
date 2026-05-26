@@ -3672,7 +3672,7 @@ async def api_modules_install(request: Request, name: str):
         if remote_item and remote_item.get("actions", {}).get("can_install"):
             result = installer.install_marketplace_item(remote_item)
 
-    if result["status"] == "installed":
+    if result["status"] in ("installed", "already_installed"):
         installed_name = result.get("name", name)
         await sync_runtime_modules(
             _brain, config=_config, pkg_dir=PKG_DIR, lumen_dir=LUMEN_DIR
