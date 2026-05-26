@@ -18,12 +18,12 @@
  * node bridge.js --port 3100 --session ~/.lumen/whatsapp/session
  */
 
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage, requestPairingCode } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } from '@whiskeysockets/baileys';
 import express from 'express';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import path from 'path';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'fs';
 import { randomBytes } from 'crypto';
 import qrcode from 'qrcode-terminal';
 import { matchesAllowedUser, parseAllowedUsers } from './allowlist.js';
@@ -132,6 +132,8 @@ const MAX_RECENT_IDS = 50;
 
 let sock = null;
 let connectionState = 'disconnected';
+// Track consecutive reconnect failures — reset to 0 on successful connection (open event).
+// Kept at module scope so the count survives across startSocket() calls.
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
@@ -159,16 +161,31 @@ async function startSocket() {
         },
     });
 
-    // Pairing code mode (Baileys v7): request a numeric code instead of QR
+    // Pairing code mode (Baileys v7): request a numeric code instead of QR.
+    // Baileys needs a moment after socket creation before requestPairingCode()
+    // is ready — retry with 2s delay up to 30 attempts to avoid silent failures
+    // that leave the user stuck on QR fallback.
     if (LUMEN_PAIRING_PHONE && !state.creds?.me?.id) {
-        try {
-            const pairingCode = await sock.requestPairingCode(LUMEN_PAIRING_PHONE);
-            console.log(`[PAIRING CODE] ${pairingCode}`);
-            writeFileSync('/tmp/whatsapp-pairing-code', pairingCode);
-        } catch (err) {
-            console.log(`[WARN] Failed to request pairing code: ${err.message}`);
-            // Fall back to QR if pairing code fails
-        }
+        const tryPairing = async () => {
+            let pairingCode = null;
+            for (let i = 0; i < 30; i++) {
+                try {
+                    await new Promise(r => setTimeout(r, 2000));
+                    if (!pairingCode) {
+                        pairingCode = await sock.requestPairingCode(LUMEN_PAIRING_PHONE);
+                        console.log(`[PAIRING CODE] ${pairingCode}`);
+                        writeFileSync('/tmp/whatsapp-pairing-code', pairingCode);
+                    }
+                    return;
+                } catch (err) {
+                    console.log(`[WARN] Pairing attempt ${i + 1}: ${err.message}`);
+                }
+            }
+            if (!pairingCode) {
+                console.log('[WARN] Failed to get pairing code, using QR fallback');
+            }
+        };
+        tryPairing();
     }
 
     sock.ev.on('creds.update', () => { saveCreds(); lidToPhone = buildLidMap(); });
@@ -193,29 +210,40 @@ async function startSocket() {
             }
 
             if (reason === DisconnectReason.loggedOut) {
-                console.log('[ERROR] Logged out. Delete session and restart to re-authenticate.');
-                process.exit(1);
+                console.log('[ERROR] Logged out. Clearing session for fresh QR...');
+                try {
+                    const sessionDir = SESSION_DIR;
+                    if (existsSync(sessionDir)) {
+                        rmSync(sessionDir, { recursive: true, force: true });
+                        console.log('[INFO] Session cleared. Will reconnect with fresh QR in 3s...');
+                    }
+                } catch (e) {
+                    console.log('[WARN] Could not clear session:', e.message);
+                }
+                setTimeout(() => startSocket(), 3000);
+                return;
             }
 
-            reconnectAttempts += 1;
+            reconnectAttempts++;
             if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
-                console.log(`[ERROR] Too many reconnect attempts (${MAX_RECONNECT_ATTEMPTS}). Exiting.`);
+                console.log(`[ERROR] Max reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) exceeded. Exiting.`);
                 process.exit(1);
             }
 
-            // 515 = restart requested (common after pairing). Always reconnect quickly.
-            // 440 = connection replaced (conflict). Wait longer to avoid competing with the other session.
-            let delayMs = 3000;
+            // Smart delay based on disconnect reason:
+            // 515 = restart requested (common after pairing) → fast 1s
+            // 440 = connection replaced (conflict) → slow 10s to avoid competing sessions
+            // everything else → default 3s
+            const isConflict = reason === DisconnectReason.connectionReplaced;
+            const delay = isConflict ? 10000 : (reason === DisconnectReason.restartRequired ? 1000 : 3000);
             if (reason === DisconnectReason.restartRequired) {
-                delayMs = 1000;
                 console.log('[INFO] WhatsApp requested restart (code 515). Reconnecting...');
-            } else if (reason === DisconnectReason.connectionReplaced) {
-                delayMs = 10000;
-                console.log(`[WARN] Connection replaced (code 440). Another session is active. Reconnecting in ${delayMs / 1000}s...`);
+            } else if (isConflict) {
+                console.log(`[WARN] Connection conflict (code 440). Waiting ${delay / 1000}s... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
             } else {
-                console.log(`[WARN] Connection closed (reason: ${reason}). Reconnecting in ${delayMs / 1000}s... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+                console.log(`[WARN] Connection closed (reason: ${reason}). Reconnecting in ${delay / 1000}s... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
             }
-            setTimeout(startSocket, delayMs);
+            setTimeout(startSocket, delay);
         } else if (connection === 'open') {
             connectionState = 'connected';
             reconnectAttempts = 0; // reset on successful connection
