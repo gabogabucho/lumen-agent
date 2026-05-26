@@ -389,7 +389,17 @@ class ModuleRuntimeManager:
             self.connectors.set_runtime_config(self.config)
 
         module = _load_runtime_module(module_dir, name, capability_paths=caps)
-        if module is None or not hasattr(module, "activate"):
+        if module is None:
+            logger.warning(
+                "Module %s in %s has no connector.py — skipping activation",
+                name, module_dir,
+            )
+            return
+        if not hasattr(module, "activate"):
+            logger.warning(
+                "Module %s in %s has no activate() function — skipping activation",
+                name, module_dir,
+            )
             return
 
         context = _build_context(
@@ -410,7 +420,11 @@ class ModuleRuntimeManager:
             result = module.activate(context)
             if inspect.isawaitable(result):
                 result = await result
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "Failed to activate module %s from %s: %s",
+                name, module_dir, exc,
+            )
             context.unregister_registered_tools()
             return
 
