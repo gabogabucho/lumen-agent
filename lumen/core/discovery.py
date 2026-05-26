@@ -311,7 +311,8 @@ def _discover_modules(
                         "manual_instructions": manual_contract.manual_instructions,
                     }
 
-            # Module is installed — ready if it has a root SKILL.md or declared skills that exist
+            # Module is installed — ready if it has a root SKILL.md, declared
+            # skills, OR a connector.py (gateway/runtime modules don't need SKILL.md).
             has_skill = (module_dir / "SKILL.md").exists()
             if not has_skill:
                 declared_skills = manifest.get("skills", [])
@@ -320,9 +321,11 @@ def _discover_modules(
                         isinstance(rel, str) and (module_dir / rel).exists()
                         for rel in declared_skills
                     )
+            has_connector = (module_dir / "connector.py").exists()
+            is_ready = (has_skill or has_connector) and not pending_setup
             status = (
                 CapabilityStatus.READY
-                if has_skill and not pending_setup
+                if is_ready
                 else CapabilityStatus.AVAILABLE
             )
 
@@ -402,7 +405,7 @@ def _discover_modules_multi(
                             "env_specs": [],
                             "flow": None,
                             "manual_instructions": manual_contract.manual_instructions,
-                        }
+}
                 has_skill = (module_dir / "SKILL.md").exists()
                 if not has_skill:
                     declared_skills = manifest.get("skills", [])
@@ -411,7 +414,10 @@ def _discover_modules_multi(
                             isinstance(rel, str) and (module_dir / rel).exists()
                             for rel in declared_skills
                         )
-                status = CapabilityStatus.READY if has_skill and not pending_setup else CapabilityStatus.AVAILABLE
+                # Gateway/runtime modules don't need SKILL.md — they have connector.py
+                has_connector = (module_dir / "connector.py").exists()
+                is_ready = (has_skill or has_connector) and not pending_setup
+                status = CapabilityStatus.READY if is_ready else CapabilityStatus.AVAILABLE
                 registry.register(
                     Capability(
                         kind=CapabilityKind.MODULE,

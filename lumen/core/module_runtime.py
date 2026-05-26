@@ -338,19 +338,25 @@ class ModuleRuntimeManager:
 
         for modules_dir in module_roots:
             if not modules_dir.exists():
+                logger.debug("Module directory does not exist: %s", modules_dir)
                 continue
+            logger.info("Scanning modules in %s", modules_dir)
             for module_dir in modules_dir.iterdir():
                 if not module_dir.is_dir() or module_dir.name.startswith("_"):
                     continue
                 manifest_path, manifest = load_module_manifest(module_dir)
                 if manifest_path is None:
+                    logger.debug("No manifest found in %s — skipping", module_dir)
                     continue
                 name = str(manifest.get("name") or module_dir.name)
                 if name in installed_names:
                     continue
                 installed_names.add(name)
+                logger.info("Found module %s in %s", name, module_dir)
                 if name not in self._loaded:
                     await self._activate(name, module_dir)
+                else:
+                    logger.debug("Module %s already loaded", name)
 
         for name in list(self._loaded):
             if name not in installed_names:

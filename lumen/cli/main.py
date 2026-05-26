@@ -1316,11 +1316,34 @@ def module_activate(
         console.print(f"[dim]Run [bold]lumen module install {name}[/bold] first.[/dim]")
         raise typer.Exit(1)
 
+    # Check for connector.py — modules without it are skill-only and activate
+    # automatically via discovery, not runtime activation.
+    has_connector = (module_dir / "connector.py").exists()
+    if not has_connector:
+        console.print(f"[yellow]⊙[/yellow] Module {name} has no connector.py — it is a skill-only module.")
+        console.print("[dim]Skill modules activate automatically via discovery on next server start.[/dim]")
+        console.print("[dim]Run [bold]lumen reload[/bold] to refresh the live runtime.[/dim]")
+        raise typer.Exit(0)
+
     console.print(f"[dim]Activating module {name}...[/dim]")
 
     # Try to reload a live running instance first
     if _request_live_reload(lumen_dir, timeout=5.0):
-        console.print(f"[green]✓[/green] Module {name} activated (live reload)")
+        console.print(f"[green]✓[/green] Module {name} activation requested (live reload sent)")
+        console.print("[dim]Check server logs to verify activation succeeded.[/dim]")
+        # Verify it's actually loaded by checking the runtime state
+        state_file = lumen_dir / "modules" / name / "runtime.json"
+        if state_file.exists():
+            try:
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+                mod_status = state.get("status", "")
+                if mod_status in ("running", "installed"):
+                    console.print(f"[dim]Module status: {mod_status}[/dim]")
+                elif mod_status in ("degraded",):
+                    err = state.get("error", "unknown error")
+                    console.print(f"[yellow]⚠[/yellow] Module status: {mod_status} — {err}")
+            except Exception:
+                pass
         return
 
     # Offline: try to bootstrap runtime and sync modules
@@ -1345,12 +1368,25 @@ def module_activate(
         asyncio.run(sync_runtime_modules(
             runtime.brain, config=config, pkg_dir=PKG_DIR, lumen_dir=lumen_dir
         ))
-        asyncio.run(runtime.brain.memory.close())
     except Exception as e:
-        console.print(f"[yellow]⚠[/yellow] Module activated but runtime sync had issues: {e}")
-        return
+        console.print(f"[yellow]⚠[/yellow] Runtime sync had issues: {e}")
+        raise typer.Exit(1)
 
-    console.print(f"[green]✓[/green] Module {name} activated")
+    # Check if the module was actually loaded
+    module_manager = getattr(runtime.brain, "module_manager", None)
+    if module_manager and name in module_manager._loaded:
+        console.print(f"[green]✓[/green] Module {name} activated successfully")
+    elif has_connector:
+        console.print(f"[yellow]⚠[/yellow] Module {name} was found but may not have activated.")
+        console.print("[dim]Check server logs for errors during module activation.[/dim]")
+    else:
+        console.print(f"[yellow]⊙[/yellow] Module {name} discovered in registry")
+
+    # Clean up
+    try:
+        asyncio.run(runtime.brain.memory.close())
+    except Exception:
+        pass
 
 
 # ── api-key commands ─────────────────────────────────────────────────────────
@@ -1540,8 +1576,12 @@ def channels_enable(
 
     # Try to activate in live runtime
     console.print(f"[dim]Activating {module_name}...[/dim]")
+
+    activation_confirmed = False
+
     if _request_live_reload(lumen_dir, timeout=5.0):
-        console.print(f"[green]✓[/green] Channel '{channel}' enabled ({module_name} activated in live runtime)")
+        activation_confirmed = True
+        console.print(f"[green]✓[/green] Activation requested (live reload sent)")
     else:
         # Offline activation: bootstrap and sync
         try:
@@ -1563,21 +1603,38 @@ def channels_enable(
                 asyncio.run(sync_runtime_modules(
                     runtime.brain, config=config, pkg_dir=PKG_DIR, lumen_dir=lumen_dir
                 ))
-                console.print(f"[green]✓[/green] Channel '{channel}' enabled ({module_name} activated)")
             except Exception as e:
                 console.print(f"[yellow]⚠[/yellow] Activation sync issue: {e}")
-                console.print(f"[dim]Module {module_name} is installed and will activate on next server start.[/dim]")
-            finally:
+                console.print(f"[dim]Module {module_name} is installed. Check server logs on next start.[/dim]")
                 try:
                     asyncio.run(runtime.brain.memory.close())
                 except Exception:
                     pass
+                return
+
+            # Verify the module actually loaded
+            module_manager = getattr(runtime.brain, "module_manager", None)
+            if module_manager and module_name in module_manager._loaded:
+                activation_confirmed = True
+                console.print(f"[green]✓[/green] Channel '{channel}' — {module_name} activated successfully")
+            else:
+                console.print(f"[yellow]⚠[/yellow] Module {module_name} was found but did not activate.")
+                console.print("[dim]Check server logs for errors during module activation.[/dim]")
+                console.print("[dim]Common causes: missing connector.py, missing activate() function, or startup error.[/dim]")
+
+            try:
+                asyncio.run(runtime.brain.memory.close())
+            except Exception:
+                pass
         else:
             console.print(f"[dim]Module {module_name} is installed and will activate on next server start.[/dim]")
+            return
 
     # Show channel-specific hints
     if channel.lower() == "whatsapp":
         console.print("\n[bold]WhatsApp Setup[/bold]")
+        if activation_confirmed:
+            console.print("  [dim]Check server logs for pairing code or QR.[/dim]")
         console.print("  Set your pairing phone and device name:")
         console.print("  [dim]lumen config set x-lumen-comunicacion-whatsapp.LUMEN_PAIRING_PHONE <number>[/dim]")
         console.print("  [dim]lumen config set x-lumen-comunicacion-whatsapp.LUMEN_PAIRING_DEVICE_NAME <name>[/dim]")
