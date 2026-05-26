@@ -136,6 +136,8 @@ let connectionState = 'disconnected';
 // Kept at module scope so the count survives across startSocket() calls.
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
+// Store latest QR data so it can be served via HTTP endpoint
+let latestQR = null;
 
 // ---------------------------------------------------------------------------
 // WhatsApp socket
@@ -194,9 +196,12 @@ async function startSocket() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
+            latestQR = qr;
             console.log('\n[QR] Scan this QR code with WhatsApp on your phone:\n');
             qrcode.generate(qr, { small: true });
             console.log('\nWaiting for scan...\n');
+            // Also expose via /qr endpoint
+            writeFileSync('/tmp/whatsapp-qr', qr);
         }
 
         if (connection === 'close') {
@@ -247,6 +252,10 @@ async function startSocket() {
         } else if (connection === 'open') {
             connectionState = 'connected';
             reconnectAttempts = 0; // reset on successful connection
+            latestQR = null; // QR no longer needed after successful connection
+            // Clean up QR and pairing code files
+            try { if (existsSync('/tmp/whatsapp-qr')) { rmSync('/tmp/whatsapp-qr', { force: true }); } } catch {}
+            try { if (existsSync('/tmp/whatsapp-pairing-code')) { rmSync('/tmp/whatsapp-pairing-code', { force: true }); } } catch {}
             console.log('[OK] WhatsApp connected!');
             if (PAIR_ONLY) {
                 console.log('[OK] Pairing complete. Credentials saved.');
@@ -619,6 +628,10 @@ app.get('/health', (req, res) => {
         session_status = 'pending_qr';
     }
 
+    const pairingCode = existsSync('/tmp/whatsapp-pairing-code')
+        ? readFileSync('/tmp/whatsapp-pairing-code', 'utf-8').trim()
+        : null;
+
     res.json({
         status: connectionState,
         queueLength: messageQueue.length,
@@ -626,7 +639,18 @@ app.get('/health', (req, res) => {
         connected,
         number,
         session_status,
+        pairing_code: pairingCode,
+        qr_available: latestQR !== null,
     });
+});
+
+// QR code endpoint — returns the raw QR string for rendering in a dashboard
+app.get('/qr', (req, res) => {
+    if (latestQR) {
+        res.json({ qr: latestQR });
+    } else {
+        res.status(404).json({ error: 'No QR code available — session may already be connected or not yet generated' });
+    }
 });
 
 // Pairing code endpoint

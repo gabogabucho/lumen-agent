@@ -232,6 +232,14 @@
         <div class="summary-chip">Conectados: <strong id="summary-connected">--</strong></div>
       </div>
     </div>
+
+    <!-- WhatsApp Status Panel -->
+    <div class="l-card" id="whatsapp-panel" style="display:none; margin-top:16px;">
+      <h3 style="margin-bottom:12px;">WhatsApp Bridge</h3>
+      <div id="whatsapp-content">
+        <div class="empty-block">Cargando estado de WhatsApp...</div>
+      </div>
+    </div>
   </main>
 
   <script>
@@ -309,6 +317,146 @@
     // === Auto-refresh every 15s ===
     loadChannels();
     setInterval(loadChannels, 15000);
+
+    // === WhatsApp Status ===
+    async function loadWhatsAppStatus() {
+      const panel = document.getElementById('whatsapp-panel');
+      const content = document.getElementById('whatsapp-content');
+      try {
+        const res = await fetch('/api/modules/x-lumen-comunicacion-whatsapp/whatsapp-status');
+        if (!res.ok) {
+          // Module not installed or not accessible — hide panel
+          panel.style.display = 'none';
+          return;
+        }
+        const data = await res.json();
+        panel.style.display = 'block';
+
+        const statusColors = {
+          authenticated: 'var(--lumen-success)',
+          connected: 'var(--lumen-success)',
+          pending_qr: 'var(--lumen-warning)',
+          disconnected: 'var(--lumen-danger)',
+          degraded: 'var(--lumen-danger)',
+          unknown: 'var(--lumen-mute)',
+        };
+        const statusLabelsWa = {
+          authenticated: 'Conectado',
+          connected: 'Conectado',
+          pending_qr: 'Esperando QR / código',
+          disconnected: 'Desconectado',
+          degraded: 'Degradado',
+          unknown: 'Desconocido',
+        };
+        const st = data.session_status || 'unknown';
+        const color = statusColors[st] || 'var(--lumen-mute)';
+        const label = statusLabelsWa[st] || st;
+
+        let html = `
+          <div style="display:grid; grid-template-columns: auto 1fr; gap:8px 16px; align-items:center; font-size:14px;">
+            <span style="color:var(--lumen-mute);">Estado</span>
+            <span style="color:${color}; font-weight:600;">${escapeHtml(label)}</span>`;
+
+        if (data.number) {
+          html += `
+            <span style="color:var(--lumen-mute);">Número</span>
+            <span style="font-weight:500;">${escapeHtml(data.number)}</span>`;
+        }
+
+        if (data.bridge_healthy) {
+          const uptimeMin = data.bridge_uptime ? Math.floor(data.bridge_uptime / 60) : null;
+          const uptimeStr = uptimeMin !== null ? `${uptimeMin}m` : '--';
+          html += `
+            <span style="color:var(--lumen-mute);">Bridge</span>
+            <span style="color:var(--lumen-success);">&#10003; activo</span>
+            <span style="color:var(--lumen-mute);">Uptime</span>
+            <span>${uptimeStr}</span>`;
+        } else {
+          html += `
+            <span style="color:var(--lumen-mute);">Bridge</span>
+            <span style="color:var(--lumen-danger);">&#10007; no responde</span>`;
+        }
+
+        html += `</div>`;
+
+        // Show pairing code if available
+        if (data.pairing_code) {
+          const code = escapeHtml(data.pairing_code);
+          html += `
+            <div style="margin-top:16px; padding:16px; background:var(--lumen-lavender); border-radius:var(--lumen-r-md); text-align:center;">
+              <div style="font-size:12px; color:var(--lumen-mute); margin-bottom:6px;">Código de vinculación</div>
+              <div style="font-size:28px; font-weight:700; letter-spacing:4px; color:var(--lumen-ink); font-family:monospace;">${code}</div>
+              <div style="font-size:12px; color:var(--lumen-mute); margin-top:8px;">Ingresá este código en WhatsApp &rsaquo; Dispositivos vinculados</div>
+            </div>`;
+        }
+
+        // Show QR code if available (rendered as text QR since we don't have a QR library)
+        if (data.qr && !data.connected && !data.pairing_code) {
+          html += `
+            <div style="margin-top:16px; text-align:center;">
+              <div style="font-size:13px; color:var(--lumen-mute); margin-bottom:8px;">
+                Escaneá el código QR con WhatsApp en tu teléfono
+              </div>
+              <div style="font-size:12px; color:var(--lumen-mute); margin-bottom:12px;">
+                WhatsApp &rsaquo; Menú &rsaquo; Dispositivos vinculados &rsaquo; Vincular dispositivo
+              </div>
+              <div id="qr-container" style="background:white; padding:16px; border-radius:8px; display:inline-block; max-width:280px;">
+                <canvas id="qr-canvas" style="width:248px; height:248px;"></canvas>
+              </div>
+            </div>`;
+          // We'll render the QR after DOM update
+          setTimeout(() => renderQR(data.qr), 50);
+        }
+
+        // Show setup hint if bridge is not healthy and no QR/pairing code
+        if (!data.bridge_healthy && !data.qr && !data.pairing_code) {
+          html += `
+            <div style="margin-top:16px; padding:12px 16px; background:var(--lumen-lavender); border-radius:var(--lumen-r-md); font-size:13px; color:var(--lumen-ink-soft);">
+              <strong style="color:var(--lumen-ink);">WhatsApp bridge no disponible</strong><br>
+              Verificá que el módulo esté activo y que Node.js esté instalado.
+              <div style="margin-top:8px; color:var(--lumen-mute);">
+                <code style="font-size:12px;">lumen channels enable whatsapp</code><br>
+                <code style="font-size:12px;">lumen module activate x-lumen-comunicacion-whatsapp</code>
+              </div>
+            </div>`;
+        }
+
+        content.innerHTML = html;
+      } catch (e) {
+        // Network error or endpoint not available — hide panel silently
+        panel.style.display = 'none';
+      }
+    }
+
+    // Simple QR code renderer using canvas
+    function renderQR(qrString) {
+      // Use a lightweight approach: generate QR via an external API
+      // (free, no tracking since it's just encoding data)
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=248x248&data=${encodeURIComponent(qrString)}&bgcolor=FFFFFF&color=000000&margin=8`;
+      const canvas = document.getElementById('qr-canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = function() {
+        canvas.width = 248;
+        canvas.height = 248;
+        ctx.drawImage(img, 0, 0, 248, 248);
+      };
+      img.onerror = function() {
+        // Fallback: show the raw QR string for manual scanning
+        const container = document.getElementById('qr-container');
+        if (container) {
+          container.innerHTML = `<div style="font-size:11px; word-break:break-all; text-align:left; color:#333;">${escapeHtml(qrString)}</div>`;
+        }
+      };
+      img.src = qrUrl;
+    }
+
+    // Load WhatsApp status with a delay to let channels load first
+    setTimeout(loadWhatsAppStatus, 1000);
+    // Refresh WhatsApp status every 10s (faster than channels for responsive QR updates)
+    setInterval(loadWhatsAppStatus, 10000);
 
     // === Sidebar ===
     function toggleSidebar() {

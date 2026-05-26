@@ -3834,6 +3834,116 @@ async def api_modules_pairing_code(request: Request, name: str):
     return JSONResponse(status_code=404, content={"error": "No pairing code available"})
 
 
+@app.get("/api/modules/{name}/whatsapp-status")
+async def api_modules_whatsapp_status(request: Request, name: str):
+    """Return comprehensive WhatsApp bridge status including QR and pairing code.
+
+    Proxies to the WhatsApp bridge's /health and /qr endpoints and merges
+    with runtime state from the module's runtime.json.
+    """
+    guard = _require_owner_access(request)
+    if guard is not None:
+        return guard
+
+    module_dir = _installed_module_dir(name)
+    manifest_path, _ = load_module_manifest(module_dir)
+    if manifest_path is None:
+        return JSONResponse(status_code=404, content={"error": "Module not installed"})
+
+    # Only WhatsApp module supports this endpoint
+    if name != "x-lumen-comunicacion-whatsapp":
+        return JSONResponse(status_code=400, content={"error": "WhatsApp status not supported for this module"})
+
+    import urllib.request
+    import urllib.error
+
+    result = {
+        "module": name,
+        "connected": False,
+        "session_status": "unknown",
+        "number": None,
+        "qr": None,
+        "pairing_code": None,
+        "bridge_healthy": False,
+        "bridge_uptime": None,
+    }
+
+    # 1. Read runtime state from the module's runtime.json
+    runtime_file = module_dir / "runtime.json"
+    if runtime_file.exists():
+        try:
+            runtime_state = json.loads(runtime_file.read_text(encoding="utf-8"))
+            wa_health = runtime_state.get("whatsapp_health")
+            if wa_health:
+                result["connected"] = wa_health.get("connected", False)
+                result["number"] = wa_health.get("number")
+                result["session_status"] = wa_health.get("session_status", "unknown")
+        except Exception:
+            pass
+
+    # 2. Determine bridge port
+    from lumen.core.module_runtime import ModuleRuntimeContext
+    bridge_port = 3100  # default
+    if _brain and hasattr(_brain, "module_manager"):
+        loaded = _brain.module_manager._loaded.get(name)
+        if loaded and loaded.state and hasattr(loaded.state, "_bridge_port"):
+            try:
+                bridge_port = loaded.state._bridge_port()
+            except Exception:
+                pass
+    # Also try reading from secrets/env
+    if _config:
+        from lumen.core.secrets_store import load_module as _load_mod_secrets
+        try:
+            secrets = _load_mod_secrets(name)
+            port_str = secrets.get("WHATSAPP_BRIDGE_PORT") or secrets.get("bridge_port")
+            if port_str:
+                bridge_port = int(port_str)
+        except Exception:
+            pass
+
+    # 3. Proxy to bridge /health
+    try:
+        health_url = f"http://127.0.0.1:{bridge_port}/health"
+        req = urllib.request.Request(health_url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            health_data = json.loads(resp.read().decode("utf-8"))
+            result["bridge_healthy"] = health_data.get("status") in ("connected", "disconnected")
+            result["bridge_uptime"] = health_data.get("uptime")
+            result["connected"] = health_data.get("connected", result.get("connected", False))
+            result["number"] = health_data.get("number") or result.get("number")
+            result["session_status"] = health_data.get("session_status", result.get("session_status", "unknown"))
+            result["pairing_code"] = health_data.get("pairing_code")
+    except Exception:
+        # Bridge not reachable — that's OK, we still have runtime state
+        pass
+
+    # 4. If not connected, try to get QR code from bridge
+    if result["session_status"] in ("pending_qr", "disconnected", "unknown") and not result["connected"]:
+        try:
+            qr_url = f"http://127.0.0.1:{bridge_port}/qr"
+            req = urllib.request.Request(qr_url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                qr_data = json.loads(resp.read().decode("utf-8"))
+                result["qr"] = qr_data.get("qr")
+        except Exception:
+            # No QR available — bridge might not be up yet
+            pass
+
+    # 5. Fallback: try reading pairing code file directly if bridge didn't provide it
+    if not result.get("pairing_code"):
+        pairing_file = Path("/tmp/whatsapp-pairing-code")
+        if pairing_file.exists():
+            try:
+                code = pairing_file.read_text(encoding="utf-8").strip()
+                if code:
+                    result["pairing_code"] = code
+            except Exception:
+                pass
+
+    return result
+
+
 # ─── Status API ───
 
 
