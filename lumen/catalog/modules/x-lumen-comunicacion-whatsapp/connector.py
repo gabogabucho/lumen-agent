@@ -20,6 +20,9 @@ DEFAULT_BRIDGE_PORT = 3100
 POLL_INTERVAL = 2
 HEALTH_POLL_INTERVAL = 5
 HEALTH_TIMEOUT = 30  # seconds to wait for bridge to become ready
+DEFAULT_NPM_INSTALL_TIMEOUT = 180
+DEFAULT_NPM_INSTALL_RETRIES = 2
+BRIDGE_LOG_TAIL_LINES = 40
 
 
 # ---------------------------------------------------------------------------
@@ -66,10 +69,10 @@ def uninstall(context):
 
 def _copy_bridge_files(runtime_dir: Path):
     """Copy Node.js bridge sources into the runtime directory."""
-    for filename in ("bridge.js", "allowlist.js", "package.json"):
+    for filename in ("bridge.js", "allowlist.js", "package.json", "package-lock.json"):
         src = BRIDGE_SOURCE_DIR / filename
         dst = runtime_dir / filename
-        if src.exists() and not dst.exists():
+        if src.exists():
             shutil.copy2(src, dst)
 
 
@@ -107,9 +110,13 @@ class WhatsAppRuntime:
         # Ensure bridge files are present in runtime dir
         _copy_bridge_files(self.context.runtime_dir)
 
-        # npm install if node_modules missing
+        # npm install / validation — transactional: never start bridge.js until
+        # Baileys is present and importable.
         node_modules = self.context.runtime_dir / "node_modules"
-        if not node_modules.exists():
+        validation_result = await asyncio.to_thread(
+            _validate_bridge_deps, node_bin, self.context.runtime_dir
+        )
+        if not node_modules.exists() or not validation_result["ok"]:
             npm_bin = _find_npm()
             if npm_bin is None:
                 state.update(
@@ -135,9 +142,39 @@ class WhatsAppRuntime:
             )
             self.context.write_runtime_state(state)
 
-            await asyncio.to_thread(
-                _run_npm_install, npm_bin, self.context.runtime_dir
+            install_timeout = _resolve_int_setting(
+                self.context,
+                "npm_install_timeout_seconds",
+                "WHATSAPP_NPM_INSTALL_TIMEOUT_SECONDS",
+                DEFAULT_NPM_INSTALL_TIMEOUT,
             )
+            install_retries = _resolve_int_setting(
+                self.context,
+                "npm_install_retries",
+                "WHATSAPP_NPM_INSTALL_RETRIES",
+                DEFAULT_NPM_INSTALL_RETRIES,
+            )
+            install_result = await asyncio.to_thread(
+                _ensure_bridge_deps,
+                npm_bin,
+                node_bin,
+                self.context.runtime_dir,
+                install_timeout,
+                install_retries,
+                validation_result,
+            )
+            if not install_result["ok"]:
+                state.update(
+                    {
+                        "module": MODULE_NAME,
+                        "status": "degraded",
+                        "polling": False,
+                        "error": install_result["error"],
+                        "updated_at": time(),
+                    }
+                )
+                self.context.write_runtime_state(state)
+                return
 
         # Kill orphaned bridge processes on the configured port
         port = self._bridge_port()
@@ -172,12 +209,15 @@ class WhatsAppRuntime:
         # Wait for bridge to become healthy
         ready = await asyncio.to_thread(_wait_for_health, port, HEALTH_TIMEOUT)
         if not ready:
+            bridge_error = _summarize_bridge_start_failure(
+                bridge_log, self._bridge_proc
+            )
             state.update(
                 {
                     "module": MODULE_NAME,
                     "status": "degraded",
                     "polling": False,
-                    "error": "Bridge did not become healthy in time. Check bridge.log.",
+                    "error": bridge_error,
                     "bridge_pid": self._bridge_proc.pid if self._bridge_proc else None,
                     "updated_at": time(),
                 }
@@ -526,6 +566,17 @@ def _bridge_post(port: int, path: str, payload: dict, timeout: int = 15) -> dict
         raise RuntimeError(f"Bridge unreachable: {exc.reason}") from exc
 
 
+def _resolve_int_setting(context, key: str, env_key: str, default: int) -> int:
+    raw = context.resolve_setting(key, env_key)
+    if raw in (None, ""):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
 # ---------------------------------------------------------------------------
 # STT helpers
 # ---------------------------------------------------------------------------
@@ -682,14 +733,177 @@ def _find_npm() -> str | None:
     return None
 
 
-def _run_npm_install(npm_bin: str, cwd: Path) -> None:
-    """Run npm install synchronously."""
-    subprocess.run(
-        [npm_bin, "install", "--production"],
-        cwd=str(cwd),
-        capture_output=True,
-        timeout=120,
-    )
+def _run_npm_install(npm_bin: str, cwd: Path, timeout: int) -> dict:
+    """Run npm install synchronously and capture stdout/stderr."""
+    try:
+        result = subprocess.run(
+            [npm_bin, "install", "--production"],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return {
+            "ok": result.returncode == 0,
+            "returncode": result.returncode,
+            "stdout": result.stdout or "",
+            "stderr": result.stderr or "",
+            "error": None,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "ok": False,
+            "returncode": None,
+            "stdout": exc.stdout or "",
+            "stderr": exc.stderr or "",
+            "error": f"npm install timed out after {timeout}s",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+            "error": f"npm install failed to start: {exc}",
+        }
+
+
+def _ensure_bridge_deps(
+    npm_bin: str,
+    node_bin: str,
+    runtime_dir: Path,
+    timeout: int,
+    retries: int,
+    initial_validation: dict | None = None,
+) -> dict:
+    """Install + validate bridge dependencies before starting bridge.js."""
+    attempts = max(retries, 1)
+    last_error = "Unknown dependency installation failure"
+    previous_validation = initial_validation or {"ok": True}
+    node_modules = runtime_dir / "node_modules"
+
+    for attempt in range(1, attempts + 1):
+        if attempt > 1 or not previous_validation.get("ok", True):
+            shutil.rmtree(node_modules, ignore_errors=True)
+
+        install_result = _run_npm_install(npm_bin, runtime_dir, timeout)
+        install_summary = _format_install_result(install_result)
+        if not install_result["ok"]:
+            last_error = (
+                f"WhatsApp bridge dependency install failed on attempt {attempt}/{attempts}. "
+                f"{install_result.get('error') or 'npm install returned non-zero exit status.'}\n"
+                f"{install_summary}"
+            )
+            continue
+
+        validation = _validate_bridge_deps(node_bin, runtime_dir)
+        if validation["ok"]:
+            return {"ok": True}
+
+        last_error = (
+            f"Baileys install incomplete / import failed on attempt {attempt}/{attempts}.\n"
+            f"Validation: {validation['error']}\n"
+            f"{install_summary}"
+        )
+
+    return {"ok": False, "error": last_error}
+
+
+def _validate_bridge_deps(node_bin: str, runtime_dir: Path) -> dict:
+    """Validate that Baileys exists and is importable before starting bridge.js."""
+    package_dir = runtime_dir / "node_modules" / "@whiskeysockets" / "baileys"
+    package_json = package_dir / "package.json"
+    if not package_json.exists():
+        return {
+            "ok": False,
+            "error": f"Missing package metadata: {package_json}",
+        }
+
+    try:
+        result = subprocess.run(
+            [
+                node_bin,
+                "--input-type=module",
+                "-e",
+                "await import('@whiskeysockets/baileys'); console.log('ok');",
+            ],
+            cwd=str(runtime_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "error": "Timed out validating import('@whiskeysockets/baileys')",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"Failed to validate Baileys import: {exc}",
+        }
+
+    if result.returncode != 0:
+        detail = _combine_output(result.stdout or "", result.stderr or "")
+        return {
+            "ok": False,
+            "error": f"import('@whiskeysockets/baileys') failed. {_truncate_text(detail)}",
+        }
+
+    return {"ok": True, "error": None}
+
+
+def _format_install_result(result: dict) -> str:
+    parts = []
+    if result.get("returncode") is not None:
+        parts.append(f"npm exit code: {result['returncode']}")
+    if result.get("stdout"):
+        parts.append(f"npm stdout:\n{_truncate_text(result['stdout'])}")
+    if result.get("stderr"):
+        parts.append(f"npm stderr:\n{_truncate_text(result['stderr'])}")
+    return "\n".join(parts).strip()
+
+
+def _summarize_bridge_start_failure(
+    bridge_log: Path, bridge_proc: subprocess.Popen | None
+) -> str:
+    """Return a clearer bridge startup error than generic health timeout."""
+    parts = ["Bridge did not become healthy in time."]
+    if bridge_proc is not None:
+        returncode = bridge_proc.poll()
+        if returncode is not None:
+            parts.append(f"bridge.js exited early with code {returncode}.")
+
+    log_tail = _read_log_tail(bridge_log, BRIDGE_LOG_TAIL_LINES)
+    if log_tail:
+        parts.append(f"Last bridge.log lines:\n{log_tail}")
+    else:
+        parts.append("No bridge.log output captured.")
+    return " ".join(parts)
+
+
+def _read_log_tail(log_path: Path, max_lines: int) -> str:
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return ""
+    return _truncate_text("\n".join(lines[-max_lines:]))
+
+
+def _combine_output(stdout: str, stderr: str) -> str:
+    parts = []
+    if stdout.strip():
+        parts.append(stdout.strip())
+    if stderr.strip():
+        parts.append(stderr.strip())
+    return "\n".join(parts)
+
+
+def _truncate_text(text: str, max_chars: int = 4000) -> str:
+    text = (text or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3] + "..."
 
 
 def _build_bridge_env(context, port: int) -> dict:
