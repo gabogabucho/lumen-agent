@@ -252,6 +252,40 @@ class WhatsAppRuntime:
         chat_id = str(recipient_id or "").strip()
         if not chat_id:
             return
+
+        # Feature: typing indicator (opt-out via whatsapp_typing_indicator: false)
+        typing_setting = self.context.resolve_setting(
+            "whatsapp_typing_indicator", "WHATSAPP_TYPING_INDICATOR"
+        )
+        typing_enabled = str(typing_setting).lower() not in ("false", "0", "no") if typing_setting is not None else True
+        if typing_enabled:
+            try:
+                await asyncio.to_thread(
+                    _bridge_post,
+                    self._bridge_port(),
+                    "/typing",
+                    {"chatId": chat_id},
+                )
+            except Exception:
+                pass  # non-blocking — failed indicator never blocks the actual send
+
+        # Feature: TTS — convert response to a WhatsApp voice note
+        tts_model = self.context.resolve_setting("tts_model", "TOKAINE_TTS_MODEL") or ""
+        if tts_model:
+            audio_path = await _synthesize_speech(self.context, message)
+            if audio_path:
+                try:
+                    await asyncio.to_thread(
+                        _bridge_post,
+                        self._bridge_port(),
+                        "/send-media",
+                        {"chatId": chat_id, "filePath": audio_path, "mediaType": "audio"},
+                    )
+                    return  # sent as voice note — skip text fallback
+                except Exception:
+                    pass  # fall through to text if the media send fails
+
+        # Default: send as text
         try:
             await asyncio.to_thread(
                 _bridge_post,
@@ -348,6 +382,19 @@ class WhatsAppRuntime:
         body = msg.get("body", "")
         sender = msg.get("senderId", "")
         timestamp = msg.get("timestamp")
+        media_type = msg.get("mediaType", "")
+        media_urls = msg.get("mediaUrls") or []
+
+        # Feature: STT — transcribe incoming voice/PTT messages before routing
+        if media_type in ("ptt", "audio") and media_urls:
+            transcript = await _transcribe_audio(self.context, media_urls[0])
+            if transcript:
+                body = transcript
+            else:
+                # No STT configured or transcription failed — drop the message.
+                # (Without a transcript, Lumen would only see a placeholder like
+                # "[ptt received]" which produces a confused/unhelpful reply.)
+                return
 
         state = self.context.read_runtime_state()
         state.update(
@@ -477,6 +524,140 @@ def _bridge_post(port: int, path: str, payload: dict, timeout: int = 15) -> dict
         raise RuntimeError(f"Bridge HTTP error: {exc.code} {body}") from exc
     except urllib_error.URLError as exc:
         raise RuntimeError(f"Bridge unreachable: {exc.reason}") from exc
+
+
+# ---------------------------------------------------------------------------
+# STT helpers
+# ---------------------------------------------------------------------------
+
+async def _transcribe_audio(context, audio_path: str) -> str | None:
+    """Transcribe an audio file using the configured STT model.
+
+    Returns the transcript string, or None if STT is not configured or fails.
+    """
+    stt_model = context.resolve_setting("stt_model", "TOKAINE_STT_MODEL") or ""
+    if not stt_model:
+        return None
+    api_base = (
+        context.resolve_setting("api_base", "LUMEN_API_BASE") or "https://api.openai.com/v1"
+    ).rstrip("/")
+    api_key = context.resolve_setting("api_key", "LUMEN_API_KEY") or ""
+    try:
+        return await asyncio.to_thread(
+            _transcribe_audio_sync, stt_model, api_base, api_key, audio_path
+        )
+    except Exception:
+        return None
+
+
+def _transcribe_audio_sync(model: str, api_base: str, api_key: str, audio_path: str) -> str | None:
+    """Synchronous call to an OpenAI-compatible /audio/transcriptions endpoint."""
+    audio_file = Path(audio_path)
+    if not audio_file.exists():
+        return None
+
+    audio_bytes = audio_file.read_bytes()
+    filename = audio_file.name
+    ext = audio_file.suffix.lower()
+    _AUDIO_MIME = {
+        ".ogg": "audio/ogg",
+        ".opus": "audio/opus",
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".m4a": "audio/mp4",
+        ".flac": "audio/flac",
+        ".webm": "audio/webm",
+    }
+    mime_type = _AUDIO_MIME.get(ext, "audio/ogg")
+
+    # Build multipart/form-data manually (no external deps)
+    boundary = "----LumenSTTBoundary" + os.urandom(8).hex()
+
+    def _field(name: str, value: str) -> bytes:
+        return (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+            f"{value}\r\n"
+        ).encode("utf-8")
+
+    body = (
+        _field("model", model)
+        + f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f"Content-Type: {mime_type}\r\n\r\n".encode("utf-8")
+        + audio_bytes
+        + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    )
+
+    url = f"{api_base}/audio/transcriptions"
+    headers: dict = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    req = urllib_request.Request(url, data=body, headers=headers, method="POST")
+    with urllib_request.urlopen(req, timeout=60) as response:
+        result = json.loads(response.read().decode("utf-8"))
+        return result.get("text") or None
+
+
+# ---------------------------------------------------------------------------
+# TTS helpers
+# ---------------------------------------------------------------------------
+
+async def _synthesize_speech(context, text: str) -> str | None:
+    """Convert text to speech using the configured TTS model.
+
+    Returns the path to the generated audio file, or None if TTS is not
+    configured or synthesis fails.
+    """
+    tts_model = context.resolve_setting("tts_model", "TOKAINE_TTS_MODEL") or ""
+    if not tts_model:
+        return None
+    api_base = (
+        context.resolve_setting("api_base", "LUMEN_API_BASE") or "https://api.openai.com/v1"
+    ).rstrip("/")
+    api_key = context.resolve_setting("api_key", "LUMEN_API_KEY") or ""
+    tts_voice = context.resolve_setting("tts_voice", "TOKAINE_TTS_VOICE") or "alloy"
+    try:
+        return await asyncio.to_thread(
+            _synthesize_speech_sync, tts_model, api_base, api_key, tts_voice, text
+        )
+    except Exception:
+        return None
+
+
+def _synthesize_speech_sync(
+    model: str, api_base: str, api_key: str, voice: str, text: str
+) -> str | None:
+    """Synchronous call to an OpenAI-compatible /audio/speech endpoint.
+
+    Saves the returned audio to the WhatsApp audio_cache directory and
+    returns the file path so bridge.js /send-media can serve it.
+    """
+    url = f"{api_base}/audio/speech"
+    payload = json.dumps({"model": model, "input": text, "voice": voice}).encode("utf-8")
+    headers: dict = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    req = urllib_request.Request(url, data=payload, headers=headers, method="POST")
+    with urllib_request.urlopen(req, timeout=60) as response:
+        audio_bytes = response.read()
+        content_type = response.headers.get("Content-Type", "")
+
+    # Determine extension from Content-Type; default to .ogg (WhatsApp PTT friendly)
+    if "ogg" in content_type:
+        ext = ".ogg"
+    elif "mpeg" in content_type or "mp3" in content_type:
+        ext = ".mp3"
+    else:
+        ext = ".ogg"
+
+    audio_dir = Path(os.path.expanduser("~")) / ".lumen" / "whatsapp" / "audio_cache"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / f"tts_{os.urandom(6).hex()}{ext}"
+    audio_path.write_bytes(audio_bytes)
+    return str(audio_path)
 
 
 # ---------------------------------------------------------------------------
