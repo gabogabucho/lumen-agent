@@ -23,6 +23,7 @@ HEALTH_TIMEOUT = 30  # seconds to wait for bridge to become ready
 DEFAULT_NPM_INSTALL_TIMEOUT = 180
 DEFAULT_NPM_INSTALL_RETRIES = 2
 BRIDGE_LOG_TAIL_LINES = 40
+DEFAULT_DEPENDENCY_LOCK_TIMEOUT = 180
 
 
 # ---------------------------------------------------------------------------
@@ -110,71 +111,113 @@ class WhatsAppRuntime:
         # Ensure bridge files are present in runtime dir
         _copy_bridge_files(self.context.runtime_dir)
 
-        # npm install / validation — transactional: never start bridge.js until
-        # Baileys is present and importable.
-        node_modules = self.context.runtime_dir / "node_modules"
-        validation_result = await asyncio.to_thread(
-            _validate_bridge_deps, node_bin, self.context.runtime_dir
+        deps_lock_timeout = _resolve_int_setting(
+            self.context,
+            "dependency_lock_timeout_seconds",
+            "WHATSAPP_DEPENDENCY_LOCK_TIMEOUT_SECONDS",
+            DEFAULT_DEPENDENCY_LOCK_TIMEOUT,
         )
-        if not node_modules.exists() or not validation_result["ok"]:
-            npm_bin = _find_npm()
-            if npm_bin is None:
-                state.update(
-                    {
-                        "module": MODULE_NAME,
-                        "status": "degraded",
-                        "polling": False,
-                        "error": "npm not found. Install Node.js (v18+) to use the WhatsApp bridge.",
-                        "updated_at": time(),
-                    }
-                )
-                self.context.write_runtime_state(state)
-                return
-
+        deps_lock_path = self.context.runtime_dir / ".deps-install.lock"
+        lock_result = await asyncio.to_thread(
+            _acquire_file_lock, deps_lock_path, deps_lock_timeout
+        )
+        if not lock_result["ok"]:
             state.update(
                 {
                     "module": MODULE_NAME,
-                    "status": "installing",
+                    "status": "degraded",
                     "polling": False,
-                    "error": None,
+                    "error": lock_result["error"],
                     "updated_at": time(),
                 }
             )
             self.context.write_runtime_state(state)
+            return
 
-            install_timeout = _resolve_int_setting(
-                self.context,
-                "npm_install_timeout_seconds",
-                "WHATSAPP_NPM_INSTALL_TIMEOUT_SECONDS",
-                DEFAULT_NPM_INSTALL_TIMEOUT,
+        try:
+            # npm install / validation — transactional: never start bridge.js until
+            # Baileys is present and importable.
+            node_modules = self.context.runtime_dir / "node_modules"
+            validation_result = await asyncio.to_thread(
+                _validate_bridge_deps, node_bin, self.context.runtime_dir
             )
-            install_retries = _resolve_int_setting(
-                self.context,
-                "npm_install_retries",
-                "WHATSAPP_NPM_INSTALL_RETRIES",
-                DEFAULT_NPM_INSTALL_RETRIES,
+            if not node_modules.exists() or not validation_result["ok"]:
+                npm_bin = _find_npm()
+                if npm_bin is None:
+                    state.update(
+                        {
+                            "module": MODULE_NAME,
+                            "status": "degraded",
+                            "polling": False,
+                            "error": "npm not found. Install Node.js (v18+) to use the WhatsApp bridge.",
+                            "updated_at": time(),
+                        }
+                    )
+                    self.context.write_runtime_state(state)
+                    return
+
+                state.update(
+                    {
+                        "module": MODULE_NAME,
+                        "status": "installing",
+                        "polling": False,
+                        "error": None,
+                        "updated_at": time(),
+                    }
+                )
+                self.context.write_runtime_state(state)
+
+                install_timeout = _resolve_int_setting(
+                    self.context,
+                    "npm_install_timeout_seconds",
+                    "WHATSAPP_NPM_INSTALL_TIMEOUT_SECONDS",
+                    DEFAULT_NPM_INSTALL_TIMEOUT,
+                )
+                install_retries = _resolve_int_setting(
+                    self.context,
+                    "npm_install_retries",
+                    "WHATSAPP_NPM_INSTALL_RETRIES",
+                    DEFAULT_NPM_INSTALL_RETRIES,
+                )
+                install_result = await asyncio.to_thread(
+                    _ensure_bridge_deps,
+                    npm_bin,
+                    node_bin,
+                    self.context.runtime_dir,
+                    install_timeout,
+                    install_retries,
+                    validation_result,
+                )
+                if not install_result["ok"]:
+                    state.update(
+                        {
+                            "module": MODULE_NAME,
+                            "status": "degraded",
+                            "polling": False,
+                            "error": install_result["error"],
+                            "updated_at": time(),
+                        }
+                    )
+                    self.context.write_runtime_state(state)
+                    return
+
+            prestart_validation = await asyncio.to_thread(
+                _validate_bridge_deps, node_bin, self.context.runtime_dir
             )
-            install_result = await asyncio.to_thread(
-                _ensure_bridge_deps,
-                npm_bin,
-                node_bin,
-                self.context.runtime_dir,
-                install_timeout,
-                install_retries,
-                validation_result,
-            )
-            if not install_result["ok"]:
+            if not prestart_validation["ok"]:
                 state.update(
                     {
                         "module": MODULE_NAME,
                         "status": "degraded",
                         "polling": False,
-                        "error": install_result["error"],
+                        "error": f"Baileys import validation failed before bridge startup. {prestart_validation['error']}",
                         "updated_at": time(),
                     }
                 )
                 self.context.write_runtime_state(state)
                 return
+        finally:
+            await asyncio.to_thread(_release_file_lock, deps_lock_path)
 
         # Kill orphaned bridge processes on the configured port
         port = self._bridge_port()
@@ -185,7 +228,7 @@ class WhatsAppRuntime:
         env = _build_bridge_env(self.context, port)
 
         try:
-            log_fh = open(bridge_log, "a", encoding="utf-8")
+            log_fh = open(bridge_log, "w", encoding="utf-8")
             self._bridge_proc = subprocess.Popen(
                 [node_bin, "bridge.js", "--port", str(port)],
                 cwd=str(self.context.runtime_dir),
@@ -577,6 +620,34 @@ def _resolve_int_setting(context, key: str, env_key: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def _acquire_file_lock(lock_path: Path, timeout: int) -> dict:
+    deadline = time() + timeout
+    payload = json.dumps({"pid": os.getpid(), "created_at": time()})
+    while time() < deadline:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, payload.encode("utf-8"))
+            finally:
+                os.close(fd)
+            return {"ok": True, "error": None}
+        except FileExistsError:
+            sleep(1)
+        except Exception as exc:
+            return {"ok": False, "error": f"Failed to acquire dependency install lock: {exc}"}
+    return {
+        "ok": False,
+        "error": f"Timed out waiting for dependency install lock after {timeout}s: {lock_path}",
+    }
+
+
+def _release_file_lock(lock_path: Path) -> None:
+    try:
+        lock_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # STT helpers
 # ---------------------------------------------------------------------------
@@ -735,9 +806,10 @@ def _find_npm() -> str | None:
 
 def _run_npm_install(npm_bin: str, cwd: Path, timeout: int) -> dict:
     """Run npm install synchronously and capture stdout/stderr."""
+    command = [npm_bin, "ci", "--omit=dev"] if (cwd / "package-lock.json").exists() else [npm_bin, "install", "--production"]
     try:
         result = subprocess.run(
-            [npm_bin, "install", "--production"],
+            command,
             cwd=str(cwd),
             capture_output=True,
             text=True,
@@ -820,12 +892,43 @@ def _validate_bridge_deps(node_bin: str, runtime_dir: Path) -> dict:
         }
 
     try:
+        package_data = json.loads(package_json.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"Invalid Baileys package metadata: {exc}",
+        }
+
+    expected_main = package_data.get("main") or "index.js"
+    expected_main_path = package_dir / expected_main
+    if not expected_main_path.exists():
+        return {
+            "ok": False,
+            "error": f"Baileys package is incomplete: expected entrypoint missing: {expected_main_path}",
+        }
+
+    required_exports = [
+        "makeWASocket",
+        "useMultiFileAuthState",
+        "DisconnectReason",
+        "fetchLatestBaileysVersion",
+        "downloadMediaMessage",
+    ]
+
+    validate_script = (
+        "const mod = await import('@whiskeysockets/baileys');"
+        "const required = ['makeWASocket','useMultiFileAuthState','DisconnectReason','fetchLatestBaileysVersion','downloadMediaMessage'];"
+        "for (const key of required) { if (!(key in mod)) throw new Error(`Missing export: ${key}`); }"
+        "console.log('ok');"
+    )
+
+    try:
         result = subprocess.run(
             [
                 node_bin,
                 "--input-type=module",
                 "-e",
-                "await import('@whiskeysockets/baileys'); console.log('ok');",
+                validate_script,
             ],
             cwd=str(runtime_dir),
             capture_output=True,
@@ -847,7 +950,7 @@ def _validate_bridge_deps(node_bin: str, runtime_dir: Path) -> dict:
         detail = _combine_output(result.stdout or "", result.stderr or "")
         return {
             "ok": False,
-            "error": f"import('@whiskeysockets/baileys') failed. {_truncate_text(detail)}",
+            "error": f"import('@whiskeysockets/baileys') failed or required exports are missing. {_truncate_text(detail)}",
         }
 
     return {"ok": True, "error": None}
@@ -876,6 +979,8 @@ def _summarize_bridge_start_failure(
 
     log_tail = _read_log_tail(bridge_log, BRIDGE_LOG_TAIL_LINES)
     if log_tail:
+        if "@whiskeysockets/baileys" in log_tail or "ERR_MODULE_NOT_FOUND" in log_tail:
+            parts.append("Baileys import validation failed after startup.")
         parts.append(f"Last bridge.log lines:\n{log_tail}")
     else:
         parts.append("No bridge.log output captured.")
