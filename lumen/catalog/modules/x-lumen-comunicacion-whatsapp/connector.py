@@ -216,76 +216,79 @@ class WhatsAppRuntime:
                 )
                 self.context.write_runtime_state(state)
                 return
-        finally:
-            await asyncio.to_thread(_release_file_lock, deps_lock_path)
 
-        # Kill orphaned bridge processes on the configured port
-        port = self._bridge_port()
-        await asyncio.to_thread(_kill_orphans_on_port, port)
+            # Keep the deps lock until the bridge is actually healthy so another
+            # concurrent activator cannot wipe/reinstall node_modules between
+            # validation and startup.
+            port = self._bridge_port()
+            await asyncio.to_thread(_kill_orphans_on_port, port)
 
-        # Start the bridge subprocess
-        bridge_log = self.context.runtime_dir / "bridge.log"
-        env = _build_bridge_env(self.context, port)
+            bridge_log = self.context.runtime_dir / "bridge.log"
+            env = _build_bridge_env(self.context, port)
 
-        try:
-            log_fh = open(bridge_log, "w", encoding="utf-8")
-            self._bridge_proc = subprocess.Popen(
-                [node_bin, "bridge.js", "--port", str(port)],
-                cwd=str(self.context.runtime_dir),
-                stdout=log_fh,
-                stderr=log_fh,
-                env=env,
-            )
-        except Exception as exc:
+            try:
+                log_fh = open(bridge_log, "w", encoding="utf-8")
+                self._bridge_proc = subprocess.Popen(
+                    [node_bin, "bridge.js", "--port", str(port)],
+                    cwd=str(self.context.runtime_dir),
+                    stdout=log_fh,
+                    stderr=log_fh,
+                    env=env,
+                )
+            except Exception as exc:
+                state.update(
+                    {
+                        "module": MODULE_NAME,
+                        "status": "degraded",
+                        "polling": False,
+                        "error": f"Failed to start bridge: {exc}",
+                        "updated_at": time(),
+                    }
+                )
+                self.context.write_runtime_state(state)
+                return
+
+            ready = await asyncio.to_thread(_wait_for_health, port, HEALTH_TIMEOUT)
+            if not ready:
+                validation_after_failure = await asyncio.to_thread(
+                    _validate_bridge_deps, node_bin, self.context.runtime_dir
+                )
+                bridge_error = _summarize_bridge_start_failure(
+                    bridge_log, self._bridge_proc, validation_after_failure
+                )
+                state.update(
+                    {
+                        "module": MODULE_NAME,
+                        "status": "degraded",
+                        "polling": False,
+                        "error": bridge_error,
+                        "bridge_pid": self._bridge_proc.pid if self._bridge_proc else None,
+                        "updated_at": time(),
+                    }
+                )
+                self.context.write_runtime_state(state)
+                return
+
             state.update(
                 {
                     "module": MODULE_NAME,
-                    "status": "degraded",
-                    "polling": False,
-                    "error": f"Failed to start bridge: {exc}",
-                    "updated_at": time(),
-                }
-            )
-            self.context.write_runtime_state(state)
-            return
-
-        # Wait for bridge to become healthy
-        ready = await asyncio.to_thread(_wait_for_health, port, HEALTH_TIMEOUT)
-        if not ready:
-            bridge_error = _summarize_bridge_start_failure(
-                bridge_log, self._bridge_proc
-            )
-            state.update(
-                {
-                    "module": MODULE_NAME,
-                    "status": "degraded",
-                    "polling": False,
-                    "error": bridge_error,
+                    "status": "running",
+                    "polling": True,
+                    "error": None,
                     "bridge_pid": self._bridge_proc.pid if self._bridge_proc else None,
                     "updated_at": time(),
                 }
             )
             self.context.write_runtime_state(state)
-            return
 
-        state.update(
-            {
-                "module": MODULE_NAME,
-                "status": "running",
-                "polling": True,
-                "error": None,
-                "bridge_pid": self._bridge_proc.pid if self._bridge_proc else None,
-                "updated_at": time(),
-            }
-        )
-        self.context.write_runtime_state(state)
-
-        self._poll_task = asyncio.create_task(
-            self._poll_loop(), name=f"{MODULE_NAME}-poll"
-        )
-        self._health_task = asyncio.create_task(
-            self._poll_health(), name=f"{MODULE_NAME}-health"
-        )
+            self._poll_task = asyncio.create_task(
+                self._poll_loop(), name=f"{MODULE_NAME}-poll"
+            )
+            self._health_task = asyncio.create_task(
+                self._poll_health(), name=f"{MODULE_NAME}-health"
+            )
+        finally:
+            await asyncio.to_thread(_release_file_lock, deps_lock_path)
 
     async def stop(self):
         self._stopping = True
@@ -968,10 +971,16 @@ def _format_install_result(result: dict) -> str:
 
 
 def _summarize_bridge_start_failure(
-    bridge_log: Path, bridge_proc: subprocess.Popen | None
+    bridge_log: Path,
+    bridge_proc: subprocess.Popen | None,
+    validation_result: dict | None = None,
 ) -> str:
     """Return a clearer bridge startup error than generic health timeout."""
     parts = ["Bridge did not become healthy in time."]
+    if validation_result is not None and not validation_result.get("ok", False):
+        parts.append(
+            f"Baileys import validation failed after startup attempt: {validation_result.get('error', 'unknown validation error')}."
+        )
     if bridge_proc is not None:
         returncode = bridge_proc.poll()
         if returncode is not None:
