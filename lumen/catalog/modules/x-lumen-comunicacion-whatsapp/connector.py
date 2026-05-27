@@ -73,8 +73,15 @@ def _copy_bridge_files(runtime_dir: Path):
     for filename in ("bridge.js", "allowlist.js", "package.json", "package-lock.json"):
         src = BRIDGE_SOURCE_DIR / filename
         dst = runtime_dir / filename
-        if src.exists():
-            shutil.copy2(src, dst)
+        if not src.exists():
+            continue
+        try:
+            same_file = dst.exists() and src.resolve() == dst.resolve()
+        except Exception:
+            same_file = False
+        if same_file:
+            continue
+        shutil.copy2(src, dst)
 
 
 # ---------------------------------------------------------------------------
