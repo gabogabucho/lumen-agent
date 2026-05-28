@@ -1941,62 +1941,107 @@ class Brain:
         2. Personality — who I am in this context (swappable)
         3. Body — what I have (discovered at startup)
         4. Current state — active flow, memories, conversation
+
+        When personality has a system_prompt_override, the prompt follows
+        override mode: LANGUAGE → override text → minimal framework
+        meta-instruction → tools → body → state. Legacy mode is byte-for-byte
+        identical to pre-change behavior.
         """
-        system_parts = [
-            # LANGUAGE — responses must match the user's chosen locale
+        override = self.personality.system_prompt_override
+
+        # ── LANGUAGE directive (shared by both modes) ──
+        language_block = [
             "## LANGUAGE (HIGHEST PRIORITY — this overrides any other instruction)",
             "",
             self._language_directive(message=message, session=session),
             "Treat the configured language as the default UI locale, but follow the user's actual conversational language when it is obvious.",
             "Even if other sections below are written in English, you MUST answer in the language above. Translate on the fly.",
             "",
-            # CRITICAL RULES — the LLM MUST obey these
-            "## RULES (you MUST follow these exactly)",
-            "",
-            "1. Your capabilities are EXACTLY what the Body section lists.",
-            "2. Only items under 'What I CAN do' are usable right now.",
-            "3. Installed or present is NOT the same as ready.",
-            "4. If something is listed under 'Installed but NOT ready yet' — say it exists, but be explicit that it still needs configuration, repair, or dependency fixes before you can use it.",
-            "5. Truthfulness about readiness is more important than the fact that something is installed. Never present a non-ready capability as usable, available now, or already working.",
-            "6. NEVER invent capabilities not listed in the Body.",
-            "7. When asked what you can do, ONLY list what the Body says, and separate READY capabilities from not-ready ones truthfully.",
-            "8. When the 'Something changed in my body' section appears, you MAY "
-            "mention it naturally — but ONLY if it's relevant to the conversation. "
-            "If the user is just greeting you or making small talk, IGNORE it. "
-            "A 'Hola' or 'Hey' does NOT need a capability announcement. "
-            "Example of GOOD timing: user asks about messaging → 'I can now reach you on Telegram too.' "
-            "Example of BAD timing: user says 'Hola' → 'I've connected to 8 services...' (don't do this).",
-            "9. When a user asks 'what can you do?', respond conversationally "
-            "using the Body section. Do NOT dump the raw list — translate "
-            "into human language.",
-            "10. Before claiming you have (or lack) a specific capability — especially "
-            "messaging, integrations, or channels — call neo__check_capability to "
-            "verify it against your live Registry. Do NOT rely on memory or assumptions. "
-            "This is NOT needed for capabilities you have already used successfully "
-            "in the current conversation.",
-            "11. When a tool can perform the user's requested action, USE THE TOOL — do not merely describe what you would do.",
-            "12. If you say you are going to check, inspect, search, execute, save, read, or configure something — perform that action with a tool in the same turn.",
-            "13. Do NOT end with a plan when the required capability is READY and a tool exists. Act now.",
-            "14. Do NOT claim 'I don't have access', 'I can't execute', or similar if a matching READY capability/tool exists.",
-            "15. If a tool result is partial, empty, or recoverable, try again with a better query/argument strategy before giving up.",
-            "16. Prefer concrete execution over speculation. Verify with tools instead of answering from memory when tools are available.",
-            "",
-            self._tool_enforcement_directive(),
-            "",
-            # Tool hint — Phase 2.4: suggest relevant tools based on user message
-            self._suggest_relevant_tools(message, tools),
-            "",
-            # 1. CONSCIOUSNESS — the soul (never changes)
-            context["consciousness"],
-            "",
-            # 2. PERSONALITY — context identity (changes per module)
-            "## Personality (who I am in this context)",
-            "",
-            context["personality"],
-            "",
-            # 2b. LESSONS — learned rules (persistent across sessions)
-            # Injected from cache loaded at startup via load_lessons()
         ]
+
+        if override:
+            # ── OVERRIDE MODE ──
+            # Consciousness (immutable soul) stays intact.
+            # Kit personality is injected AFTER consciousness with a clear directive.
+            # Minimal operational harness keeps the agent functional as a tool-using
+            # modular agent without competing with the kit's behavioral rules.
+            system_parts = [
+                *language_block,
+                # 1. CONSCIOUSNESS — the soul (never changes, even in override mode)
+                context["consciousness"],
+                "",
+                # 2. KIT PERSONALITY OVERRIDE — kit's behavioral rules take precedence
+                "## Personality (ACTIVE — this overrides the default personality)",
+                "",
+                context["personality"],
+                "",
+                # 3. OPERATIONAL HARNESS — minimal constraints for tool-using agent
+                "## Operational Harness (non-negotiable, kit must not override)",
+                "",
+                "Your capabilities are EXACTLY what the Body section lists. "
+                "Only READY items are usable. Installed or present is NOT the same as ready.",
+                "NEVER invent capabilities not listed in the Body.",
+                "When a tool can perform the user's requested action, USE IT — do not merely describe.",
+                "If you say you are going to do something, do it with a tool in the same turn.",
+                "Verify with tools instead of answering from memory when tools are available.",
+                "",
+                self._tool_enforcement_directive(),
+                "",
+                # Tool hint — suggest relevant tools based on user message
+                self._suggest_relevant_tools(message, tools),
+                "",
+            ]
+        else:
+            # ── LEGACY MODE (byte-for-byte identical to pre-change) ──
+            system_parts = [
+                *language_block,
+                # CRITICAL RULES — the LLM MUST obey these
+                "## RULES (you MUST follow these exactly)",
+                "",
+                "1. Your capabilities are EXACTLY what the Body section lists.",
+                "2. Only items under 'What I CAN do' are usable right now.",
+                "3. Installed or present is NOT the same as ready.",
+                "4. If something is listed under 'Installed but NOT ready yet' — say it exists, but be explicit that it still needs configuration, repair, or dependency fixes before you can use it.",
+                "5. Truthfulness about readiness is more important than the fact that something is installed. Never present a non-ready capability as usable, available now, or already working.",
+                "6. NEVER invent capabilities not listed in the Body.",
+                "7. When asked what you can do, ONLY list what the Body says, and separate READY capabilities from not-ready ones truthfully.",
+                "8. When the 'Something changed in my body' section appears, you MAY "
+                "mention it naturally — but ONLY if it's relevant to the conversation. "
+                "If the user is just greeting you or making small talk, IGNORE it. "
+                "A 'Hola' or 'Hey' does NOT need a capability announcement. "
+                "Example of GOOD timing: user asks about messaging → 'I can now reach you on Telegram too.' "
+                "Example of BAD timing: user says 'Hola' → 'I've connected to 8 services...' (don't do this).",
+                "9. When a user asks 'what can you do?', respond conversationally "
+                "using the Body section. Do NOT dump the raw list — translate "
+                "into human language.",
+                "10. Before claiming you have (or lack) a specific capability — especially "
+                "messaging, integrations, or channels — call neo__check_capability to "
+                "verify it against your live Registry. Do NOT rely on memory or assumptions. "
+                "This is NOT needed for capabilities you have already used successfully "
+                "in the current conversation.",
+                "11. When a tool can perform the user's requested action, USE THE TOOL — do not merely describe what you would do.",
+                "12. If you say you are going to check, inspect, search, execute, save, read, or configure something — perform that action with a tool in the same turn.",
+                "13. Do NOT end with a plan when the required capability is READY and a tool exists. Act now.",
+                "14. Do NOT claim 'I don't have access', 'I can't execute', or similar if a matching READY capability/tool exists.",
+                "15. If a tool result is partial, empty, or recoverable, try again with a better query/argument strategy before giving up.",
+                "16. Prefer concrete execution over speculation. Verify with tools instead of answering from memory when tools are available.",
+                "",
+                self._tool_enforcement_directive(),
+                "",
+                # Tool hint — Phase 2.4: suggest relevant tools based on user message
+                self._suggest_relevant_tools(message, tools),
+                "",
+                # 1. CONSCIOUSNESS — the soul (never changes)
+                context["consciousness"],
+                "",
+                # 2. PERSONALITY — context identity (changes per module)
+                "## Personality (who I am in this context)",
+                "",
+                context["personality"],
+                "",
+                # 2b. LESSONS — learned rules (persistent across sessions)
+                # Injected from cache loaded at startup via load_lessons()
+            ]
 
         # Inject lessons if available
         lessons_text = self._get_lessons_injection()

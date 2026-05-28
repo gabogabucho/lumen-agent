@@ -21,7 +21,7 @@ class Personality:
         with open(path, encoding="utf-8") as f:
             self._config = yaml.safe_load(f) or {}
             
-        KNOWN_KEYS = {"identity", "tone", "rules", "knowledge", "ui", "context_prompt"}
+        KNOWN_KEYS = {"identity", "tone", "rules", "knowledge", "ui", "context_prompt", "system_prompt_override"}
         unknown = set(self._config.keys()) - KNOWN_KEYS
         if unknown:
             logger.warning("Personality %s has unrecognized fields: %s", path, unknown)
@@ -50,38 +50,51 @@ class Personality:
     def context_prompt(self) -> str:
         return self._config.get("context_prompt", "")
 
+    @property
+    def system_prompt_override(self) -> str | None:
+        return self._config.get("system_prompt_override")
+
     def current(self) -> dict:
         return self._config
 
     def as_context(self, slot_values: dict | None = None) -> str:
-        """Format personality for LLM system prompt."""
-        identity = self.identity
-        lines = [
-            f"Your name is {identity.get('name', 'Lumen')}.",
-            f"Your role: {identity.get('role', 'AI Assistant')}.",
-        ]
+        """Format personality for LLM system prompt.
 
-        if identity.get("description"):
-            lines.append(identity["description"])
+        When system_prompt_override is present and non-empty, returns only the
+        interpolated override text. Otherwise falls through to the legacy
+        concatenation (identity + tone + rules + knowledge + context_prompt).
+        Slot interpolation via re.sub applies in both paths.
+        """
+        if self.system_prompt_override:
+            result = self.system_prompt_override.strip()
+        else:
+            identity = self.identity
+            lines = [
+                f"Your name is {identity.get('name', 'Lumen')}.",
+                f"Your role: {identity.get('role', 'AI Assistant')}.",
+            ]
 
-        if self.tone:
-            lines.append(f"\nTone: {self.tone.get('style', 'friendly, direct')}")
+            if identity.get("description"):
+                lines.append(identity["description"])
 
-        if self.rules:
-            lines.append("\nRules you MUST follow:")
-            for rule in self.rules:
-                lines.append(f"- {rule}")
+            if self.tone:
+                lines.append(f"\nTone: {self.tone.get('style', 'friendly, direct')}")
 
-        if self.knowledge:
-            lines.append("\nDomain knowledge:")
-            for key, value in self.knowledge.items():
-                lines.append(self._format_knowledge(key, value))
+            if self.rules:
+                lines.append("\nRules you MUST follow:")
+                for rule in self.rules:
+                    lines.append(f"- {rule}")
 
-        if self.context_prompt:
-            lines.append("\nContext Prompt:")
-            lines.append(self.context_prompt.strip())
+            if self.knowledge:
+                lines.append("\nDomain knowledge:")
+                for key, value in self.knowledge.items():
+                    lines.append(self._format_knowledge(key, value))
 
-        result = "\n".join(lines)
+            if self.context_prompt:
+                lines.append("\nContext Prompt:")
+                lines.append(self.context_prompt.strip())
+
+            result = "\n".join(lines)
 
         if slot_values:
             # Replace {{key}} with actual values
