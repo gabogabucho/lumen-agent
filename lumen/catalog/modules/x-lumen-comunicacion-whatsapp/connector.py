@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -12,6 +13,8 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 import yaml
+
+from lumen.core.module_runtime import InboundHookEvent, HookResult, normalize_hook_result
 
 
 MODULE_NAME = "x-lumen-comunicacion-whatsapp"
@@ -24,6 +27,8 @@ DEFAULT_NPM_INSTALL_TIMEOUT = 180
 DEFAULT_NPM_INSTALL_RETRIES = 2
 BRIDGE_LOG_TAIL_LINES = 40
 DEFAULT_DEPENDENCY_LOCK_TIMEOUT = 180
+DEFAULT_HOOK_TIMEOUT_SECONDS = 3
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -340,10 +345,11 @@ class WhatsAppRuntime:
 
     # -- send methods --------------------------------------------------------
 
-    async def send(self, recipient_id: str, message: str) -> None:
+    async def send(self, recipient_id: str, message: str, reply_mode: str | None = None) -> None:
         """ChannelAdapter protocol -- route inbox response back to WhatsApp."""
         chat_id = str(recipient_id or "").strip()
-        if not chat_id:
+        message_text = str(message or "").strip()
+        if not chat_id or not message_text:
             return
 
         # Feature: typing indicator (opt-out via whatsapp_typing_indicator: false)
@@ -362,48 +368,76 @@ class WhatsAppRuntime:
             except Exception:
                 pass  # non-blocking — failed indicator never blocks the actual send
 
-        # Feature: TTS — convert response to a WhatsApp voice note
-        tts_model = self.context.resolve_setting("tts_model", "TOKAINE_TTS_MODEL") or ""
-        if tts_model:
-            audio_path = await _synthesize_speech(self.context, message)
-            if audio_path:
-                try:
-                    await asyncio.to_thread(
-                        _bridge_post,
-                        self._bridge_port(),
-                        "/send-media",
-                        {"chatId": chat_id, "filePath": audio_path, "mediaType": "audio"},
-                    )
-                    return  # sent as voice note — skip text fallback
-                except Exception:
-                    pass  # fall through to text if the media send fails
+        resolved_mode = _resolve_reply_mode(self.context, reply_mode)
+        should_send_text = resolved_mode in {"text", "both"}
+        should_send_voice = resolved_mode in {"voice", "both"}
 
-        # Default: send as text
-        try:
-            await asyncio.to_thread(
-                _bridge_post,
-                self._bridge_port(),
-                "/send",
-                {"chatId": chat_id, "message": message},
-            )
-        except Exception:
-            pass
+        if should_send_text:
+            try:
+                await asyncio.to_thread(
+                    _bridge_post,
+                    self._bridge_port(),
+                    "/send",
+                    {"chatId": chat_id, "message": message_text},
+                )
+            except Exception:
+                logger.exception("whatsapp: text send failed")
 
-    async def send_message(self, text: str, chat_id: str | None = None) -> dict:
-        """Tool-registered method: send a WhatsApp message."""
+        if should_send_voice:
+            try:
+                audio_path = await _synthesize_speech(self.context, message_text)
+                if not audio_path:
+                    raise RuntimeError("TTS not configured or synthesis failed")
+                await asyncio.to_thread(
+                    _bridge_post,
+                    self._bridge_port(),
+                    "/send-media",
+                    {"chatId": chat_id, "filePath": audio_path, "mediaType": "audio"},
+                )
+            except Exception:
+                logger.exception("whatsapp: voice reply failed")
+                if resolved_mode == "voice":
+                    try:
+                        await asyncio.to_thread(
+                            _bridge_post,
+                            self._bridge_port(),
+                            "/send",
+                            {"chatId": chat_id, "message": message_text},
+                        )
+                    except Exception:
+                        logger.exception("whatsapp: voice fallback text send failed")
+
+    async def send_message(
+        self,
+        text: str,
+        chat_id: str | None = None,
+        *,
+        session_id: str | None = None,
+        metadata: dict | None = None,
+        reply_mode: str | None = None,
+    ) -> dict:
+        """Tool/API method: proactively send a WhatsApp message."""
         resolved_chat_id = str(chat_id or "").strip()
+        message_text = str(text or "").strip()
         if not resolved_chat_id:
             return {
                 "status": "error",
                 "error": "Missing WhatsApp chat_id (phone number or JID).",
             }
+        if not message_text:
+            return {"status": "error", "error": "Missing WhatsApp message text."}
+
+        resolved_mode = _resolve_reply_mode(self.context, reply_mode)
+        if resolved_mode != "text":
+            await self.send(resolved_chat_id, message_text, reply_mode=resolved_mode)
+            return {"status": "ok", "chat_id": resolved_chat_id, "message_id": None}
 
         try:
             result = await asyncio.to_thread(
                 _bridge_post,
                 self._bridge_port(),
                 "/send",
-                {"chatId": resolved_chat_id, "message": text},
+                {"chatId": resolved_chat_id, "message": message_text},
             )
             return {
                 "status": "ok",
@@ -471,23 +505,23 @@ class WhatsAppRuntime:
             await asyncio.sleep(HEALTH_POLL_INTERVAL)
 
     async def _handle_message(self, msg: dict):
-        chat_id = msg.get("chatId", "")
-        body = msg.get("body", "")
-        sender = msg.get("senderId", "")
-        timestamp = msg.get("timestamp")
-        media_type = msg.get("mediaType", "")
-        media_urls = msg.get("mediaUrls") or []
+        inbound = await _normalize_inbound_message(self.context, msg)
+        chat_id = inbound["chat_id"]
+        body = inbound["text"]
+        sender = inbound["sender_id"]
+        timestamp = inbound["timestamp"]
+        metadata = inbound["metadata"]
 
-        # Feature: STT — transcribe incoming voice/PTT messages before routing
-        if media_type in ("ptt", "audio") and media_urls:
-            transcript = await _transcribe_audio(self.context, media_urls[0])
-            if transcript:
-                body = transcript
-            else:
-                # No STT configured or transcription failed — drop the message.
-                # (Without a transcript, Lumen would only see a placeholder like
-                # "[ptt received]" which produces a confused/unhelpful reply.)
-                return
+        hook_result = await self._invoke_inbound_hooks(chat_id, body, metadata, inbound)
+        if hook_result.metadata:
+            metadata.setdefault("hook", {}).update(hook_result.metadata)
+        if hook_result.action == "consume":
+            if hook_result.response:
+                if hook_result.reply_mode:
+                    await self.send(chat_id, hook_result.response, reply_mode=hook_result.reply_mode)
+                else:
+                    await self.send(chat_id, hook_result.response)
+            return
 
         state = self.context.read_runtime_state()
         state.update(
@@ -517,6 +551,9 @@ class WhatsAppRuntime:
                         "chat_id": chat_id,
                         "text": body,
                         "received_at": time(),
+                        "metadata": metadata,
+                        "message_type": inbound["message_type"],
+                        "source": "whatsapp",
                     },
                     ensure_ascii=False,
                 )
@@ -532,6 +569,32 @@ class WhatsAppRuntime:
                 category="whatsapp_message",
                 metadata={"chat_id": str(chat_id), "module": MODULE_NAME},
             )
+
+    async def _invoke_inbound_hooks(
+        self, chat_id: str, body: str, metadata: dict, inbound: dict
+    ) -> HookResult:
+        event = InboundHookEvent(
+            channel="whatsapp",
+            sender_id=str(chat_id or ""),
+            text=str(body or ""),
+            metadata=metadata,
+            message_type=inbound.get("message_type"),
+            source="whatsapp",
+        )
+        timeout = _resolve_float_setting(
+            self.context,
+            "hook_timeout_seconds",
+            "WHATSAPP_HOOK_TIMEOUT_SECONDS",
+            DEFAULT_HOOK_TIMEOUT_SECONDS,
+        )
+        invoker = getattr(self.context, "invoke_inbound_hooks", None)
+        if not callable(invoker):
+            return HookResult(action="pass_through")
+        try:
+            return normalize_hook_result(await invoker(event, timeout_seconds=timeout))
+        except Exception:
+            logger.exception("whatsapp: inbound hook invocation failed; passing through")
+            return HookResult(action="pass_through")
 
     # -- helpers -------------------------------------------------------------
 
@@ -630,6 +693,77 @@ def _resolve_int_setting(context, key: str, env_key: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def _resolve_float_setting(context, key: str, env_key: str, default: float) -> float:
+    raw = context.resolve_setting(key, env_key)
+    if raw in (None, ""):
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _resolve_reply_mode(context, explicit: str | None = None) -> str:
+    raw = explicit or context.resolve_setting("reply_mode", "WHATSAPP_REPLY_MODE") or "text"
+    mode = str(raw).strip().lower()
+    return mode if mode in {"text", "voice", "both"} else "text"
+
+
+def _stt_configured(context) -> bool:
+    return bool(context.resolve_setting("stt_model", "TOKAINE_STT_MODEL"))
+
+
+async def _normalize_inbound_message(context, msg: dict) -> dict:
+    chat_id = str(msg.get("chatId") or msg.get("chat_id") or "").strip()
+    body = str(msg.get("body") or msg.get("text") or "").strip()
+    sender = str(msg.get("senderId") or msg.get("sender_id") or "").strip()
+    timestamp = msg.get("timestamp")
+    media_type = str(msg.get("mediaType") or msg.get("media_type") or "").strip().lower()
+    media_urls = msg.get("mediaUrls") or msg.get("media_urls") or []
+    if isinstance(media_urls, str):
+        media_urls = [media_urls]
+    media_urls = [str(item) for item in media_urls if item]
+
+    message_type = "audio" if media_type in {"ptt", "audio"} else "text"
+    metadata = {
+        "module": MODULE_NAME,
+        "chat_id": chat_id,
+        "sender_id": sender,
+        "message_id": msg.get("id") or msg.get("messageId") or msg.get("message_id"),
+        "timestamp": timestamp,
+        "raw_type": media_type or "text",
+    }
+    metadata = {key: value for key, value in metadata.items() if value not in {None, ""}}
+
+    if message_type == "audio":
+        metadata["audio"] = {
+            "media_type": media_type,
+            "media_urls": media_urls[:3],
+        }
+        audio_path = None
+        if _stt_configured(context) and media_urls:
+            audio_path = await _download_audio(context, media_urls[0])
+            if audio_path:
+                metadata["audio"]["local_path"] = audio_path
+        transcript = await _transcribe_audio(context, audio_path or "")
+        if transcript:
+            body = transcript.strip()
+            metadata["type"] = "audio_transcription"
+            metadata["audio_transcription"] = {"provider": "configured", "status": "ok"}
+        else:
+            metadata["audio_transcription"] = {"status": "unavailable"}
+
+    return {
+        "chat_id": chat_id,
+        "sender_id": sender,
+        "text": body,
+        "timestamp": timestamp,
+        "message_type": message_type,
+        "metadata": metadata,
+    }
+
+
 def _acquire_file_lock(lock_path: Path, timeout: int) -> dict:
     deadline = time() + timeout
     payload = json.dumps({"pid": os.getpid(), "created_at": time()})
@@ -661,6 +795,32 @@ def _release_file_lock(lock_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # STT helpers
 # ---------------------------------------------------------------------------
+
+async def _download_audio(context, audio_url: str) -> str | None:
+    """Download WhatsApp audio to a local cache when the bridge provides a URL."""
+    url = str(audio_url or "").strip()
+    if not url:
+        return None
+    if Path(url).exists():
+        return url
+    try:
+        return await asyncio.to_thread(_download_audio_sync, context, url)
+    except Exception:
+        logger.exception("whatsapp: audio download failed")
+        return None
+
+
+def _download_audio_sync(context, audio_url: str) -> str | None:
+    audio_dir = Path(getattr(context, "runtime_dir", Path(os.path.expanduser("~/.lumen")))) / "audio_cache"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(audio_url.split("?", 1)[0]).suffix or ".ogg"
+    if len(suffix) > 8:
+        suffix = ".ogg"
+    audio_path = audio_dir / f"in_{os.urandom(6).hex()}{suffix}"
+    req = urllib_request.Request(audio_url, method="GET")
+    with urllib_request.urlopen(req, timeout=30) as response:
+        audio_path.write_bytes(response.read())
+    return str(audio_path)
 
 async def _transcribe_audio(context, audio_path: str) -> str | None:
     """Transcribe an audio file using the configured STT model.

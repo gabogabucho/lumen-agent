@@ -3224,6 +3224,56 @@ async def api_chat(request: Request):
     return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 
+@app.post("/api/whatsapp/send")
+async def api_whatsapp_send(request: Request):
+    """Authenticated proactive WhatsApp send endpoint.
+
+    Uses the active WhatsApp module runtime rather than writing memory or
+    talking directly to bridge internals from the web layer.
+    """
+    guard = _require_any_auth(request)
+    if guard is not None:
+        return guard
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "invalid JSON"})
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"error": "expected JSON object"})
+
+    chat_id = str(body.get("to") or body.get("chat_id") or "").strip()
+    text = str(body.get("message") or body.get("text") or "").strip()
+    if not chat_id:
+        return JSONResponse(status_code=400, content={"error": "to is required"})
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "message is required"})
+
+    runtime = _active_whatsapp_runtime()
+    if runtime is None or not hasattr(runtime, "send_message"):
+        return JSONResponse(status_code=503, content={"error": "WhatsApp runtime unavailable"})
+
+    result = await runtime.send_message(
+        text,
+        chat_id=chat_id,
+        session_id=body.get("session_id"),
+        metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else None,
+        reply_mode=body.get("reply_mode"),
+    )
+    status = str((result or {}).get("status") or "error")
+    if status != "ok":
+        return JSONResponse(status_code=503, content=result or {"status": "error"})
+    return result
+
+
+def _active_whatsapp_runtime():
+    if _brain is None:
+        return None
+    manager = getattr(_brain, "module_manager", None)
+    loaded = getattr(manager, "_loaded", {}) if manager is not None else {}
+    runtime = loaded.get("x-lumen-comunicacion-whatsapp") if isinstance(loaded, dict) else None
+    return getattr(runtime, "state", None)
+
+
 @app.post("/api/session/new")
 async def api_new_session(request: Request):
     """Start a new session, archiving the current one.

@@ -18,3 +18,42 @@ x-lumen:
         hint: "Puerto para comunicación con el bridge de WhatsApp (default: 3100). Solo cambiá esto si tenés conflicto con otro servicio."
         secret: false
         expected_type: "int"
+      - name: WHATSAPP_HOOK_TIMEOUT_SECONDS
+        label: "Timeout de hooks inbound"
+        hint: "Segundos máximos para hooks oficiales pre-route antes de continuar con Lumen (default: 3)."
+        secret: false
+        expected_type: "float"
+        default: "3"
+      - name: WHATSAPP_REPLY_MODE
+        label: "Modo de respuesta"
+        hint: "text, voice o both. El default text conserva el comportamiento histórico."
+        secret: false
+        expected_type: "select"
+        options: [text, voice, both]
+        default: text
+      - name: TOKAINE_STT_MODEL
+        label: "Modelo STT"
+        hint: "Modelo OpenAI-compatible para transcribir audio/PTT entrante. Opcional."
+        secret: false
+        expected_type: "string"
+      - name: TOKAINE_TTS_MODEL
+        label: "Modelo TTS"
+        hint: "Modelo OpenAI-compatible para generar respuestas de voz. Opcional."
+        secret: false
+        expected_type: "string"
+      - name: TOKAINE_TTS_VOICE
+        label: "Voz TTS"
+        hint: "Voz a usar cuando WHATSAPP_REPLY_MODE sea voice o both."
+        secret: false
+        expected_type: "string"
+        default: alloy
+      - name: LUMEN_API_BASE
+        label: "API base STT/TTS"
+        hint: "Base URL OpenAI-compatible para /audio/transcriptions y /audio/speech."
+        secret: false
+        expected_type: "url"
+      - name: LUMEN_API_KEY
+        label: "API key STT/TTS"
+        hint: "Clave para proveedor OpenAI-compatible de STT/TTS."
+        secret: true
+        expected_type: "password"

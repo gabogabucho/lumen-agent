@@ -29,6 +29,9 @@ class IncomingMessage:
     channel: str  # "telegram", "whatsapp", "email", ...
     sender_id: str  # chat_id, phone, email — identifies the user
     text: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+    message_type: str | None = None
+    source: str | None = None
 
 
 @runtime_checkable

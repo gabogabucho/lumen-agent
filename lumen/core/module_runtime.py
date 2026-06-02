@@ -26,6 +26,49 @@ from lumen.core.module_manifest import (
 )
 
 
+@dataclass(frozen=True)
+class InboundHookEvent:
+    """Normalized pre-route event for official inbound channel hooks."""
+
+    channel: str
+    sender_id: str
+    text: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+    message_type: str | None = None
+    source: str | None = None
+
+
+@dataclass(frozen=True)
+class HookResult:
+    """Normalized hook result. Unknown/malformed output is pass-through."""
+
+    action: str = "pass_through"
+    response: str | None = None
+    reply_mode: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def normalize_hook_result(value: Any) -> HookResult:
+    if isinstance(value, HookResult):
+        action = value.action if value.action in {"consume", "pass_through"} else "pass_through"
+        reply_mode = value.reply_mode if value.reply_mode in {"text", "voice", "both", None} else None
+        metadata = value.metadata if isinstance(value.metadata, dict) else {}
+        return HookResult(action=action, response=value.response, reply_mode=reply_mode, metadata=metadata)
+    if not isinstance(value, dict):
+        return HookResult(action="pass_through")
+    action = str(value.get("action") or "pass_through").strip().lower()
+    if action not in {"consume", "pass_through"}:
+        action = "pass_through"
+    response = value.get("response")
+    response_text = str(response) if response not in {None, ""} else None
+    reply_mode = value.get("reply_mode")
+    reply_mode_text = str(reply_mode).strip().lower() if reply_mode else None
+    if reply_mode_text not in {"text", "voice", "both", None}:
+        reply_mode_text = None
+    metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
+    return HookResult(action=action, response=response_text, reply_mode=reply_mode_text, metadata=metadata)
+
+
 class CapabilityPathInjector:
     """Context manager that temporarily prepends capability parent dirs to ``sys.path``.
 
@@ -86,6 +129,7 @@ class ModuleRuntimeContext:
     registered_tools: list[str] = field(default_factory=list)
     inbox: Any = None
     _broadcast_callback: Any = None
+    _inbound_hooks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     async def broadcast_event(self, event_type: str, payload: dict) -> int:
         if self._broadcast_callback is not None:
@@ -148,6 +192,55 @@ class ModuleRuntimeContext:
         for tool_name in list(self.registered_tools):
             self.connectors.unregister_tool(tool_name)
         self.registered_tools.clear()
+
+    def register_inbound_hook(self, channel: str, handler, *, timeout_seconds: float | None = None):
+        """Register an official ordered pre-route hook for a channel.
+
+        Integrations such as Ambar should use this API instead of monkey-patching
+        channel connectors. The returned token unregisters the hook.
+        """
+        channel_id = str(channel or "").strip().lower()
+        if not channel_id:
+            raise ValueError("channel is required")
+        item = {"handler": handler, "timeout_seconds": timeout_seconds}
+        self._inbound_hooks.setdefault(channel_id, []).append(item)
+
+        def _unregister() -> None:
+            hooks = self._inbound_hooks.get(channel_id) or []
+            if item in hooks:
+                hooks.remove(item)
+
+        return _unregister
+
+    async def invoke_inbound_hooks(self, event: InboundHookEvent, *, timeout_seconds: float | None = None) -> HookResult:
+        """Invoke hooks in order; first consume wins, all failures pass through."""
+        channel_id = str(event.channel or "").strip().lower()
+        hooks = list(self._inbound_hooks.get(channel_id) or [])
+        merged_metadata: dict[str, Any] = {}
+        for hook in hooks:
+            handler = hook.get("handler")
+            timeout = hook.get("timeout_seconds") or timeout_seconds
+            try:
+                result = handler(event)
+                if inspect.isawaitable(result):
+                    if timeout:
+                        result = await asyncio.wait_for(result, timeout=float(timeout))
+                    else:
+                        result = await result
+            except Exception:
+                logger.exception("inbound hook failed for channel %s; passing through", channel_id)
+                continue
+            normalized = normalize_hook_result(result)
+            if normalized.metadata:
+                merged_metadata.update(normalized.metadata)
+            if normalized.action == "consume":
+                return HookResult(
+                    action="consume",
+                    response=normalized.response,
+                    reply_mode=normalized.reply_mode,
+                    metadata=merged_metadata,
+                )
+        return HookResult(action="pass_through", metadata=merged_metadata)
 
 
 def _load_runtime_module(
@@ -328,9 +421,32 @@ class ModuleRuntimeManager:
         self.brain = brain
         self._broadcast_callback = broadcast_callback
         self._loaded: dict[str, LoadedModuleRuntime] = {}
+        self._inbound_hooks: dict[str, list[dict[str, Any]]] = {}
 
     def set_broadcast_callback(self, callback) -> None:
         self._broadcast_callback = callback
+
+    def register_inbound_hook(self, channel: str, handler, *, timeout_seconds: float | None = None):
+        context = ModuleRuntimeContext(
+            name="runtime-manager",
+            module_dir=self.pkg_dir,
+            runtime_dir=self.runtime_root,
+            manifest={},
+            config=self.config,
+            _inbound_hooks=self._inbound_hooks,
+        )
+        return context.register_inbound_hook(channel, handler, timeout_seconds=timeout_seconds)
+
+    async def invoke_inbound_hooks(self, event: InboundHookEvent, *, timeout_seconds: float | None = None) -> HookResult:
+        context = ModuleRuntimeContext(
+            name="runtime-manager",
+            module_dir=self.pkg_dir,
+            runtime_dir=self.runtime_root,
+            manifest={},
+            config=self.config,
+            _inbound_hooks=self._inbound_hooks,
+        )
+        return await context.invoke_inbound_hooks(event, timeout_seconds=timeout_seconds)
 
     async def sync(self) -> None:
         module_roots = [self.runtime_root, self.pkg_dir / "modules"]
@@ -420,6 +536,7 @@ class ModuleRuntimeManager:
             inbox=getattr(self.brain, "inbox", None) if self.brain else None,
             broadcast_callback=self._broadcast_callback,
         )
+        context._inbound_hooks = self._inbound_hooks
         context.ensure_runtime_dir()
 
         try:
@@ -548,6 +665,9 @@ def _start_gateway_inbox_watcher(
                                 channel=channel_id,
                                 sender_id=sender_id,
                                 text=text,
+                                metadata=entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {},
+                                message_type=str(entry.get("message_type") or "") or None,
+                                source=str(entry.get("source") or "") or None,
                             )
                         )
                 offset = f.tell()
