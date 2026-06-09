@@ -656,13 +656,59 @@ class Brain:
             return "en"
         return None
 
+    @staticmethod
+    def _continuity_prefix(session: Session) -> str | None:
+        """Session-id prefix that groups all sessions of the same human.
+
+        Mirrors _scoped_session_id without the per-session raw id. Role-less
+        sessions (single-user instances) return None: every stored summary
+        belongs to the same person.
+        """
+        role = str(getattr(session, "role", "") or "").strip().lower()
+        workspace = str(getattr(session, "workspace", "") or "").strip() or "default"
+        team = str(getattr(session, "team", "") or "").strip() or "no-team"
+        email = str(getattr(session, "user_email", "") or "").strip().lower() or "anon"
+        if role == "admin":
+            return f"global:{workspace}:"
+        if role == "team_admin":
+            return f"team:{workspace}:{team}:"
+        if role:
+            return f"user:{workspace}:{team}:{email}:"
+        return None
+
+    async def _load_session_continuity(self, session: Session) -> dict:
+        """Latest session summary + durable facts for this user.
+
+        Distilled knowledge exists in the DB but recall() only surfaces it when
+        the current message happens to match — the agent must greet already
+        knowing who it is talking to (issue #21).
+        """
+        empty = {"summary": "", "facts": []}
+        if not self.memory:
+            return empty
+        try:
+            prefix = self._continuity_prefix(session)
+            summaries = await self.memory.list_session_summaries(
+                limit=1, session_prefix=prefix
+            )
+            facts = await self.memory.list_session_facts(
+                limit=10, session_prefix=prefix
+            )
+        except Exception:
+            return empty
+        return {
+            "summary": summaries[0]["summary"] if summaries else "",
+            "facts": [f["fact"] for f in facts],
+        }
+
     async def _prepare_think_context(self, message: str, session: Session):
         """Prepare context, messages, and tools for the LLM call.
 
         Returns (context, messages, tools) tuple.
         """
-        # 1. Recall relevant memories
+        # 1. Recall relevant memories + cross-session continuity
         memories = await self.memory.recall(message, limit=5)
+        continuity = await self._load_session_continuity(session)
 
         # 2. Build context — Consciousness + Personality + Body + Catalog + State
         context = {
@@ -680,6 +726,7 @@ class Brain:
             "filled_slots": session.slots,
             "pending_slots": session.get_pending_slots(),
             "memories": memories,
+            "continuity": continuity,
             "available_flows": self.flows,
         }
 
@@ -2125,6 +2172,15 @@ class Brain:
                     "If multiple pending setups are relevant, do not assume which one the user wants; ask them to choose."
                 )
             system_parts.extend(triggers)
+
+        # Cross-session continuity — who this user is, before any recall match
+        continuity = context.get("continuity") or {}
+        if continuity.get("summary") or continuity.get("facts"):
+            system_parts.append("\n## What I know from previous sessions")
+            if continuity.get("summary"):
+                system_parts.append(f"Last session: {continuity['summary']}")
+            for fact in continuity.get("facts", []):
+                system_parts.append(f"- {fact}")
 
         # Relevant memories
         if context["memories"]:
