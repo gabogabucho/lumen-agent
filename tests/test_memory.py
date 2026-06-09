@@ -114,6 +114,51 @@ class TestFTS5SpecialChars:
         assert len(results) >= 1
 
 
+# ── Natural language queries (issue #20) ─────────────────────────────
+
+
+class TestRecallNaturalLanguage:
+    async def test_natural_phrase_matches_on_significant_terms(self, memory):
+        """A conversational question must not require ALL its words to match."""
+        await memory.remember("A Humber le gusta el mate amargo")
+        results = await memory.recall(
+            "Te acordas de algo de lo que hablamos sobre el mate?"
+        )
+        assert len(results) == 1
+        assert "mate" in results[0]["content"]
+
+    async def test_natural_phrase_in_spanish_with_accents(self, memory):
+        await memory.remember("Su hija María lo visita los domingos")
+        results = await memory.recall("¿Quién me visita los domingos?")
+        assert len(results) == 1
+
+    async def test_natural_phrase_in_english(self, memory):
+        await memory.remember("User prefers tea over coffee in the morning")
+        results = await memory.recall("Do you remember what I drink in the morning?")
+        assert len(results) == 1
+
+    async def test_stopword_only_query_returns_recent_memories(self, memory):
+        """If nothing significant remains after filtering, return recent memories."""
+        await memory.remember("primera memoria")
+        await memory.remember("segunda memoria")
+        await memory.remember("tercera memoria")
+        results = await memory.recall("te acordas de lo que", limit=2)
+        assert len(results) == 2
+        assert results[0]["content"] == "tercera memoria"
+
+    async def test_no_match_on_significant_terms_returns_empty(self, memory):
+        await memory.remember("the quick brown fox")
+        results = await memory.recall("contame sobre astronomía")
+        assert results == []
+
+    async def test_relevance_still_ranks_multi_term_matches_first(self, memory):
+        await memory.remember("python web framework")
+        await memory.remember("toma la pastilla verde a las 15:30")
+        results = await memory.recall("la pastilla verde")
+        assert len(results) >= 1
+        assert "pastilla" in results[0]["content"]
+
+
 # ── Fallback to LIKE when FTS5 fails ─────────────────────────────────
 
 
