@@ -560,15 +560,10 @@ class WhatsAppRuntime:
                 + "\n"
             )
 
-        if (
-            self.context.memory is not None
-            and getattr(self.context.memory, "_db", None) is not None
-        ):
-            await self.context.memory.remember(
-                body,
-                category="whatsapp_message",
-                metadata={"chat_id": str(chat_id), "module": MODULE_NAME},
-            )
+        # Conversation persistence is owned by Brain.think (saved as
+        # conversation:{session}); saving here too duplicated every inbound
+        # message in memories and polluted FTS recall (issue #22). The
+        # inbox.jsonl archive above keeps the raw channel log.
 
     async def _invoke_inbound_hooks(
         self, chat_id: str, body: str, metadata: dict, inbound: dict
