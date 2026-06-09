@@ -2597,3 +2597,119 @@ class TestPersistenceResilience:
         assert result["message"] == "Response!"
         # Session history should still be updated in RAM
         # (even though persistence failed)
+
+
+# ── session continuity (issue #21) ───────────────────────────────────
+
+
+class TestSessionContinuity:
+    """The agent must start a conversation knowing the user — latest session
+    summary and durable facts injected into context, not only recall()."""
+
+    def _continuity_brain(self, summaries=None, facts=None):
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.list_session_summaries = AsyncMock(return_value=summaries or [])
+        brain.memory.list_session_facts = AsyncMock(return_value=facts or [])
+        return brain
+
+    @pytest.mark.asyncio
+    async def test_context_includes_latest_summary_and_facts(self):
+        brain = self._continuity_brain(
+            summaries=[{"session_id": "s1", "summary": "Hablamos de su pastilla verde",
+                        "fact_count": 1, "turn_count": 6, "created_at": 1.0}],
+            facts=[{"id": 1, "session_id": "s1", "fact": "Se llama Humber",
+                    "category": "identity", "importance": 0.9, "created_at": 1.0}],
+        )
+        context, _, _ = await brain._prepare_think_context("Hola", Session())
+
+        assert context["continuity"]["summary"] == "Hablamos de su pastilla verde"
+        assert context["continuity"]["facts"] == ["Se llama Humber"]
+
+    @pytest.mark.asyncio
+    async def test_context_continuity_empty_when_no_history(self):
+        brain = self._continuity_brain()
+        context, _, _ = await brain._prepare_think_context("Hola", Session())
+
+        assert context["continuity"] == {"summary": "", "facts": []}
+
+    @pytest.mark.asyncio
+    async def test_continuity_failure_does_not_break_context(self):
+        brain = self._continuity_brain()
+        brain.memory.list_session_summaries = AsyncMock(side_effect=Exception("DB locked"))
+        context, _, _ = await brain._prepare_think_context("Hola", Session())
+
+        assert context["continuity"] == {"summary": "", "facts": []}
+
+    def test_prompt_renders_continuity_section(self):
+        brain = _make_brain()
+        context = {
+            "consciousness": "I am Lumen",
+            "personality": "assistant",
+            "body": "capabilities",
+            "catalog": "",
+            "active_flow": None,
+            "filled_slots": {},
+            "pending_slots": [],
+            "memories": [],
+            "available_flows": [],
+            "continuity": {
+                "summary": "Hablamos de su pastilla verde",
+                "facts": ["Se llama Humber", "Le gusta el mate amargo"],
+            },
+        }
+        system_msg = brain._build_prompt(context, "Hola", Session())[0]["content"]
+
+        assert "previous sessions" in system_msg
+        assert "Hablamos de su pastilla verde" in system_msg
+        assert "Se llama Humber" in system_msg
+        assert "Le gusta el mate amargo" in system_msg
+
+    def test_prompt_omits_continuity_section_when_empty(self):
+        brain = _make_brain()
+        context = {
+            "consciousness": "I am Lumen",
+            "personality": "assistant",
+            "body": "capabilities",
+            "catalog": "",
+            "active_flow": None,
+            "filled_slots": {},
+            "pending_slots": [],
+            "memories": [],
+            "available_flows": [],
+            "continuity": {"summary": "", "facts": []},
+        }
+        system_msg = brain._build_prompt(context, "Hola", Session())[0]["content"]
+
+        assert "previous sessions" not in system_msg
+
+    def test_prompt_handles_missing_continuity_key(self):
+        """Older callers may build context without the key — must not crash."""
+        brain = _make_brain()
+        context = {
+            "consciousness": "I am Lumen",
+            "personality": "assistant",
+            "body": "capabilities",
+            "catalog": "",
+            "active_flow": None,
+            "filled_slots": {},
+            "pending_slots": [],
+            "memories": [],
+            "available_flows": [],
+        }
+        messages = brain._build_prompt(context, "Hola", Session())
+        assert messages[0]["role"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_continuity_scopes_by_user_for_workspace_sessions(self):
+        brain = self._continuity_brain()
+        session = Session()
+        session.role = "user"
+        session.workspace = "acme"
+        session.team = "alpha"
+        session.user_email = "maria@example.com"
+
+        await brain._prepare_think_context("Hola", session)
+
+        kwargs = brain.memory.list_session_summaries.call_args.kwargs
+        assert kwargs.get("session_prefix") == "user:acme:alpha:maria@example.com:"
