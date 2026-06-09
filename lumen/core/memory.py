@@ -1,10 +1,35 @@
 """Persistent memory — SQLite with FTS5 full-text search."""
 
 import json
+import re
 import time
 from pathlib import Path
 
 import aiosqlite
+
+# Common Spanish/English words that carry no recall signal. Without this
+# filter a conversational query like "Te acordas de algo de lo que hablamos?"
+# requires every word to match (FTS5 implicit AND) and returns nothing.
+_STOPWORDS = frozenset(
+    """
+    a al algo ante antes aqui aquí asi así bien casi como cómo con contra cual
+    cuál cuando cuándo de del desde donde dónde dos el él ella ellas ellos en
+    entre era eres es esa ese eso esta está están estas este esto estos fue ha
+    han hasta hay la las le les lo los mas más me mi mis muy nada ni no nos
+    nosotros o os otra otro para pero poco por porque que qué quien quién se
+    ser si sí sin sobre solo sólo son soy su sus te ti tu tus un una unas unos
+    usted vos y ya yo
+    acordas acordás recordas recordás sabes sabés decime contame hablamos dijiste dije
+    a about after all also am an and any are as at be because been before but
+    by can could did do does doing down for from had has have he her here hers
+    him his how i if in into is it its just like me my no nor not now of off
+    on once only or other our out over own re s so some such t than that the
+    their them then there these they this those through to too under until up
+    very was we were what when where which while who whom why will with you
+    your yours
+    remember recall told said talked tell know
+    """.split()
+)
 
 
 class Memory:
@@ -120,10 +145,31 @@ class Memory:
         return cursor.lastrowid
 
     async def recall(self, query: str, limit: int = 5) -> list[dict]:
-        """Search memory using FTS5. Returns matching memories ranked by relevance."""
-        safe_query = " ".join(f'"{term}"' for term in query.split() if term.strip())
-        if not safe_query:
+        """Search memory using FTS5. Returns matching memories ranked by relevance.
+
+        Terms are OR-ed (any significant word may match) so natural-language
+        questions work; FTS5 rank still puts multi-term matches first.
+        """
+        raw_terms = [t for t in re.split(r"\W+", query, flags=re.UNICODE) if t]
+        if not raw_terms:
             return []
+
+        terms = [t for t in raw_terms if t.lower() not in _STOPWORDS]
+        if not terms:
+            # Query was pure conversational filler ("te acordas de lo que...")
+            # — recent memories are the best available context.
+            rows = await self._db.execute_fetchall(
+                """
+                SELECT id, content, category, metadata, created_at
+                FROM memories
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return self._rows_to_memories(rows)
+
+        safe_query = " OR ".join(f'"{term}"' for term in terms)
 
         try:
             rows = await self._db.execute_fetchall(
@@ -139,17 +185,22 @@ class Memory:
             )
         except Exception:
             # Fallback to LIKE search if FTS fails
+            like_clauses = " OR ".join(["content LIKE ?"] * len(terms))
             rows = await self._db.execute_fetchall(
-                """
+                f"""
                 SELECT id, content, category, metadata, created_at
                 FROM memories
-                WHERE content LIKE ?
+                WHERE {like_clauses}
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
-                (f"%{query}%", limit),
+                (*[f"%{term}%" for term in terms], limit),
             )
 
+        return self._rows_to_memories(rows)
+
+    @staticmethod
+    def _rows_to_memories(rows) -> list[dict]:
         return [
             {
                 "id": row[0],
