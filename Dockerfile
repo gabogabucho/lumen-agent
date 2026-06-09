@@ -5,9 +5,12 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Minimal runtime dependencies for TLS/certs and basic health tooling.
+# Runtime dependencies: TLS/certs, health tooling, git, and Node.js 20 for
+# the WhatsApp (Baileys) bridge.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md /app/
