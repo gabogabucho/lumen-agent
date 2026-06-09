@@ -229,3 +229,35 @@ class WhatsAppSendApiTests(unittest.TestCase):
         assert response.status_code == 200
         assert response.json()["message_id"] == "mid"
         runtime.send_message.assert_awaited_once()
+
+
+class WhatsAppMemoryDuplicationTests(unittest.TestCase):
+    """Issue #22: inbound messages were persisted twice — once here as
+    'whatsapp_message' and once by Brain.think as 'conversation:{session}'.
+    The brain owns conversation persistence; the connector must not save."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.runtime_dir = Path(self.temp_dir.name)
+        self.connector = load_connector()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_inbound_message_is_not_saved_to_memory_by_connector(self):
+        ctx = FakeContext(self.runtime_dir)
+        ctx.memory = MagicMock()
+        ctx.memory._db = object()
+        ctx.memory.remember = AsyncMock()
+        runtime = self.connector.WhatsAppRuntime(ctx)
+
+        async def run():
+            await runtime._handle_message(
+                {"chatId": "c1", "senderId": "s1", "body": "Hola! Muy bien", "id": "m1"}
+            )
+
+        asyncio.run(run())
+        ctx.memory.remember.assert_not_awaited()
+        # The jsonl inbox archive still captures the message
+        rows = (self.runtime_dir / "inbox.jsonl").read_text(encoding="utf-8").splitlines()
+        assert json.loads(rows[0])["text"] == "Hola! Muy bien"
