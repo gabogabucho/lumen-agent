@@ -184,3 +184,38 @@ class TestRecordAction(unittest.TestCase):
         policy = ToolPolicy()
         policy.load_defaults()
         policy.record_action("task", "delete", approved=True)
+
+
+class TestSchedulerToolRisk:
+    """Scheduler tools must not fall into the unknown→privileged default:
+    that forces a human confirmation that REST/WhatsApp flows cannot give,
+    so every reminder request dies in a 60s timeout."""
+
+    def _policy(self):
+        from lumen.core.tool_policy import ToolPolicy
+        policy = ToolPolicy()
+        policy.load_defaults()
+        return policy
+
+    def test_scheduler_create_is_mutating_no_confirmation(self):
+        policy = self._policy()
+        entry = policy.get_policy("scheduler", "create")
+        assert entry.risk == "mutating"
+        assert policy.requires_confirmation(entry) is False
+
+    def test_scheduler_list_is_read_only(self):
+        policy = self._policy()
+        entry = policy.get_policy("scheduler", "list")
+        assert entry.risk == "read_only"
+        assert policy.requires_confirmation(entry) is False
+
+    def test_scheduler_cancel_is_mutating_no_confirmation(self):
+        policy = self._policy()
+        entry = policy.get_policy("scheduler", "cancel")
+        assert entry.risk == "mutating"
+        assert policy.requires_confirmation(entry) is False
+
+    def test_scheduler_tool_names_resolve_directly(self):
+        policy = self._policy()
+        entry = policy.get_policy("scheduler__create")
+        assert entry.risk == "mutating"

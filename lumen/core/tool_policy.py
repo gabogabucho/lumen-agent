@@ -61,6 +61,11 @@ DEFAULT_TOOL_RISK: dict[str, dict[str, str]] = {
     "terminal": {
         "execute": ToolRisk.PRIVILEGED.value,
     },
+    "scheduler": {
+        "create": ToolRisk.MUTATING.value,
+        "list": ToolRisk.READ_ONLY.value,
+        "cancel": ToolRisk.MUTATING.value,
+    },
     "neo": {
         "read_skill": ToolRisk.READ_ONLY.value,
         "search_modules": ToolRisk.READ_ONLY.value,
