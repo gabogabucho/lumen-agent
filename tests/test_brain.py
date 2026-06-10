@@ -2713,3 +2713,48 @@ class TestSessionContinuity:
 
         kwargs = brain.memory.list_session_summaries.call_args.kwargs
         assert kwargs.get("session_prefix") == "user:acme:alpha:maria@example.com:"
+
+
+# ── current date/time awareness ──────────────────────────────────────
+
+
+class TestCurrentDateTimeInPrompt:
+    """The agent must know the current local date and time: scheduling
+    reminders and any time-relative conversation depend on it."""
+
+    def _context(self):
+        return {
+            "consciousness": "I am Lumen",
+            "personality": "assistant",
+            "body": "capabilities",
+            "catalog": "",
+            "active_flow": None,
+            "filled_slots": {},
+            "pending_slots": [],
+            "memories": [],
+            "available_flows": [],
+        }
+
+    def test_prompt_includes_current_datetime(self):
+        from datetime import datetime
+        brain = _make_brain(config={"locale": {"timezone": "America/Argentina/Buenos_Aires"}})
+        system_msg = brain._build_prompt(self._context(), "hola", Session())[0]["content"]
+
+        assert "Current date and time" in system_msg
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
+        except Exception:
+            # No tzdata on this platform — code falls back to system local
+            now = datetime.now().astimezone()
+        assert now.strftime("%Y-%m-%d") in system_msg
+
+    def test_prompt_datetime_falls_back_without_locale(self):
+        brain = _make_brain()
+        system_msg = brain._build_prompt(self._context(), "hola", Session())[0]["content"]
+        assert "Current date and time" in system_msg
+
+    def test_prompt_datetime_survives_bad_timezone(self):
+        brain = _make_brain(config={"locale": {"timezone": "Not/AZone"}})
+        system_msg = brain._build_prompt(self._context(), "hola", Session())[0]["content"]
+        assert "Current date and time" in system_msg
