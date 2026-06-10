@@ -310,9 +310,11 @@ class Memory:
                 (*params, limit),
             )
         else:
+            # Importance first: critical seeded facts (medication, family)
+            # must stay in the top-N that continuity injects every turn.
             rows = await self._db.execute_fetchall(
                 "SELECT id, session_id, fact, category, importance, created_at "
-                f"FROM session_facts {where} ORDER BY created_at DESC LIMIT ?",
+                f"FROM session_facts {where} ORDER BY importance DESC, created_at DESC LIMIT ?",
                 (*params, limit),
             )
         return [

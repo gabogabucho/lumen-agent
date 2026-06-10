@@ -387,3 +387,18 @@ class TestAsyncConcurrency:
         )
         history = await memory.load_conversation(session_id)
         assert len(history) == 10
+
+
+# ── session facts ordering (continuity injection) ────────────────────
+
+
+class TestSessionFactsOrdering:
+    async def test_high_importance_facts_listed_first(self, memory):
+        """Continuity injects the top-N facts: critical seeded facts (e.g. real
+        medication) must outrank newer low-importance distilled chatter."""
+        await memory.save_session_fact("seed", "Medicación: Pastilla verde 15:30", importance=1.0)
+        for i in range(12):
+            await memory.save_session_fact("s1", f"charla {i}", importance=0.4)
+
+        facts = await memory.list_session_facts(limit=10)
+        assert facts[0]["fact"] == "Medicación: Pastilla verde 15:30"

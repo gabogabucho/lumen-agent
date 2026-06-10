@@ -4562,6 +4562,49 @@ async def api_memory_facts(
     return JSONResponse(status_code=503, content={"error": "Memory not available"})
 
 
+@app.post("/api/memory/facts")
+async def api_memory_facts_create(request: Request):
+    """Save a durable session fact.
+
+    Lets products seed authoritative knowledge (medication schedules, family
+    info) that the brain injects into context on every turn via continuity.
+    """
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_any_auth(request, loaded)
+    if guard is not None:
+        return guard
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "invalid_json"})
+    fact = str(body.get("fact") or "").strip()
+    if not fact:
+        return JSONResponse(status_code=400, content={"error": "fact_required"})
+    session_id = str(body.get("session_id") or "seed").strip() or "seed"
+    category = str(body.get("category") or "general").strip() or "general"
+    try:
+        importance = float(body.get("importance", 0.9))
+    except (TypeError, ValueError):
+        importance = 0.9
+    importance = min(max(importance, 0.0), 1.0)
+
+    if _brain and _brain.memory:
+        fact_id = await _brain.memory.save_session_fact(
+            session_id, fact, category=category, importance=importance
+        )
+        return {
+            "id": fact_id,
+            "fact": fact,
+            "category": category,
+            "importance": importance,
+            "session_id": session_id,
+        }
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
 @app.get("/api/memory/sessions")
 async def api_memory_sessions(request: Request, limit: int = 20):
     """List session summaries."""
