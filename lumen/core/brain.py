@@ -1978,6 +1978,35 @@ class Brain:
             logger.warning(f"Failed to load lessons: {e}")
             self._cached_lessons_text = ""
 
+    def _current_datetime_line(self) -> str:
+        """Current local date/time for the system prompt.
+
+        The model cannot infer the clock: reminders, greetings and any
+        time-relative reasoning produce wrong answers without this.
+        """
+        from datetime import datetime
+
+        tz = None
+        tz_name = ""
+        locale = self.config.get("locale") if isinstance(self.config, dict) else None
+        if isinstance(locale, dict):
+            tz_name = str(locale.get("timezone") or "").strip()
+        if tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+
+                tz = ZoneInfo(tz_name)
+            except Exception:
+                tz = None
+        now = datetime.now(tz) if tz else datetime.now().astimezone()
+        label = tz_name or "system local time"
+        return (
+            "## Current date and time\n"
+            f"{now.strftime('%A %Y-%m-%d %H:%M')} ({label}). "
+            "Use this as the ONLY source for the current time when reasoning "
+            "about schedules, reminders or time of day."
+        )
+
     def _build_prompt(
         self, context: dict, message: str, session: Session, tools: list[dict] | None = None
     ) -> list[dict]:
@@ -2003,6 +2032,8 @@ class Brain:
             self._language_directive(message=message, session=session),
             "Treat the configured language as the default UI locale, but follow the user's actual conversational language when it is obvious.",
             "Even if other sections below are written in English, you MUST answer in the language above. Translate on the fly.",
+            "",
+            self._current_datetime_line(),
             "",
         ]
 
