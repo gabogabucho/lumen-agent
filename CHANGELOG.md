@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-06-10
+
+### Added
+- **Ground truth seeding** (#27): \`POST /api/memory/facts\` lets operators declare authoritative facts (medication schedules, business hours) that the agent injects into context every turn. Fact listing is now importance-first so critical facts never fall out of the top-N.
+- **Functional scheduler module** (#29, #30): the scheduler now has a real runtime — SQLite-persisted jobs, a background sweep that fires due reminders through the originating channel's \`message.send_*\` tool, daily/weekly recurrence, and restart survival. Failed deliveries stay pending and retry.
+
+### Changed
+- **Scheduler SKILL**: the LLM must resolve relative times to absolute before calling \`scheduler__create\` and must never claim a reminder is set without a job id.
+
 ## [1.3.2] - 2026-06-09
 
 ### Fixed
