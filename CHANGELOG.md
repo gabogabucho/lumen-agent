@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-06-10
+
+### Fixed
+- **Scheduler tools blocked by confirmation gate** (#32): \`scheduler__create/cancel\` are now classified as mutating and \`scheduler__list\` as read_only. The unknown-tool default (privileged) demanded a human confirmation that REST/WhatsApp flows cannot provide, so every reminder died in a 60s timeout.
+
+### Added
+- **Current date/time in the system prompt** (#33): the agent now knows the current local date and time (config \`locale.timezone\`, falling back to system local). Required for scheduling reminders and any time-relative reasoning.
+
 ## [1.3.3] - 2026-06-10
 
 ### Added
