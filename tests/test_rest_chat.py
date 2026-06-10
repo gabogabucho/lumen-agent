@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import MagicMock
 from pathlib import Path
 from unittest.mock import patch
 
@@ -330,3 +331,87 @@ class RESTChatTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryFactsWriteAPITests(unittest.TestCase):
+    """POST /api/memory/facts — durable fact seeding (e.g. real medication)."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_lumen_dir = web.LUMEN_DIR
+        self.original_config_path = web.CONFIG_PATH
+        self.original_brain = web._brain
+        self.original_config = web._config
+        web.LUMEN_DIR = Path(self.temp_dir.name)
+        web.CONFIG_PATH = web.LUMEN_DIR / "config.yaml"
+        web.CONFIG_PATH.write_text("model: test-model\n", encoding="utf-8")
+        web._config = {}
+        os.environ["LUMEN_API_KEY"] = "seed-key"
+        self.client = TestClient(web.app)
+
+        class FactsMemoryStub:
+            def __init__(self):
+                self.saved = []
+
+            async def save_session_fact(self, session_id, fact, category="general", importance=0.5):
+                self.saved.append(
+                    {"session_id": session_id, "fact": fact,
+                     "category": category, "importance": importance}
+                )
+                return len(self.saved)
+
+        self.memory_stub = FactsMemoryStub()
+        brain = MagicMock()
+        brain.memory = self.memory_stub
+        web._brain = brain
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+        web.LUMEN_DIR = self.original_lumen_dir
+        web.CONFIG_PATH = self.original_config_path
+        web._brain = self.original_brain
+        web._config = self.original_config
+        os.environ.pop("LUMEN_API_KEY", None)
+
+    def test_post_fact_requires_auth_in_serve_mode(self):
+        original_mode = web._access_mode
+        web._access_mode = "serve"
+        try:
+            response = self.client.post("/api/memory/facts", json={"fact": "x"})
+            assert response.status_code in (401, 403)
+        finally:
+            web._access_mode = original_mode
+
+    def test_post_fact_saves_and_returns_id(self):
+        response = self.client.post(
+            "/api/memory/facts",
+            json={"fact": "Medicación real: Pastilla verde a las 15:30",
+                  "category": "medication", "importance": 1.0,
+                  "session_id": "ambar-seed"},
+            headers={"Authorization": "Bearer seed-key"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["id"] == 1
+        saved = self.memory_stub.saved[0]
+        assert saved["fact"] == "Medicación real: Pastilla verde a las 15:30"
+        assert saved["category"] == "medication"
+        assert saved["importance"] == 1.0
+        assert saved["session_id"] == "ambar-seed"
+
+    def test_post_fact_rejects_empty_fact(self):
+        response = self.client.post(
+            "/api/memory/facts",
+            json={"fact": "   "},
+            headers={"Authorization": "Bearer seed-key"},
+        )
+        assert response.status_code == 400
+
+    def test_post_fact_clamps_importance(self):
+        response = self.client.post(
+            "/api/memory/facts",
+            json={"fact": "dato", "importance": 7},
+            headers={"Authorization": "Bearer seed-key"},
+        )
+        assert response.status_code == 200
+        assert self.memory_stub.saved[0]["importance"] == 1.0
