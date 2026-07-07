@@ -14,9 +14,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from litellm import acompletion
+from lumen.core.llm_client import LLMClient, build_llm_client
 
 logger = logging.getLogger(__name__)
+
+# Module-level seam: tests (and embedders) can override the default client
+# factory without threading an LLMClient through every SessionDistiller().
+_llm_client_factory = build_llm_client
 
 
 @dataclass
@@ -69,11 +73,16 @@ class SessionDistiller:
         model: str = "deepseek/deepseek-chat",
         min_turns: int = 4,  # Don't distill very short sessions
         max_turns: int = 50,  # Limit context sent to LLM
+        llm_client: LLMClient | None = None,
     ):
         self.memory = memory
         self.model = model
         self.min_turns = min_turns
         self.max_turns = max_turns
+        # Constructor injection with factory default (module seam above).
+        self._llm_client: LLMClient = llm_client or _llm_client_factory(
+            {"models": {"default": model}}
+        )
 
     async def distill_session(self, session_id: str) -> list[DistilledFact]:
         """Distill a session into durable facts.
@@ -143,13 +152,13 @@ class SessionDistiller:
         prompt = DISTILL_PROMPT.format(conversation=conversation)
         
         try:
-            response = await acompletion(
+            response = await self._llm_client.complete(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=1024,
             )
-            content = response.choices[0].message.content if response.choices else ""
+            content = response.content or ""
             return self._parse_facts_response(content)
         except Exception as e:
             logger.warning(f"Distillation LLM call failed: {e}")

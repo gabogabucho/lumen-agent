@@ -41,6 +41,32 @@ def test_import_module_does_not_import_litellm():
     assert "litellm" not in sys.modules
 
 
+def test_importing_brain_and_distiller_does_not_import_litellm():
+    """Phase 5 (perfil-core): `import lumen.core.brain` / `lumen.core.distiller`
+    MUST NOT import litellm at module level — this is the RSS-goal linchpin.
+
+    Runs in a fresh subprocess so no prior test pollution of sys.modules can
+    mask (or fake) the result.
+    """
+    import subprocess
+
+    code = (
+        "import sys; "
+        "import lumen.core.brain; "
+        "import lumen.core.distiller; "
+        "assert 'litellm' not in sys.modules, 'litellm was imported at module level'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"brain/distiller import pulled in litellm:\n{result.stderr}"
+    )
+
+
 def test_construction_does_not_import_litellm():
     """spec: constructing LiteLLMClient() must not trigger the litellm import."""
     LiteLLMClient()

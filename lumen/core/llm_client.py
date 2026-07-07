@@ -45,6 +45,9 @@ class LLMChunk:
     delta_content: str | None = None
     delta_tool_calls: list[dict[str, Any]] | None = None
     finish_reason: str | None = None
+    # Reasoning/thinking tokens (DeepSeek R1, Claude extended thinking, ...).
+    # Optional-with-default so the Phase 1 contract stays backward compatible.
+    delta_reasoning_content: str | None = None
 
 
 class LLMClientError(Exception):
@@ -218,7 +221,13 @@ class OpenAICompatClient:
                     arguments = json.loads(arguments)
                 except (json.JSONDecodeError, TypeError):
                     pass
-            parsed.append({"name": function.get("name"), "arguments": arguments})
+            entry: dict[str, Any] = {
+                "name": function.get("name"),
+                "arguments": arguments,
+            }
+            if call.get("id"):
+                entry["id"] = call["id"]
+            parsed.append(entry)
         return parsed
 
     async def complete(
@@ -307,6 +316,7 @@ class OpenAICompatClient:
                         delta_content=delta.get("content"),
                         delta_tool_calls=delta.get("tool_calls"),
                         finish_reason=choice.get("finish_reason"),
+                        delta_reasoning_content=delta.get("reasoning_content"),
                     )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             raise self._map_error(exc) from exc

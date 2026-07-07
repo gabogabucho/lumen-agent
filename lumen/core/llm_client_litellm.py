@@ -151,6 +151,9 @@ class LiteLLMClient:
                         getattr(delta, "tool_calls", None)
                     ),
                     finish_reason=getattr(choice, "finish_reason", None),
+                    delta_reasoning_content=getattr(
+                        delta, "reasoning_content", None
+                    ),
                 )
         except Exception as exc:  # noqa: BLE001 (mapped below)
             raise _map_litellm_error(litellm, exc) from exc
@@ -170,14 +173,25 @@ def _normalize_tool_calls(
         if function is not None:
             name = getattr(function, "name", None)
             arguments = getattr(function, "arguments", None)
+            call_id = getattr(call, "id", None)
+            index = getattr(call, "index", None)
         elif isinstance(call, dict):
             function_dict = call.get("function", {})
             name = function_dict.get("name")
             arguments = function_dict.get("arguments")
+            call_id = call.get("id")
+            index = call.get("index")
         else:
             name = None
             arguments = None
-        normalized.append({"name": name, "arguments": arguments})
+            call_id = None
+            index = None
+        entry: dict[str, Any] = {"name": name, "arguments": arguments}
+        if call_id:
+            entry["id"] = call_id
+        if index is not None:
+            entry["index"] = index
+        normalized.append(entry)
     return normalized
 
 

@@ -1,7 +1,25 @@
 import asyncio
 import json
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 import unittest
+
+from lumen.core.llm_client import LLMResponse
+
+
+class _FakeLLMClient:
+    """Minimal LLMClient fake for constructor injection (Phase 5:
+    distiller no longer imports litellm — it calls an injected client)."""
+
+    def __init__(self, content="", error=None):
+        self.calls = []
+        self._content = content
+        self._error = error
+
+    async def complete(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        return LLMResponse(content=self._content)
 
 
 class TestDistillSession(unittest.TestCase):
@@ -38,15 +56,12 @@ class TestDistillSession(unittest.TestCase):
             {"fact": "User's name is Gabo", "category": "fact", "importance": 0.9},
             {"fact": "User prefers Python over JavaScript", "category": "preference", "importance": 0.7},
         ])
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=facts_response))]
-        
         memory = self._make_memory(turns=turns)
-        distiller = SessionDistiller(memory=memory, min_turns=4)
-        
-        with patch("lumen.core.distiller.acompletion", new_callable=AsyncMock, return_value=mock_response):
-            result = asyncio.run(distiller.distill_session("sess-2"))
-        
+        distiller = SessionDistiller(
+            memory=memory, min_turns=4, llm_client=_FakeLLMClient(content=facts_response)
+        )
+        result = asyncio.run(distiller.distill_session("sess-2"))
+
         assert len(result) == 2
         assert result[0].fact == "User's name is Gabo"
         assert memory.save_session_fact.call_count == 2
@@ -58,10 +73,10 @@ class TestDistillSession(unittest.TestCase):
         turns = [{"role": "user", "content": f"msg{i}"} for i in range(5)]
         
         memory = self._make_memory(turns=turns)
-        distiller = SessionDistiller(memory=memory, min_turns=4)
-        
-        with patch("lumen.core.distiller.acompletion", new_callable=AsyncMock, side_effect=Exception("API down")):
-            result = asyncio.run(distiller.distill_session("sess-3"))
+        distiller = SessionDistiller(
+            memory=memory, min_turns=4, llm_client=_FakeLLMClient(error=Exception("API down"))
+        )
+        result = asyncio.run(distiller.distill_session("sess-3"))
         
         assert result == []
         memory.save_session_fact.assert_not_called()
@@ -70,14 +85,11 @@ class TestDistillSession(unittest.TestCase):
         """Non-JSON LLM response returns empty list."""
         from lumen.core.distiller import SessionDistiller
         turns = [{"role": "user", "content": f"msg{i}"} for i in range(5)]
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content="Not JSON at all"))]
-        
         memory = self._make_memory(turns=turns)
-        distiller = SessionDistiller(memory=memory, min_turns=4)
-        
-        with patch("lumen.core.distiller.acompletion", new_callable=AsyncMock, return_value=mock_response):
-            result = asyncio.run(distiller.distill_session("sess-4"))
+        distiller = SessionDistiller(
+            memory=memory, min_turns=4, llm_client=_FakeLLMClient(content="Not JSON at all")
+        )
+        result = asyncio.run(distiller.distill_session("sess-4"))
         
         assert result == []
 
@@ -90,14 +102,11 @@ class TestDistillSession(unittest.TestCase):
             {"fact": "", "category": "fact", "importance": 0.5},
             {"fact": "Another valid", "category": "preference", "importance": 0.3},
         ])
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=facts_response))]
-        
         memory = self._make_memory(turns=turns)
-        distiller = SessionDistiller(memory=memory, min_turns=4)
-        
-        with patch("lumen.core.distiller.acompletion", new_callable=AsyncMock, return_value=mock_response):
-            result = asyncio.run(distiller.distill_session("sess-5"))
+        distiller = SessionDistiller(
+            memory=memory, min_turns=4, llm_client=_FakeLLMClient(content=facts_response)
+        )
+        result = asyncio.run(distiller.distill_session("sess-5"))
         
         assert len(result) == 2
 
@@ -106,14 +115,11 @@ class TestDistillSession(unittest.TestCase):
         from lumen.core.distiller import SessionDistiller
         turns = [{"role": "user", "content": f"msg{i}"} for i in range(5)]
         facts_response = '```json\n[{"fact": "Parsed from code block", "category": "fact", "importance": 0.5}]\n```'
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=facts_response))]
-        
         memory = self._make_memory(turns=turns)
-        distiller = SessionDistiller(memory=memory, min_turns=4)
-        
-        with patch("lumen.core.distiller.acompletion", new_callable=AsyncMock, return_value=mock_response):
-            result = asyncio.run(distiller.distill_session("sess-6"))
+        distiller = SessionDistiller(
+            memory=memory, min_turns=4, llm_client=_FakeLLMClient(content=facts_response)
+        )
+        result = asyncio.run(distiller.distill_session("sess-6"))
         
         assert len(result) == 1
         assert result[0].fact == "Parsed from code block"

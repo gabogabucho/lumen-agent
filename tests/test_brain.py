@@ -5,8 +5,11 @@ import json
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from lumen.core.llm_client import LLMChunk, LLMResponse
 
 import pytest
 import pytest_asyncio
@@ -148,6 +151,130 @@ def _test_tools(*names):
     ]
 
 
+# ── Fake LLMClient (Phase 5: brain no longer imports litellm) ─────────
+
+
+def _to_llm_response(obj):
+    """Convert a test double into a normalized LLMResponse.
+
+    Accepts: None, an LLMResponse, or a legacy litellm-shaped response
+    (`.choices[0].message`) as built by `_mock_llm_response` — so existing
+    fixtures keep working unchanged after the LLMClient migration.
+    """
+    if obj is None:
+        return LLMResponse(content="")
+    if isinstance(obj, LLMResponse):
+        return obj
+    choices = getattr(obj, "choices", None)
+    if choices:
+        choice = choices[0]
+        msg = choice.message
+        tool_calls = None
+        raw_calls = getattr(msg, "tool_calls", None)
+        if raw_calls:
+            tool_calls = []
+            for tc in raw_calls:
+                entry = {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                }
+                tc_id = getattr(tc, "id", None)
+                if isinstance(tc_id, str) and tc_id:
+                    entry["id"] = tc_id
+                tool_calls.append(entry)
+        finish_reason = getattr(choice, "finish_reason", None)
+        role = getattr(msg, "role", None)
+        return LLMResponse(
+            content=msg.content or "",
+            tool_calls=tool_calls,
+            finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+            role=role if isinstance(role, str) else "assistant",
+        )
+    return LLMResponse(content=str(obj))
+
+
+class FakeLLMClient:
+    """Fake LLMClient with a unittest.mock-like surface (return_value,
+    side_effect, call_count, await_count, call_args, assert_not_called)
+    so migrated tests keep their original assertion style."""
+
+    def __init__(self, return_value=None, side_effect=None):
+        self.return_value = return_value
+        self.side_effect = side_effect
+        self.calls = []
+        self._side_effect_index = 0
+
+    @property
+    def call_count(self):
+        return len(self.calls)
+
+    @property
+    def await_count(self):
+        return len(self.calls)
+
+    @property
+    def call_args(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(kwargs=self.calls[-1]) if self.calls else None
+
+    @property
+    def call_args_list(self):
+        from types import SimpleNamespace
+
+        return [SimpleNamespace(kwargs=c) for c in self.calls]
+
+    def assert_not_called(self):
+        assert not self.calls, f"Expected no LLM calls, got {len(self.calls)}"
+
+    async def complete(self, **kwargs):
+        import inspect
+
+        self.calls.append(kwargs)
+        item = self.return_value
+        if self.side_effect is not None:
+            if isinstance(self.side_effect, (list, tuple)):
+                item = self.side_effect[self._side_effect_index]
+                self._side_effect_index += 1
+            else:
+                item = self.side_effect
+        if isinstance(item, BaseException):
+            raise item
+        if isinstance(item, type) and issubclass(item, BaseException):
+            raise item()
+        if item is not None and not isinstance(item, LLMResponse) and not hasattr(item, "choices") and callable(item):
+            result = item(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            return _to_llm_response(result)
+        return _to_llm_response(item)
+
+    async def stream(self, **kwargs):
+        # No brain test exercises streaming yet; yield the complete() result
+        # as a single chunk if one is ever requested.
+        response = await self.complete(**kwargs)
+        yield LLMChunk(delta_content=response.content, finish_reason="stop")
+
+
+@contextmanager
+def _patch_brain_llm(brain, return_value=None, side_effect=None):
+    """Install a FakeLLMClient on an existing Brain (and its distiller).
+
+    Drop-in replacement for the pre-Phase-5
+    `patch("lumen.core.brain.acompletion")` pattern.
+    """
+    fake = FakeLLMClient(return_value=return_value, side_effect=side_effect)
+    old_brain_client = brain._llm_client
+    old_distiller_client = brain._distiller._llm_client
+    brain._llm_client = fake
+    brain._distiller._llm_client = fake
+    try:
+        yield fake
+    finally:
+        brain._llm_client = old_brain_client
+        brain._distiller._llm_client = old_distiller_client
+
+
 # ── think() happy path ───────────────────────────────────────────────
 
 
@@ -217,7 +344,7 @@ class TestThinkHappyPath:
         brain = _make_brain(model="gpt-4o-mini")
         brain.memory.recall = AsyncMock(return_value=[])
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response("I can help with that!")
             await brain.think("hello", Session())
 
@@ -230,7 +357,7 @@ class TestThinkHappyPath:
         brain = _make_brain()
         brain.memory.recall = AsyncMock(return_value=[])
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response("I can help with that!")
             result = await brain.think("hello", Session())
 
@@ -243,7 +370,7 @@ class TestThinkHappyPath:
         brain.memory.recall = AsyncMock(return_value=[])
         brain.memory.save_conversation_turn = AsyncMock()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response("Hi!")
             session = Session()
             await brain.think("hello", session)
@@ -261,7 +388,7 @@ class TestThinkHappyPath:
         brain.memory.save_conversation_turn = AsyncMock()
 
         session = Session()
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response("Got it!")
             await brain.think("remember this", session)
 
@@ -283,7 +410,7 @@ class TestThinkHappyPath:
         )
         brain.memory.save_conversation_turn = AsyncMock()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response("You like Python!")
             result = await brain.think("what do I like?", Session())
 
@@ -301,7 +428,7 @@ class TestThinkLLMError:
         brain = _make_brain()
         brain.memory.recall = AsyncMock(return_value=[])
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = Exception("API rate limit exceeded")
             result = await brain.think("hello", Session())
 
@@ -397,7 +524,7 @@ class TestToolUseLoop:
         first_response = _mock_llm_response(tool_calls=[tool_call])
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [first_response, final_response]
             result = await brain.think("run the test", Session())
 
@@ -432,7 +559,7 @@ class TestToolUseLoop:
         first_response = _mock_llm_response(tool_calls=[tool_call])
         final_response = _mock_llm_response("Skill loaded!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [first_response, final_response]
             result = await brain.think("use my skill", Session())
 
@@ -450,7 +577,7 @@ class TestToolUseLoop:
         first_response = _mock_llm_response(tool_calls=[tool_call])
         final_response = _mock_llm_response("I tried but it failed.")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [first_response, final_response]
             result = await brain.think("do something", Session())
 
@@ -469,7 +596,7 @@ class TestToolUseLoop:
         tool_call = _mock_tool_call("test_conn__run", '{"input": "loop"}')
         looping_response = _mock_llm_response(tool_calls=[tool_call])
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = looping_response
             result = await brain.think("keep running", Session())
 
@@ -487,7 +614,7 @@ class TestToolUseLoop:
         empty_final = _mock_llm_response(content="")
         recovered_final = _mock_llm_response(content="Recovered answer")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [first_response, empty_final, recovered_final]
             result = await brain.think("run the test", Session())
 
@@ -507,7 +634,7 @@ class TestToolUseLoop:
         looping_response = _mock_llm_response(content="", tool_calls=[tool_call])
         empty_final = _mock_llm_response(content="")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [looping_response, looping_response, looping_response, empty_final]
             result = await brain.think("keep running", Session())
 
@@ -526,7 +653,7 @@ class TestToolUseLoop:
         )
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "Python 3", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -545,7 +672,7 @@ class TestToolUseLoop:
         )
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "Python 3", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -567,7 +694,7 @@ class TestToolUseLoop:
         fallback_response = _mock_llm_response(content=dsml_content)
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -589,7 +716,7 @@ class TestToolUseLoop:
         fallback_response = _mock_llm_response(content=minimax_content)
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -607,7 +734,7 @@ class TestToolUseLoop:
         fallback_response = _mock_llm_response(content=mistral_content)
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -629,7 +756,7 @@ class TestToolUseLoop:
         fallback_response = _mock_llm_response(content=dsml_content)
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -657,7 +784,7 @@ class TestToolUseLoop:
         )
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -678,7 +805,7 @@ class TestToolUseLoop:
         )
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -701,7 +828,7 @@ class TestToolUseLoop:
         fallback_response = _mock_llm_response(content=dsml_content)
         final_response = _mock_llm_response("Done!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [fallback_response, final_response]
             with patch.object(brain.connectors, "execute", new=AsyncMock(return_value={"stdout": "ok", "stderr": "", "exit_code": 0})) as mock_exec:
                 result = await brain.think("check python", Session())
@@ -745,7 +872,7 @@ class TestToolUseLoop:
         bad_content = '<|DSML|invoke name="nonexistent_tool"><|DSML|parameter name="x">y</|DSML|parameter></|DSML|invoke>'
         fallback_response = _mock_llm_response(content=bad_content)
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = fallback_response
             result = await brain.think("do something", Session())
 
@@ -775,7 +902,7 @@ class TestToolUseLoop:
         dsml_response = _mock_llm_response(
             content='<|DSML|invoke name="x"><|DSML|parameter name="a">b</|DSML|parameter></|DSML|invoke>'
         )
-        with patch("lumen.core.brain.acompletion", return_value=dsml_response):
+        with _patch_brain_llm(brain, return_value=dsml_response):
             result = await brain._retry_final_response_without_tools([])
         assert "<|DSML|" not in result
         assert "invoke" not in result
@@ -1231,7 +1358,7 @@ class TestCheckCapability:
         first_response = _mock_llm_response(tool_calls=[tool_call])
         final_response = _mock_llm_response("Yes, I have Telegram ready!")
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [first_response, final_response]
             result = await brain.think("can you send me a telegram?", Session())
 
@@ -1306,7 +1433,7 @@ class TestMatchFlowTrigger:
         brain.memory.recall = AsyncMock(return_value=[])
         brain.memory.save_conversation_turn = AsyncMock()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response("What would you like to order?")
             session = Session()
             await brain.think("I want to order something", session)
@@ -1350,7 +1477,7 @@ class TestMatchFlowTrigger:
 
         session = Session()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             first = await brain.think("setup:pending-module", session)
             second = await brain.think("super-secret-token", session)
             third = await brain.think("chat-123", session)
@@ -1405,7 +1532,7 @@ class TestMatchFlowTrigger:
 
         session = Session()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             first = await brain.think("setup:github", session)
             second = await brain.think("ghp_secret", session)
 
@@ -1442,7 +1569,7 @@ class TestMatchFlowTrigger:
 
         session = Session()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response(
                 "I have Telegram but it still needs configuration. Want to configure it now?"
             )
@@ -1481,7 +1608,7 @@ class TestMatchFlowTrigger:
 
         session = Session()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response(
                 "I have Telegram and Slack, but they still need configuration. Want to configure one now?"
             )
@@ -1513,7 +1640,7 @@ class TestMatchFlowTrigger:
 
         session = Session()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [
                 _mock_llm_response(
                     "I have Telegram but it still needs configuration. Want to configure it now?"
@@ -1548,7 +1675,7 @@ class TestMatchFlowTrigger:
 
         session = Session()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response(
                 "I have Telegram but it still needs configuration. Want to configure it now?"
             )
@@ -1579,7 +1706,7 @@ class TestMatchFlowTrigger:
 
         session = Session()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             result = await brain.think(
                 "Hola! Te fijas si me puedes hablar por telegram?", session
             )
@@ -1614,7 +1741,7 @@ class TestMatchFlowTrigger:
 
         session = Session()
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response("I see two Telegram options!")
             result = await brain.think("hablar por telegram", session)
 
@@ -1639,7 +1766,7 @@ class TestMatchFlowTrigger:
 
         session = Session(pending_setup_offer={"modules": ["telegram"]})
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             second = await brain.think("setup:telegram", session)
 
         assert second["message"] == "Telegram setup.\n\nTelegram token"
@@ -1898,7 +2025,7 @@ class TestContradictionRetryLayer:
             "Sí tengo terminal. Listo."
         )
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.side_effect = [first_response, corrected_response]
             result = await brain.think("ejecuta un comando", Session())
 
@@ -1928,7 +2055,7 @@ class TestContradictionRetryLayer:
             "Sí tengo terminal. Acá está el resultado."
         )
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = response
             result = await brain.think("ejecuta un comando", Session())
 
@@ -1963,7 +2090,7 @@ class TestContradictionRetryLayer:
             call_kwargs.update(kwargs)
             return retry_response
 
-        with patch("lumen.core.brain.acompletion", side_effect=[first_response, capture_call]):
+        with _patch_brain_llm(brain, side_effect=[first_response, capture_call]):
             result = await brain.think("ejecuta algo", Session())
 
         # The retry call (second call) should include tools and max_tokens
@@ -2590,7 +2717,7 @@ class TestPersistenceResilience:
             side_effect=Exception("DB locked")
         )
 
-        with patch("lumen.core.brain.acompletion") as mock_llm:
+        with _patch_brain_llm(brain) as mock_llm:
             mock_llm.return_value = _mock_llm_response("Response!")
             result = await brain.think("hello", Session())
 
