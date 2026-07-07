@@ -315,3 +315,139 @@ class OpenAICompatClient:
         """Close the underlying httpx client if this instance owns it."""
         if self._owns_client:
             await self._client.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: build_llm_client() factory + auto-detect routing
+# ---------------------------------------------------------------------------
+#
+# Design ref: sdd/perfil-core/design -> "Client selection" row.
+# `LiteLLMClient` lives in a SEPARATE module (`llm_client_litellm.py`, Phase 3
+# divergence approved by the orchestrator to allow parallel agents). This is
+# the canonical import path other code (brain.py, distiller.py, tests) should
+# use: `from lumen.core.llm_client import LiteLLMClient` — but the import
+# itself is deferred to inside the branch that needs it, so importing this
+# module never imports `litellm` (lazy-import guarantee, verified by
+# tests/test_litellm_client_lazy_import.py and
+# tests/test_llm_client_factory.py::test_default_config_never_imports_litellm).
+
+# Litellm-only provider prefixes: NOT OpenAI-compatible, always routed to
+# LiteLLMClient when auto-detecting. This list documents which prefixes the
+# design calls out explicitly ("anthropic/claude-*", "vertex_ai/*") plus the
+# other major non-OpenAI-compatible providers litellm supports. Any prefix
+# not in `_OPENAI_COMPAT_PREFIXES` (defined above) and not explicitly
+# OpenAI-compatible falls through to the same LiteLLMClient default — this
+# tuple exists for documentation/readability, not as the sole gate.
+_LITELLM_ONLY_PREFIXES = (
+    "anthropic/",
+    "vertex_ai/",
+    "gemini/",
+    "bedrock/",
+    "cohere/",
+    "groq/",
+)
+
+
+def _resolve_model_string(config: dict[str, Any]) -> str:
+    """Extract the model string the factory should inspect for auto-detect.
+
+    Mirrors `ModelRouter`'s own resolution (`config["models"]["default"]`,
+    falling back to legacy `config["model"]`) without importing
+    `ModelRouter` itself, since the factory only needs the *string*, not
+    role-based routing.
+    """
+    models_cfg = config.get("models")
+    if isinstance(models_cfg, dict) and isinstance(models_cfg.get("default"), str):
+        return models_cfg["default"]
+    legacy = config.get("model")
+    if isinstance(legacy, str):
+        return legacy
+    return ""
+
+
+def _auto_detect_client_kind(config: dict[str, Any]) -> str:
+    """Return "openai_compat" or "litellm" based on the model string prefix.
+
+    Decision (documented, per apply-time mem_save): the design is silent on
+    bare model names (no "/" prefix) with NO explicit `base_url` configured.
+    Default: "litellm" — the safe multi-provider fallback, since litellm is
+    already a base dependency and OpenAICompatClient has no endpoint to call
+    without an explicit `base_url`. A bare model name WITH an explicit
+    `base_url` set is treated as OpenAI-compatible (design: "bare model
+    names with explicit base_url").
+    """
+    model = _resolve_model_string(config)
+    llm_cfg = config.get("llm")
+    has_base_url = isinstance(llm_cfg, dict) and bool(llm_cfg.get("base_url"))
+
+    if model.startswith(_OPENAI_COMPAT_PREFIXES):
+        return "openai_compat"
+    if model.startswith(_LITELLM_ONLY_PREFIXES):
+        return "litellm"
+    if "/" not in model:
+        # Bare model name: OpenAI-compatible only if the caller supplied an
+        # explicit base_url to actually call; otherwise there's no endpoint
+        # to route to and litellm is the safe default.
+        return "openai_compat" if has_base_url else "litellm"
+    # Any other "/"-prefixed provider not in either known table: litellm is
+    # the safe multi-provider fallback (documented default decision).
+    return "litellm"
+
+
+def build_llm_client(config: dict[str, Any] | None, **overrides: Any) -> "LLMClient":
+    """Build an `LLMClient` implementation from Lumen's config dict.
+
+    Selection order (design: "Client selection"):
+      1. Explicit `config["llm"]["client"]` ("openai_compat" | "litellm") —
+         always wins, regardless of the configured model string.
+      2. Auto-detect by model prefix (see `_auto_detect_client_kind`).
+
+    Raises:
+        ValueError: if `config["llm"]["client"]` is set to an unrecognized
+            value.
+    """
+    config = config or {}
+    llm_cfg = config.get("llm") if isinstance(config.get("llm"), dict) else {}
+
+    explicit = llm_cfg.get("client")
+    if isinstance(explicit, str) and explicit.strip():
+        kind = explicit.strip().lower()
+    else:
+        kind = _auto_detect_client_kind(config)
+
+    if kind == "openai_compat":
+        return OpenAICompatClient(
+            base_url=llm_cfg.get("base_url", ""),
+            api_key=llm_cfg.get("api_key"),
+            timeout=llm_cfg.get("timeout", 60.0),
+        )
+    if kind == "litellm":
+        # Lazy import: only reached when the litellm-backed client is
+        # actually selected, preserving the lazy-import guarantee at the
+        # `llm_client` module boundary (never at module top).
+        from lumen.core.llm_client_litellm import LiteLLMClient  # noqa: PLC0415
+
+        return LiteLLMClient()
+
+    raise ValueError(
+        f"Unknown config['llm']['client'] value: {explicit!r}. "
+        "Expected 'openai_compat' or 'litellm'."
+    )
+
+
+def __getattr__(name: str) -> Any:
+    """Module-level lazy attribute access (PEP 562).
+
+    Provides the canonical `from lumen.core.llm_client import LiteLLMClient`
+    import path (per apply-progress #2106: "factory must define the
+    canonical import path") without eagerly importing
+    `lumen.core.llm_client_litellm` — and therefore never `litellm` — at
+    THIS module's import time. The submodule import only happens when a
+    caller actually accesses `LiteLLMClient` off `lumen.core.llm_client`,
+    which itself only imports `litellm` lazily inside its own methods.
+    """
+    if name == "LiteLLMClient":
+        from lumen.core.llm_client_litellm import LiteLLMClient  # noqa: PLC0415
+
+        return LiteLLMClient
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
