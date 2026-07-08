@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import json
 import os
 import tempfile
@@ -23,6 +24,17 @@ from lumen.core.session import SessionManager
 
 async def _noop(**_kwargs):
     return {"ok": True}
+
+
+def _receive_text(websocket, timeout: float = 5.0) -> str:
+    """receive_text with a hard timeout so a silent socket fails instead of hanging."""
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        return pool.submit(websocket.receive_text).result(timeout=timeout)
+    finally:
+        # wait=False: on timeout the worker is still blocked on the socket;
+        # waiting for it would reintroduce the hang we're guarding against.
+        pool.shutdown(wait=False)
 
 
 class MemoryStub:
@@ -55,6 +67,15 @@ class BrainStub:
             "history": list(session.history),
         }
         return {"message": f"Echo: {user_text}"}
+
+    async def think_stream(self, user_text, session):
+        self.think_calls += 1
+        self.last_think = {
+            "user_text": user_text,
+            "session_id": session.session_id,
+            "history": list(session.history),
+        }
+        yield {"type": "message", "role": "assistant", "content": f"Echo: {user_text}"}
 
 
 class StubMarketplace(Marketplace):
@@ -500,9 +521,9 @@ class WebSurfaceTests(unittest.TestCase):
         with self.client.websocket_connect("/ws/session-abc") as websocket:
             websocket.send_text(json.dumps({"content": "new question"}))
 
-            typing_on = json.loads(websocket.receive_text())
-            assistant = json.loads(websocket.receive_text())
-            typing_off = json.loads(websocket.receive_text())
+            typing_on = json.loads(_receive_text(websocket))
+            assistant = json.loads(_receive_text(websocket))
+            typing_off = json.loads(_receive_text(websocket))
 
             self.assertEqual(typing_on, {"type": "typing", "status": True})
             self.assertEqual(assistant["type"], "message")

@@ -341,6 +341,10 @@ class MCPRuntimeTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 if runtime.brain.mcp_manager:
                     await runtime.brain.mcp_manager.close()
+                # Modules (e.g. scheduler) keep files open under temp_dir;
+                # Windows can't delete the tree while those handles live.
+                if getattr(runtime.brain, "module_manager", None):
+                    await runtime.brain.module_manager.close()
                 await runtime.brain.memory.close()
 
     async def test_runtime_refresh_preserves_mcp_truth_and_syncs_marketplace(self):
