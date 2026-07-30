@@ -297,14 +297,14 @@ class MarketplaceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("let currentMarketplaceTab = 'modules';", template)
-        self.assertIn('id="tab-modules"', template)
+        self.assertIn('id="marketplace-kind"', template)
         self.assertLess(
-            template.index('id="tab-modules"'),
-            template.index('id="tab-kits"'),
+            template.index('<option value="modules">'),
+            template.index('<option value="kits">'),
         )
         self.assertLess(
-            template.index('id="tab-kits"'),
-            template.index('id="tab-skills"'),
+            template.index('<option value="kits">'),
+            template.index('<option value="skills">'),
         )
         self.assertIn('id="settings-form"', template)
         self.assertIn('id="openrouter-connect-button"', template)

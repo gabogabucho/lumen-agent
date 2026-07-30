@@ -2,7 +2,7 @@ import hashlib
 import json
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, AsyncMock, MagicMock
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -159,6 +159,7 @@ class PersonalitySwapDiskTests(unittest.TestCase):
         self.original_config = web._config
         self.original_refresh = web.refresh_runtime_registry
         self.original_reload = web.reload_runtime_personality_surface
+        self.original_sync = web.sync_runtime_modules
         self.original_manifest = web._installed_personality_manifest
         self.original_is_installed = web._is_installed_personality_module
 
@@ -182,6 +183,9 @@ class PersonalitySwapDiskTests(unittest.TestCase):
 
         web.refresh_runtime_registry = MagicMock()
         web.reload_runtime_personality_surface = MagicMock()
+        # AsyncMock: the real sync activates modules (e.g. scheduler) that open
+        # files under the temp LUMEN_DIR, blocking tempdir cleanup on Windows.
+        web.sync_runtime_modules = AsyncMock()
         web._installed_personality_manifest = lambda name: (
             {"tags": ["personality"]} if name in {"personality-a", "personality-b"} else None
         )
@@ -197,6 +201,7 @@ class PersonalitySwapDiskTests(unittest.TestCase):
         web._config = self.original_config
         web.refresh_runtime_registry = self.original_refresh
         web.reload_runtime_personality_surface = self.original_reload
+        web.sync_runtime_modules = self.original_sync
         web._installed_personality_manifest = self.original_manifest
         web._is_installed_personality_module = self.original_is_installed
         for p in self._patches:
