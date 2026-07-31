@@ -195,6 +195,54 @@ WIZARD_PROVIDERS = {
 }
 
 
+def _config_from_env(*, lumen_dir: Path | None = None) -> dict | None:
+    """Build a config from environment variables, for headless deploys.
+
+    Returns the saved config, or None when LUMEN_MODEL is not set.
+
+    Why this exists: in a container there is nobody to answer the wizard. It
+    blocks on a prompt that never gets an answer and the container dies, which
+    makes Lumen hard to run under Docker, Kubernetes or any CI. Until now the
+    only way out was writing config.yaml before starting, which every deployment
+    had to reinvent.
+
+    Variables:
+      LUMEN_MODEL     required, e.g. "deepseek/deepseek-chat"
+      LUMEN_API_KEY   optional, for providers that need one
+      LUMEN_API_BASE  optional, for custom or self-hosted endpoints
+      LUMEN_LANGUAGE  optional, defaults to "es"
+
+    Existing config always wins: this only runs when there is nothing saved, so
+    it can never overwrite an instance someone configured by hand.
+    """
+    model = (os.environ.get("LUMEN_MODEL") or "").strip()
+    if not model:
+        return None
+
+    target_dir = lumen_dir or LUMEN_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    config_path = target_dir / "config.yaml"
+
+    config: dict = {
+        "language": (os.environ.get("LUMEN_LANGUAGE") or "es").strip(),
+        "model": model,
+    }
+
+    if api_key := (os.environ.get("LUMEN_API_KEY") or "").strip():
+        config["api_key"] = api_key
+    if api_base := (os.environ.get("LUMEN_API_BASE") or "").strip():
+        config["api_base"] = api_base
+
+    config_path.write_text(
+        yaml.dump(config, default_flow_style=False), encoding="utf-8"
+    )
+
+    console.print(
+        f"[green]✓[/green] Configured from environment: [bold]{model}[/bold]"
+    )
+    return config
+
+
 def _run_cli_wizard(*, lumen_dir: Path | None = None) -> dict:
     """Run the onboarding wizard in the terminal.
 
@@ -300,11 +348,17 @@ def run(
 
     config = _load_persisted_config(config_path)
 
-    # No config → run CLI wizard (unless --no-wizard)
+    # No config → try the environment first, then the wizard.
+    if not _is_runtime_configured(config):
+        config = _config_from_env(lumen_dir=lumen_dir) or config
+
     if not _is_runtime_configured(config):
         if no_wizard:
             console.print("[red]No configuration found and --no-wizard is set.[/red]")
-            console.print("Create config.yaml manually or run without --no-wizard.")
+            console.print(
+                "Set LUMEN_MODEL (and LUMEN_API_KEY if needed), "
+                "create config.yaml manually, or run without --no-wizard."
+            )
             raise typer.Exit(1)
         config = _run_cli_wizard(lumen_dir=lumen_dir)
 
@@ -374,10 +428,19 @@ def server(
 
     config = _load_persisted_config(config_path)
 
-    # No config → run CLI wizard (unless --no-wizard)
+    # No config → try the environment first, then the wizard.
+    # The environment comes first so headless deploys never reach a prompt that
+    # nobody can answer.
+    if not _is_runtime_configured(config):
+        config = _config_from_env(lumen_dir=lumen_dir) or config
+
     if not _is_runtime_configured(config):
         if no_wizard:
             console.print("[red]No configuration found and --no-wizard is set.[/red]")
+            console.print(
+                "[dim]For headless deploys, set LUMEN_MODEL "
+                "(and LUMEN_API_KEY if the provider needs one).[/dim]"
+            )
             raise typer.Exit(1)
         config = _run_cli_wizard(lumen_dir=lumen_dir)
 
