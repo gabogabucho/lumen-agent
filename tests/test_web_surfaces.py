@@ -30,6 +30,7 @@ class MemoryStub:
         self.messages = list(messages or [])
         self.should_fail = should_fail
         self.calls = []
+        self._db = "stub-initialized"
 
     async def load_conversation(self, session_id: str, limit: int = 50):
         self.calls.append((session_id, limit))
@@ -600,6 +601,92 @@ class WebSurfaceTests(unittest.TestCase):
         self.assertEqual(logout.status_code, 200)
         denied_again = self.client.get("/api/status")
         self.assertEqual(denied_again.status_code, 401)
+
+    def test_headless_mode_disables_ui_html_routes(self):
+        """perfil-core Phase 6: `headless: true` disables the web UI routes."""
+        web._config = {"model": "demo-model", "language": "en", "headless": True}
+        web.CONFIG_PATH.write_text(yaml.dump(web._config), encoding="utf-8")
+
+        for path in ("/", "/setup", "/login", "/dashboard"):
+            response = self.client.get(path, follow_redirects=False)
+            self.assertEqual(response.status_code, 404, msg=path)
+            self.assertEqual(response.json()["error"], "ui_disabled")
+
+    def test_headless_mode_defaults_off_ui_routes_unchanged(self):
+        """Regression: no `headless` key in config -> UI behaves exactly as before."""
+        response = self.client.get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "/setup")
+
+    def test_headless_mode_does_not_gate_server_mode_dashboard(self):
+        """Regression: existing `server_mode` hosted-dashboard feature is a
+        DISTINCT, already-tested concept from `headless` — server_mode alone
+        (no explicit `headless: true`) must keep serving the dashboard/API
+        exactly as tested by test_serve_mode_requires_owner_login_for_api_and_websocket.
+        """
+        web.configure_access_mode("serve")
+        config = {
+            "model": "demo-model",
+            "language": "en",
+            "server_mode": True,
+            "server_secret": "test-server-secret",
+            "owner_secret_hash": web._hash_secret("2468"),
+            # Bypasses the _brain.personality lookup path in
+            # _current_dashboard_personality(); BrainStub doesn't model
+            # personality, only the UI-gating behavior is under test here.
+            "active_personality": "stub-personality",
+        }
+        web.CONFIG_PATH.write_text(yaml.dump(config), encoding="utf-8")
+        web._config = dict(config)
+        web._brain = BrainStub()
+
+        login = self.client.post("/api/login", json={"secret": "2468"})
+        self.assertEqual(login.status_code, 200)
+
+        dashboard = self.client.get("/dashboard", follow_redirects=False)
+        self.assertEqual(dashboard.status_code, 200)
+
+    def test_headless_mode_leaves_api_key_auth_and_memory_and_websocket_unaffected(self):
+        """Regression-unchanged domain: API-key/owner auth, websocket chat and
+        the memory layer keep working when `headless: true` is set — only the
+        HTML dashboard surface is gated, not the programmatic surfaces used by
+        companion deployments (e.g. WhatsApp bridging) that don't need a UI.
+        """
+        web.configure_access_mode("serve")
+        config = {
+            "model": "demo-model",
+            "language": "en",
+            "server_mode": True,
+            "headless": True,
+            "server_secret": "test-server-secret",
+            "owner_secret_hash": web._hash_secret("2468"),
+        }
+        web.CONFIG_PATH.write_text(yaml.dump(config), encoding="utf-8")
+        web._config = dict(config)
+        web._brain = BrainStub()
+
+        # UI surface gated
+        self.assertEqual(self.client.get("/dashboard").status_code, 404)
+
+        # Auth still required and functional for the API/websocket surfaces
+        denied = self.client.get("/api/status")
+        self.assertEqual(denied.status_code, 401)
+
+        login = self.client.post("/api/login", json={"secret": "2468"})
+        self.assertEqual(login.status_code, 200)
+
+        allowed = self.client.get("/api/status")
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.json()["status"], "active")
+
+        with self.client.websocket_connect("/ws/protected-session") as websocket:
+            websocket.send_text(json.dumps({"type": "ping"}))
+            pong = json.loads(websocket.receive_text())
+            self.assertEqual(pong, {"type": "pong"})
+
+        # Memory layer (SQLite+FTS5 stub in tests) still reachable/unaffected —
+        # the websocket flow above loaded conversation history successfully.
+        self.assertIn(("protected-session", 50), web._brain.memory.calls)
 
     def test_api_settings_merges_and_refreshes_runtime_config(self):
         config = {

@@ -23,9 +23,9 @@ from typing import Any
 from types import SimpleNamespace
 
 import yaml
-from litellm import acompletion
 
 from lumen.core.artifact_setup import parse_artifact_action
+from lumen.core.llm_client import LLMClient, LLMResponse, build_llm_client
 from lumen.core.awareness import CapabilityAwareness
 from lumen.core.catalog import Catalog
 from lumen.core.connectors import ConnectorRegistry
@@ -42,6 +42,12 @@ from lumen.core.distiller import SessionDistiller
 
 
 logger = logging.getLogger(__name__)
+
+# Module-level seam: tests (and embedders) can override the default client
+# factory without threading an LLMClient through every Brain() call.
+# Resolved at Brain.__init__ time, so monkeypatching
+# `lumen.core.brain._llm_client_factory` takes effect for later instances.
+_llm_client_factory = build_llm_client
 
 
 class Brain:
@@ -71,6 +77,7 @@ class Brain:
         model_router: ModelRouter | None = None,
         provider_health: ProviderHealthTracker | None = None,
         workspace_index=None,
+        llm_client: LLMClient | None = None,
     ):
         self.consciousness = consciousness
         self.personality = personality
@@ -97,6 +104,18 @@ class Brain:
         self.api_key_env = api_key_env
         self.flow_action_handler = flow_action_handler
         self.config = config or {}
+        # ── LLM client: constructor injection with factory default ──
+        # The client abstracts the transport (OpenAI-compatible httpx vs
+        # litellm) behind the LLMClient protocol. Default is built from the
+        # resolved model so auto-detect routing matches what we will call.
+        if llm_client is not None:
+            self._llm_client: LLMClient = llm_client
+        else:
+            llm_factory_cfg = dict(self.config)
+            models_cfg = dict(llm_factory_cfg.get("models") or {})
+            models_cfg["default"] = self.model
+            llm_factory_cfg["models"] = models_cfg
+            self._llm_client = _llm_client_factory(llm_factory_cfg)
         self.provider_health = provider_health or ProviderHealthTracker.from_config(config)
         self.tool_policy = ToolPolicy()
         self.tool_policy.load_defaults()
@@ -107,7 +126,11 @@ class Brain:
         self._cached_lessons_text: str = ""  # Pre-loaded lessons for prompt injection
         self.workspace_index = workspace_index  # For ACL checks (Phase 3)
         self._last_user_email: str = ""  # Current user for ACL (set per-request)
-        self._distiller = SessionDistiller(memory=self.memory, model=self._resolved_model())
+        self._distiller = SessionDistiller(
+            memory=self.memory,
+            model=self._resolved_model(),
+            llm_client=self._llm_client,
+        )
         self._distilled_sessions: set[str] = set()
 
     async def _persist_tool_output(
@@ -462,13 +485,7 @@ class Brain:
 
         try:
             options = self._completion_options(purpose="contradiction", tools=tools)
-            response = await acompletion(
-                model=options["model"],
-                messages=retry_messages,
-                tools=options.get("tools"),
-                temperature=options["temperature"],
-                max_tokens=options["max_tokens"],
-            )
+            response = await self._acomplete(options=options, messages=retry_messages)
             return self._safe_extract_content(response)
         except Exception:
             return ""
@@ -962,13 +979,7 @@ class Brain:
         try:
             options = self._completion_options(purpose="main", tools=tools)
             start_time = time.monotonic()
-            response = await acompletion(
-                model=options["model"],
-                messages=messages,
-                tools=options.get("tools"),
-                temperature=options["temperature"],
-                max_tokens=options["max_tokens"],
-            )
+            response = await self._acomplete(options=options, messages=messages)
             elapsed = time.monotonic() - start_time
             # Record provider health if available
             if self.provider_health:
@@ -976,7 +987,7 @@ class Brain:
                 self.provider_health.record_success(provider_name, latency=elapsed)
         except Exception as e:
             logger.exception(
-                "litellm_acompletion_failed phase=main model=%s provider=%s session=%s",
+                "llm_completion_failed phase=main model=%s provider=%s session=%s",
                 options.get("model") if "options" in locals() else None,
                 self._infer_current_provider_name(options.get("model")) if "options" in locals() else None,
                 getattr(session, "id", None),
@@ -1039,6 +1050,71 @@ class Brain:
 
         choice = SimpleNamespace(message=msg)
         return SimpleNamespace(choices=[choice])
+
+    @staticmethod
+    def _to_legacy_response(llm_response: LLMResponse):
+        """Adapt a normalized LLMResponse to the legacy `.choices[0].message`
+        shape the tool-use loop and `_safe_extract_content` consume.
+
+        Keeps the (battle-tested) downstream logic byte-for-byte identical
+        while the transport is swapped from `litellm.acompletion` to the
+        injected `LLMClient`. Mirrors `_build_synthetic_response`'s shape.
+        """
+        tool_calls = None
+        if llm_response.tool_calls:
+            tool_calls = []
+            for call in llm_response.tool_calls:
+                arguments = call.get("arguments")
+                if not isinstance(arguments, str):
+                    arguments = json.dumps(arguments) if arguments is not None else ""
+                tool_calls.append(
+                    SimpleNamespace(
+                        id=call.get("id") or f"llm-{uuid.uuid4()}",
+                        type="function",
+                        function=SimpleNamespace(
+                            name=call.get("name"), arguments=arguments
+                        ),
+                    )
+                )
+
+        content = llm_response.content or ""
+        msg = SimpleNamespace(
+            content=content,
+            tool_calls=tool_calls,
+            model_dump=lambda: {
+                "role": llm_response.role or "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+                if tool_calls
+                else None,
+            },
+        )
+        choice = SimpleNamespace(
+            message=msg, finish_reason=llm_response.finish_reason
+        )
+        return SimpleNamespace(choices=[choice])
+
+    async def _acomplete(self, *, options: dict[str, Any], messages: list[dict]):
+        """Run a non-streaming completion through the injected LLMClient and
+        return it in the legacy `.choices[0].message` response shape."""
+        llm_response = await self._llm_client.complete(
+            model=options["model"],
+            messages=messages,
+            tools=options.get("tools"),
+            temperature=options["temperature"],
+            max_tokens=options["max_tokens"],
+        )
+        return self._to_legacy_response(llm_response)
 
     async def think_stream(self, message: str, session: Session):
         """Stream LLM response as an async generator."""
@@ -1116,17 +1192,30 @@ class Brain:
 
         try:
             options = self._completion_options(purpose="main", tools=tools, stream=True)
-            response = await acompletion(
+            chunk_iter = self._llm_client.stream(
                 model=options["model"],
                 messages=messages,
                 tools=options.get("tools"),
                 temperature=options["temperature"],
                 max_tokens=options["max_tokens"],
-                stream=True,
-            )
+            ).__aiter__()
+            # Prefetch the first chunk so request-time failures (connection,
+            # auth, rate limit) surface here — mirroring the previous
+            # behavior where `await acompletion(..., stream=True)` raised
+            # before any chunk was consumed.
+            try:
+                first_chunk = await chunk_iter.__anext__()
+            except StopAsyncIteration:
+                first_chunk = None
         except Exception as e:
             yield {"type": "error", "content": f"I had trouble thinking: {e}"}
             return
+
+        async def _chained_chunks():
+            if first_chunk is not None:
+                yield first_chunk
+            async for c in chunk_iter:
+                yield c
 
         # Stream processing
         full_content = ""
@@ -1134,40 +1223,49 @@ class Brain:
         has_tool_calls = False
         content_buffer = ""  # Buffer content when tool_calls are detected
 
-        async for chunk in response:
-            choice = chunk.choices[0]
-            delta = choice.delta
-            finish_reason = choice.finish_reason
+        async for chunk in _chained_chunks():
+            finish_reason = chunk.finish_reason
 
             # Emit reasoning/thinking tokens (DeepSeek R1, Claude extended thinking, etc.)
-            rc = getattr(delta, "reasoning_content", None)
+            rc = chunk.delta_reasoning_content
             if rc:
                 yield {"type": "reasoning", "content": rc}
 
-            if delta.content:
-                full_content += delta.content
+            if chunk.delta_content:
+                full_content += chunk.delta_content
                 if has_tool_calls:
                     # Suppress pre-tool content — model sent text alongside tool_calls
-                    content_buffer += delta.content
+                    content_buffer += chunk.delta_content
                 else:
-                    yield {"type": "delta", "content": delta.content}
+                    yield {"type": "delta", "content": chunk.delta_content}
 
-            if delta.tool_calls:
+            if chunk.delta_tool_calls:
                 has_tool_calls = True
-                for tc in delta.tool_calls:
-                    idx = tc.index
+                for pos, tc in enumerate(chunk.delta_tool_calls):
+                    if not isinstance(tc, dict):
+                        continue
+                    # Fragments carry either the raw OpenAI shape
+                    # ({"index", "id", "function": {"name", "arguments"}}) or
+                    # the normalized shape ({"name", "arguments", "id"?,
+                    # "index"?}) depending on the client implementation.
+                    idx = tc.get("index")
+                    if idx is None:
+                        idx = pos
                     while len(buffered_tool_calls) <= idx:
                         buffered_tool_calls.append(
                             {"id": "", "function": {"name": "", "arguments": ""}}
                         )
-                    if getattr(tc, "id", None):
-                        buffered_tool_calls[idx]["id"] = tc.id
-                    func = getattr(tc, "function", None)
-                    if func:
-                        if getattr(func, "name", None):
-                            buffered_tool_calls[idx]["function"]["name"] = func.name
-                        if getattr(func, "arguments", None):
-                            buffered_tool_calls[idx]["function"]["arguments"] += func.arguments
+                    if tc.get("id"):
+                        buffered_tool_calls[idx]["id"] = tc["id"]
+                    func = tc.get("function") if isinstance(tc.get("function"), dict) else None
+                    name = (func or tc).get("name")
+                    arguments = (func or tc).get("arguments")
+                    if name:
+                        buffered_tool_calls[idx]["function"]["name"] = name
+                    if arguments:
+                        if not isinstance(arguments, str):
+                            arguments = json.dumps(arguments)
+                        buffered_tool_calls[idx]["function"]["arguments"] += arguments
 
             if finish_reason == "tool_calls":
                 has_tool_calls = True
@@ -1241,12 +1339,7 @@ class Brain:
 
         try:
             options = self._completion_options(purpose="proactive")
-            response = await acompletion(
-                model=options["model"],
-                messages=messages,
-                max_tokens=options["max_tokens"],
-                temperature=options["temperature"],
-            )
+            response = await self._acomplete(options=options, messages=messages)
             content = self._safe_extract_content(response)
             return content.strip() if content.strip() else None
         except Exception:
@@ -3134,16 +3227,10 @@ class Brain:
             # Send tool results back to LLM for final response
             try:
                 options = self._completion_options(purpose="main", tools=tools)
-                response = await acompletion(
-                    model=options["model"],
-                    messages=messages,
-                    tools=options.get("tools"),
-                    temperature=options["temperature"],
-                    max_tokens=options["max_tokens"],
-                )
+                response = await self._acomplete(options=options, messages=messages)
             except Exception as e:
                 logger.exception(
-                    "litellm_acompletion_failed phase=tool_loop model=%s provider=%s",
+                    "llm_completion_failed phase=tool_loop model=%s provider=%s",
                     options.get("model") if "options" in locals() else None,
                     self._infer_current_provider_name(options.get("model")) if "options" in locals() else None,
                 )
@@ -3411,13 +3498,7 @@ class Brain:
             # Send tool results back to LLM
             try:
                 options = self._completion_options(purpose="main", tools=tools)
-                response = await acompletion(
-                    model=options["model"],
-                    messages=messages,
-                    tools=options.get("tools"),
-                    temperature=options["temperature"],
-                    max_tokens=options["max_tokens"],
-                )
+                response = await self._acomplete(options=options, messages=messages)
             except Exception as e:
                 result = {
                     "message": f"I completed the action but had trouble responding: {e}",
@@ -3449,13 +3530,7 @@ class Brain:
         """Ask the model for one last synthesis pass without tools."""
         try:
             options = self._completion_options(purpose="main", tools=None)
-            response = await acompletion(
-                model=options["model"],
-                messages=messages,
-                tools=None,
-                temperature=options["temperature"],
-                max_tokens=options["max_tokens"],
-            )
+            response = await self._acomplete(options=options, messages=messages)
             return self._safe_extract_content(response)
         except Exception:
             return ""

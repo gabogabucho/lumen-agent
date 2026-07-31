@@ -502,6 +502,33 @@ def _is_serve_mode() -> bool:
     return _access_mode == "serve"
 
 
+def _is_headless_mode(config: dict | None = None) -> bool:
+    """Web UI gating flag (perfil-core Phase 6, server-mode-gating domain).
+
+    Deliberately a NEW, distinct config key (`headless: true`) rather than
+    reusing `server_mode`. `server_mode` already has established, tested
+    semantics in this codebase: it means "hosted mode with owner/API-key
+    auth", and it still serves the dashboard/UI (see
+    tests/test_web_surfaces.py::test_serve_mode_requires_owner_login_for_api_and_websocket).
+    Gating the UI off whenever `server_mode` is true — as a literal reading
+    of the perfil-core design table would suggest — breaks that existing,
+    already-tested feature. `headless` is therefore an explicit opt-in,
+    default-off flag for companion/headless deployments (e.g. "Ámbar") that
+    genuinely have no local UI. This is a behavioral toggle only — no UI
+    dependency/import is removed (UI deps remain in the base dependency set
+    this round, per design decision on passlib/bcrypt + litellm).
+    """
+    loaded = config if config is not None else _load_config()
+    return bool(loaded.get("headless"))
+
+
+def _ui_disabled_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"error": "ui_disabled", "message": "Web UI is disabled in headless mode."},
+    )
+
+
 def _workspace_snapshot():
     return load_workspace(lumen_dir=LUMEN_DIR, snapshot=True)
 
@@ -1651,6 +1678,8 @@ async def health_check():
 async def root(request: Request):
     """Smart routing: setup → awakening → dashboard."""
     loaded = _load_config()
+    if _is_headless_mode(loaded):
+        return _ui_disabled_response()
     if not _is_configured(loaded):
         return RedirectResponse(url="/setup")
 
@@ -1678,6 +1707,8 @@ async def root(request: Request):
 async def setup_page(request: Request):
     """Setup wizard — for manual access or re-configuration."""
     loaded = _load_config()
+    if _is_headless_mode(loaded):
+        return _ui_disabled_response()
     if _is_configured(loaded):
         if _is_serve_mode() and not _request_has_owner_access(request, loaded):
             return RedirectResponse(url="/login")
@@ -1696,6 +1727,8 @@ async def setup_page(request: Request):
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     loaded = _load_config()
+    if _is_headless_mode(loaded):
+        return _ui_disabled_response()
     if not _is_serve_mode() or not _is_configured(loaded):
         return RedirectResponse(url="/")
     if _request_has_owner_access(request, loaded):
@@ -2670,6 +2703,8 @@ async def openrouter_oauth_callback(
 async def dashboard(request: Request):
     """The main dashboard — Lumen's UI-FIRST experience."""
     loaded = _load_config()
+    if _is_headless_mode(loaded):
+        return _ui_disabled_response()
     if not _is_configured(loaded):
         return RedirectResponse(url="/")
     if _is_serve_mode() and not _request_has_owner_access(request, loaded):
