@@ -28,8 +28,8 @@ class ConfigFromEnvTests(unittest.TestCase):
         from lumen.cli.main import _config_from_env
 
         with patch.dict(os.environ, env, clear=False):
-            for key in ("LUMEN_MODEL", "LUMEN_API_KEY",
-                        "LUMEN_API_BASE", "LUMEN_LANGUAGE"):
+            for key in ("LUMEN_MODEL", "LUMEN_API_KEY", "LUMEN_API_BASE",
+                        "LUMEN_LANGUAGE", "LUMEN_PERSONALITY"):
                 if key not in env:
                     os.environ.pop(key, None)
             return _config_from_env(lumen_dir=self.lumen_dir)
@@ -85,6 +85,19 @@ class ConfigFromEnvTests(unittest.TestCase):
         """An unset variable in a compose file arrives as an empty string, not
         as absent. Treating "" as a model would write a broken config."""
         self.assertIsNone(self._call(LUMEN_MODEL="   "))
+
+    def test_selects_personality_module(self):
+        """A deployment shipping its own personality needs to select it in the
+        same step, or the module sits there ignored."""
+        config = self._call(LUMEN_MODEL="ollama/llama3",
+                            LUMEN_PERSONALITY="ambar")
+
+        self.assertEqual(config["active_personality"], "ambar")
+
+    def test_no_personality_key_when_unset(self):
+        config = self._call(LUMEN_MODEL="ollama/llama3")
+
+        self.assertNotIn("active_personality", config)
 
     def test_creates_missing_directory(self):
         nested = self.lumen_dir / "instances" / "elena"

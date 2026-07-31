@@ -207,10 +207,11 @@ def _config_from_env(*, lumen_dir: Path | None = None) -> dict | None:
     had to reinvent.
 
     Variables:
-      LUMEN_MODEL     required, e.g. "deepseek/deepseek-chat"
-      LUMEN_API_KEY   optional, for providers that need one
-      LUMEN_API_BASE  optional, for custom or self-hosted endpoints
-      LUMEN_LANGUAGE  optional, defaults to "es"
+      LUMEN_MODEL      required, e.g. "deepseek/deepseek-chat"
+      LUMEN_API_KEY    optional, for providers that need one
+      LUMEN_API_BASE   optional, for custom or self-hosted endpoints
+      LUMEN_LANGUAGE   optional, defaults to "es"
+      LUMEN_PERSONALITY optional, name of an installed personality module
 
     Existing config always wins: this only runs when there is nothing saved, so
     it can never overwrite an instance someone configured by hand.
@@ -232,6 +233,12 @@ def _config_from_env(*, lumen_dir: Path | None = None) -> dict | None:
         config["api_key"] = api_key
     if api_base := (os.environ.get("LUMEN_API_BASE") or "").strip():
         config["api_base"] = api_base
+    if personality := (os.environ.get("LUMEN_PERSONALITY") or "").strip():
+        # A deployment that ships its own personality module needs to select it
+        # without a second configuration step. Without this, the module can be
+        # mounted and still be ignored, and the agent answers as a generic
+        # Lumen — which looks like it works until you read what it says.
+        config["active_personality"] = personality
 
     config_path.write_text(
         yaml.dump(config, default_flow_style=False), encoding="utf-8"
