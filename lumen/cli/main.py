@@ -195,6 +195,16 @@ WIZARD_PROVIDERS = {
 }
 
 
+def _api_key_env_for(model: str) -> str:
+    """Which environment variable LiteLLM expects for this model's provider.
+
+    "deepseek/deepseek-chat" -> "DEEPSEEK_API_KEY"
+    "gpt-4o-mini"            -> "OPENAI_API_KEY"
+    """
+    provider = model.split("/", 1)[0] if "/" in model else "openai"
+    return f"{provider.upper().replace('-', '_')}_API_KEY"
+
+
 def _config_from_env(*, lumen_dir: Path | None = None) -> dict | None:
     """Build a config from environment variables, for headless deploys.
 
@@ -231,6 +241,12 @@ def _config_from_env(*, lumen_dir: Path | None = None) -> dict | None:
 
     if api_key := (os.environ.get("LUMEN_API_KEY") or "").strip():
         config["api_key"] = api_key
+        # apply_provider_runtime_env only exports the key when api_key_env is
+        # also present. Without this line a headless deploy on DeepSeek, OpenAI
+        # or Anthropic starts perfectly and fails on the first reply with
+        # AuthenticationError, with nothing in the message pointing at config.
+        # Derived from the model so the two can never diverge.
+        config["api_key_env"] = _api_key_env_for(model)
     if api_base := (os.environ.get("LUMEN_API_BASE") or "").strip():
         config["api_base"] = api_base
     if personality := (os.environ.get("LUMEN_PERSONALITY") or "").strip():

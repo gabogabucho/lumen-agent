@@ -57,6 +57,33 @@ class ConfigFromEnvTests(unittest.TestCase):
 
         self.assertEqual(config["api_key"], "sk-test")
 
+    def test_binds_the_key_to_the_provider_variable(self):
+        """Without api_key_env, apply_provider_runtime_env never exports the
+        key and the first reply fails with AuthenticationError -- with nothing
+        in the message pointing at the config."""
+        config = self._call(LUMEN_MODEL="deepseek/deepseek-chat",
+                            LUMEN_API_KEY="sk-test")
+
+        self.assertEqual(config["api_key_env"], "DEEPSEEK_API_KEY")
+
+    def test_binding_follows_the_model_provider(self):
+        for model, expected in [
+            ("openai/gpt-4o-mini", "OPENAI_API_KEY"),
+            ("anthropic/claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"),
+            ("openrouter/openai/gpt-oss-120b:free", "OPENROUTER_API_KEY"),
+            ("gpt-4o-mini", "OPENAI_API_KEY"),
+        ]:
+            with self.subTest(model=model):
+                config = self._call(LUMEN_MODEL=model, LUMEN_API_KEY="k")
+                self.assertEqual(config["api_key_env"], expected)
+
+    def test_no_binding_without_a_key(self):
+        """Keyless providers such as Ollama need no binding, and an empty one
+        would only confuse the provider layer."""
+        config = self._call(LUMEN_MODEL="ollama/llama3")
+
+        self.assertNotIn("api_key_env", config)
+
     def test_omits_api_key_when_absent(self):
         """Local providers such as Ollama need no key; an empty one would only
         confuse the provider layer."""
