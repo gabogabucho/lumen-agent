@@ -360,6 +360,24 @@ class MemoryFactsWriteAPITests(unittest.TestCase):
                 )
                 return len(self.saved)
 
+            async def update_session_fact(self, fact_id, *, fact=None, category=None, importance=None):
+                if fact_id != 1:
+                    return None
+                current = self.saved[0]
+                if fact is not None:
+                    current["fact"] = fact
+                if category is not None:
+                    current["category"] = category
+                if importance is not None:
+                    current["importance"] = importance
+                return {"id": fact_id, **current}
+
+            async def delete_session_fact(self, fact_id):
+                if fact_id != 1:
+                    return False
+                self.saved.clear()
+                return True
+
         self.memory_stub = FactsMemoryStub()
         brain = MagicMock()
         brain.memory = self.memory_stub
@@ -415,3 +433,35 @@ class MemoryFactsWriteAPITests(unittest.TestCase):
         )
         assert response.status_code == 200
         assert self.memory_stub.saved[0]["importance"] == 1.0
+
+    def test_patch_fact_updates_allowed_fields(self):
+        self.memory_stub.saved.append(
+            {"session_id": "seed", "fact": "horario viejo", "category": "general", "importance": 0.9}
+        )
+
+        response = self.client.patch(
+            "/api/memory/facts/1",
+            json={"fact": "horario nuevo", "category": "hours", "importance": 3},
+            headers={"Authorization": "Bearer seed-key"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["fact"] == "horario nuevo"
+        assert response.json()["category"] == "hours"
+        assert response.json()["importance"] == 1.0
+
+    def test_patch_fact_rejects_empty_update_and_missing_fact(self):
+        headers = {"Authorization": "Bearer seed-key"}
+        assert self.client.patch("/api/memory/facts/1", json={}, headers=headers).status_code == 400
+        assert self.client.patch("/api/memory/facts/99", json={"fact": "x"}, headers=headers).status_code == 404
+
+    def test_delete_fact_removes_existing_fact_and_reports_missing(self):
+        self.memory_stub.saved.append(
+            {"session_id": "seed", "fact": "obsoleto", "category": "general", "importance": 0.9}
+        )
+        headers = {"Authorization": "Bearer seed-key"}
+
+        deleted = self.client.delete("/api/memory/facts/1", headers=headers)
+        assert deleted.status_code == 200, deleted.text
+        assert deleted.json() == {"id": 1, "deleted": True}
+        assert self.client.delete("/api/memory/facts/99", headers=headers).status_code == 404

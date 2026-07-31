@@ -392,6 +392,24 @@ class TestAsyncConcurrency:
 # ── session facts ordering (continuity injection) ────────────────────
 
 
+class TestSessionFactsCrud:
+    async def test_update_and_delete_session_fact(self, memory):
+        fact_id = await memory.save_session_fact(
+            "seed", "Horario anterior", category="hours", importance=0.5
+        )
+
+        updated = await memory.update_session_fact(
+            fact_id, fact="Horario actualizado", importance=1.0
+        )
+        assert updated is not None
+        assert updated["fact"] == "Horario actualizado"
+        assert updated["category"] == "hours"
+        assert updated["importance"] == 1.0
+
+        assert await memory.delete_session_fact(fact_id) is True
+        assert await memory.delete_session_fact(fact_id) is False
+
+
 class TestSessionFactsOrdering:
     async def test_high_importance_facts_listed_first(self, memory):
         """Continuity injects the top-N facts: critical seeded facts (e.g. real

@@ -4640,6 +4640,66 @@ async def api_memory_facts_create(request: Request):
     return JSONResponse(status_code=503, content={"error": "Memory not available"})
 
 
+@app.patch("/api/memory/facts/{fact_id}")
+async def api_memory_facts_update(fact_id: int, request: Request):
+    """Update a durable fact without creating a conflicting duplicate."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_any_auth(request, loaded)
+    if guard is not None:
+        return guard
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "invalid_json"})
+
+    updates = {}
+    if "fact" in body:
+        fact = str(body["fact"] or "").strip()
+        if not fact:
+            return JSONResponse(status_code=400, content={"error": "fact_required"})
+        updates["fact"] = fact
+    if "category" in body:
+        category = str(body["category"] or "").strip()
+        if not category:
+            return JSONResponse(status_code=400, content={"error": "category_required"})
+        updates["category"] = category
+    if "importance" in body:
+        try:
+            importance = float(body["importance"])
+        except (TypeError, ValueError):
+            return JSONResponse(status_code=400, content={"error": "importance_invalid"})
+        updates["importance"] = min(max(importance, 0.0), 1.0)
+    if not updates:
+        return JSONResponse(status_code=400, content={"error": "update_required"})
+
+    if _brain and _brain.memory:
+        updated = await _brain.memory.update_session_fact(fact_id, **updates)
+        if updated is None:
+            return JSONResponse(status_code=404, content={"error": "fact_not_found"})
+        return updated
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
+@app.delete("/api/memory/facts/{fact_id}")
+async def api_memory_facts_delete(fact_id: int, request: Request):
+    """Delete an obsolete durable fact."""
+    loaded = _load_config()
+    if not _is_configured(loaded):
+        return JSONResponse(status_code=400, content={"error": "not_configured"})
+    guard = _require_any_auth(request, loaded)
+    if guard is not None:
+        return guard
+
+    if _brain and _brain.memory:
+        if not await _brain.memory.delete_session_fact(fact_id):
+            return JSONResponse(status_code=404, content={"error": "fact_not_found"})
+        return {"id": fact_id, "deleted": True}
+    return JSONResponse(status_code=503, content={"error": "Memory not available"})
+
+
 @app.get("/api/memory/sessions")
 async def api_memory_sessions(request: Request, limit: int = 20):
     """List session summaries."""
