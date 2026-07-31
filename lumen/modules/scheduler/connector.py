@@ -132,10 +132,10 @@ class SchedulerRuntime:
             channel = channel or resolved[0]
             chat_id = chat_id or resolved[1]
         if not channel or not chat_id:
-            return {
-                "error": "no_delivery_target",
-                "hint": "No channel/chat_id given and no default could be resolved.",
-            }
+            # Dashboard-only instances have no message.send_* capability but
+            # still need reminders through the internal notification path.
+            channel = "inbox"
+            chat_id = "dashboard"
         recurrence = str(recurrence or "").strip().lower()
         if recurrence and not self._valid_recurrence(recurrence):
             return {"error": "invalid_recurrence", "hint": "Use 'daily' or 'weekly:mon'..'weekly:sun'."}
@@ -220,26 +220,46 @@ class SchedulerRuntime:
         for job in due_jobs:
             tool = f"message.send_{job['channel']}"
             message = f"🔔 Recordatorio: {job['text']}"
-            try:
-                await self.context.connectors.execute_tool(
-                    tool, {"chat_id": job["chat_id"], "text": message}
+            delivered_via = job["channel"]
+            has_channel_tool = (
+                job["channel"] != "inbox"
+                and self.context.connectors is not None
+                and self.context.connectors.has_tool(tool)
+            )
+            if has_channel_tool:
+                try:
+                    await self.context.connectors.execute_tool(
+                        tool, {"chat_id": job["chat_id"], "text": message}
+                    )
+                except Exception as exc:
+                    # A configured but temporarily broken channel must keep
+                    # retrying rather than failing over silently.
+                    logger.warning("Scheduler delivery failed for %s via %s: %s", job["id"], tool, exc)
+                    continue
+            else:
+                delivered_via = "inbox"
+                await self.context.broadcast_event(
+                    "scheduler_reminder",
+                    {
+                        "job_id": job["id"],
+                        "text": job["text"],
+                        "delivered_via": delivered_via,
+                    },
                 )
-            except Exception as exc:
-                logger.warning("Scheduler delivery failed for %s via %s: %s", job["id"], tool, exc)
-                continue
 
             next_due = self._next_occurrence(job)
 
-            def _mark(job=job, next_due=next_due):
+            def _mark(job=job, next_due=next_due, delivered_via=delivered_via):
+                metadata = json.dumps({"delivered_via": delivered_via})
                 if next_due is not None:
                     self._db.execute(
-                        "UPDATE scheduled_jobs SET due_at = ?, fired_at = ? WHERE id = ?",
-                        (next_due.isoformat(), self._now().isoformat(), job["id"]),
+                        "UPDATE scheduled_jobs SET due_at = ?, fired_at = ?, metadata = ? WHERE id = ?",
+                        (next_due.isoformat(), self._now().isoformat(), metadata, job["id"]),
                     )
                 else:
                     self._db.execute(
-                        "UPDATE scheduled_jobs SET status = 'done', fired_at = ? WHERE id = ?",
-                        (self._now().isoformat(), job["id"]),
+                        "UPDATE scheduled_jobs SET status = 'done', fired_at = ?, metadata = ? WHERE id = ?",
+                        (self._now().isoformat(), metadata, job["id"]),
                     )
                 self._db.commit()
 

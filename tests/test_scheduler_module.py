@@ -19,6 +19,13 @@ CONNECTOR_PATH = (
     / "scheduler"
     / "connector.py"
 )
+DASHBOARD_TEMPLATE = (
+    Path(__file__).resolve().parents[1]
+    / "lumen"
+    / "channels"
+    / "templates"
+    / "dashboard.html"
+)
 
 
 def load_connector():
@@ -64,6 +71,7 @@ class FakeContext:
         self.connectors = FakeConnectors()
         self.settings = settings or {}
         self.registered_tools = []
+        self.broadcasts = []
 
     def ensure_runtime_dir(self):
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -81,6 +89,10 @@ class FakeContext:
 
     def write_runtime_state(self, payload):
         pass
+
+    async def broadcast_event(self, event_type, payload):
+        self.broadcasts.append({"type": event_type, "payload": payload})
+        return 1
 
 
 class SchedulerModuleTests(unittest.TestCase):
@@ -104,6 +116,12 @@ class SchedulerModuleTests(unittest.TestCase):
         asyncio.run(run())
         for tool in ("scheduler__create", "scheduler__list", "scheduler__cancel"):
             assert tool in self.ctx.connectors.registered, tool
+
+    def test_dashboard_renders_internal_scheduler_reminders(self):
+        template = DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
+
+        assert "data.type === 'scheduler_reminder'" in template
+        assert "data.payload?.text" in template
 
     def test_create_and_list_job(self):
         async def run():
@@ -228,7 +246,7 @@ class SchedulerModuleTests(unittest.TestCase):
         async def run():
             runtime = self._runtime()
             await runtime.init_store()
-            await runtime.create_job(
+            created = await runtime.create_job(
                 text="canal roto",
                 when=(datetime.now() + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S"),
                 channel="telegram",  # not in known_tools → delivery fails
@@ -236,9 +254,37 @@ class SchedulerModuleTests(unittest.TestCase):
             )
             await asyncio.sleep(1.2)
             fired = await runtime.fire_due_jobs()
-            assert fired == 0
+            assert fired == 1
             jobs = await runtime.list_jobs()
-            assert len(jobs) == 1  # still pending, retried next sweep
+            assert jobs == []
+            assert self.ctx.connectors.executed == []
+            assert self.ctx.broadcasts == [{
+                "type": "scheduler_reminder",
+                "payload": {
+                    "job_id": created["id"],
+                    "text": "canal roto",
+                    "delivered_via": "inbox",
+                },
+            }]
+            await runtime.close()
+
+        asyncio.run(run())
+
+    def test_channel_less_job_defaults_to_the_internal_inbox(self):
+        async def run():
+            runtime = self._runtime()
+            await runtime.init_store()
+            created = await runtime.create_job(
+                text="ver el panel",
+                when=(datetime.now() + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            assert created["channel"] == "inbox"
+            assert created["chat_id"] == "dashboard"
+
+            await asyncio.sleep(1.2)
+            assert await runtime.fire_due_jobs() == 1
+            assert self.ctx.broadcasts[0]["type"] == "scheduler_reminder"
+            assert self.ctx.broadcasts[0]["payload"]["delivered_via"] == "inbox"
             await runtime.close()
 
         asyncio.run(run())
