@@ -150,6 +150,40 @@ def test_auto_detect_bare_model_name_with_explicit_base_url_uses_openai_compat()
     assert "litellm" not in sys.modules
 
 
+@pytest.mark.parametrize(
+    ("model", "default_base_url", "expected_model"),
+    [
+        pytest.param("openai/gpt-4o-mini", "https://api.openai.com/v1", "gpt-4o-mini", id="openai"),
+        pytest.param("deepseek/deepseek-chat", "https://api.deepseek.com/v1", "deepseek-chat", id="deepseek"),
+        pytest.param("ollama/llama3", "http://localhost:11434/v1", "llama3", id="ollama"),
+        pytest.param("openrouter/openai/gpt-oss-120b:free", "https://openrouter.ai/api/v1", "openai/gpt-oss-120b:free", id="openrouter"),
+    ],
+)
+def test_core_routes_wizard_openai_compatible_providers_without_litellm(
+    model, default_base_url, expected_model
+):
+    """Core must run every OpenAI-compatible wizard path with no LiteLLM.
+
+    The persisted config uses root-level ``api_base`` / ``api_key`` fields,
+    therefore the factory must understand those fields as well as its nested
+    ``llm`` override block.
+    """
+    client = build_llm_client({"model": model, "api_key": "core-key"})
+
+    assert isinstance(client, OpenAICompatClient)
+    assert client._base_url == default_base_url
+    assert client._api_key == "core-key"
+    assert client._build_payload(
+        model=model,
+        messages=[],
+        tools=None,
+        temperature=0,
+        max_tokens=1,
+        stream=False,
+    )["model"] == expected_model
+    assert "litellm" not in sys.modules
+
+
 def test_default_config_never_imports_litellm():
     """spec: 'Default config never touches litellm' — building the default
     (openai_compat-eligible) client must not trigger the litellm import."""

@@ -48,6 +48,20 @@ pip install enlumen
 lumen run
 ```
 
+### Installation profiles
+
+`enlumen` is the lightweight **Core** profile: it uses the built-in HTTPX
+OpenAI-compatible client and does not install LiteLLM. It is intended for
+headless deployments using OpenAI, DeepSeek, Ollama, OpenRouter, or another
+OpenAI-compatible endpoint.
+
+Install the full compatibility profile when an instance needs a provider that
+uses LiteLLM (for example Anthropic, Bedrock, or Gemini):
+
+```bash
+pip install "enlumen[full]"
+```
+
 Your browser opens at:
 
 ```txt
@@ -159,12 +173,19 @@ RUN apt-get update \
 COPY pyproject.toml README.md /app/
 COPY lumen /app/lumen
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[full]"
 
 EXPOSE 3000
 
 # Persist Lumen instance data in /root/.lumen using a Docker volume.
 CMD ["lumen", "server", "--host", "0.0.0.0", "--port", "3000"]
+```
+
+For a lightweight headless Core image, build `Dockerfile.core` instead. It
+omits LiteLLM and Node.js:
+
+```bash
+docker build -f Dockerfile.core -t enlumen:core .
 ```
 
 ### Basic `docker-compose.yml`

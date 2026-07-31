@@ -122,13 +122,17 @@ import json
 
 import httpx
 
-# Known litellm-style model prefixes that map to OpenAI-compatible providers.
-# The prefix is stripped before sending the `model` field upstream, since
-# these providers expect their own bare model ids (not the litellm-routing
-# prefix). Prefixes not in this table are passed through unchanged (e.g. a
-# custom base_url already pointing at a provider that expects the full
-# string, or plain "gpt-4o"-style ids with no prefix at all).
-_OPENAI_COMPAT_PREFIXES = ("openai/", "deepseek/", "together_ai/")
+# Known model prefixes that use the OpenAI chat-completions protocol. The
+# mapping supplies a sensible endpoint for the providers offered by Lumen's
+# wizard, so the Core profile does not need LiteLLM merely to start them.
+_OPENAI_COMPAT_BASE_URLS = {
+    "openai/": "https://api.openai.com/v1",
+    "deepseek/": "https://api.deepseek.com/v1",
+    "ollama/": "http://localhost:11434/v1",
+    "openrouter/": "https://openrouter.ai/api/v1",
+    "together_ai/": "https://api.together.xyz/v1",
+}
+_OPENAI_COMPAT_PREFIXES = tuple(_OPENAI_COMPAT_BASE_URLS)
 
 
 def _strip_openai_compat_prefix(model: str) -> str:
@@ -141,6 +145,14 @@ def _strip_openai_compat_prefix(model: str) -> str:
         if model.startswith(prefix):
             return model[len(prefix) :]
     return model
+
+
+def _default_openai_compat_base_url(model: str) -> str:
+    """Return the provider endpoint implied by a known model prefix."""
+    for prefix, base_url in _OPENAI_COMPAT_BASE_URLS.items():
+        if model.startswith(prefix):
+            return base_url
+    return ""
 
 
 class OpenAICompatClient:
@@ -418,6 +430,7 @@ def build_llm_client(config: dict[str, Any] | None, **overrides: Any) -> "LLMCli
     """
     config = config or {}
     llm_cfg = config.get("llm") if isinstance(config.get("llm"), dict) else {}
+    model = _resolve_model_string(config)
 
     explicit = llm_cfg.get("client")
     if isinstance(explicit, str) and explicit.strip():
@@ -426,9 +439,18 @@ def build_llm_client(config: dict[str, Any] | None, **overrides: Any) -> "LLMCli
         kind = _auto_detect_client_kind(config)
 
     if kind == "openai_compat":
+        # Persisted Lumen configuration predates the nested ``llm`` block and
+        # stores these values at the root. Keep that public config contract
+        # intact while allowing nested values to override it.
+        base_url = (
+            llm_cfg.get("base_url")
+            or config.get("api_base")
+            or _default_openai_compat_base_url(model)
+        )
+        api_key = llm_cfg.get("api_key") or config.get("api_key")
         return OpenAICompatClient(
-            base_url=llm_cfg.get("base_url", ""),
-            api_key=llm_cfg.get("api_key"),
+            base_url=base_url,
+            api_key=api_key,
             timeout=llm_cfg.get("timeout", 60.0),
         )
     if kind == "litellm":
