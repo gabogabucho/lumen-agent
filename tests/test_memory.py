@@ -410,6 +410,44 @@ class TestSessionFactsCrud:
         assert await memory.delete_session_fact(fact_id) is False
 
 
+class TestConversationHistoryIsolation:
+    async def test_conversation_turns_do_not_pollute_durable_recall(self, memory):
+        await memory.save_conversation_turn("session-1", "user", "Mi secreto temporal")
+        await memory.save_conversation_turn("session-1", "assistant", "Entendido")
+
+        assert await memory.recall("secreto temporal") == []
+        assert await memory.load_conversation("session-1") == [
+            {"role": "user", "content": "Mi secreto temporal"},
+            {"role": "assistant", "content": "Entendido"},
+        ]
+
+    async def test_system_schedule_turns_are_not_persisted(self, memory):
+        await memory.save_conversation_turn(
+            "session-1", "system", "[AMBAR:SCHEDULE] CHECKIN_MORNING"
+        )
+
+        assert await memory.load_conversation("session-1") == []
+
+    async def test_init_migrates_legacy_transcript_out_of_recall(self, memory):
+        await memory.remember(
+            "Dato transitorio heredado",
+            category="conversation:legacy-session",
+            metadata={"role": "user", "session_id": "legacy-session"},
+        )
+        db_path = memory.db_path
+        await memory.close()
+
+        migrated = Memory(db_path=db_path)
+        await migrated.init()
+        try:
+            assert await migrated.recall("transitorio heredado") == []
+            assert await migrated.load_conversation("legacy-session") == [
+                {"role": "user", "content": "Dato transitorio heredado"}
+            ]
+        finally:
+            await migrated.close()
+
+
 class TestSessionFactsOrdering:
     async def test_high_importance_facts_listed_first(self, memory):
         """Continuity injects the top-N facts: critical seeded facts (e.g. real
