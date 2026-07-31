@@ -112,6 +112,16 @@ class Memory:
             CREATE INDEX IF NOT EXISTS idx_lessons_category ON lessons(category);
             CREATE INDEX IF NOT EXISTS idx_lessons_pinned ON lessons(pinned);
 
+            CREATE TABLE IF NOT EXISTS conversation_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversation_turns_session
+                ON conversation_turns(session_id, created_at);
+
             CREATE TABLE IF NOT EXISTS outputs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 output_id TEXT UNIQUE NOT NULL,
@@ -127,6 +137,28 @@ class Memory:
             CREATE INDEX IF NOT EXISTS idx_outputs_created ON outputs(created_at);
             """
         )
+        await self._db.commit()
+        await self._migrate_legacy_conversation_memories()
+
+    async def _migrate_legacy_conversation_memories(self) -> None:
+        """Move raw transcript rows out of durable recall exactly once."""
+        rows = await self._db.execute_fetchall(
+            "SELECT id, content, category, metadata, created_at FROM memories "
+            "WHERE category LIKE 'conversation:%'"
+        )
+        if not rows:
+            return
+        for row in rows:
+            metadata = json.loads(row[3] or "{}")
+            session_id = str(metadata.get("session_id") or row[2].split(":", 1)[-1])
+            role = str(metadata.get("role") or "user")
+            if self._should_persist_conversation_turn(role, row[1]):
+                await self._db.execute(
+                    "INSERT INTO conversation_turns (session_id, role, content, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (session_id, role, row[1], row[4]),
+                )
+        await self._db.execute("DELETE FROM memories WHERE category LIKE 'conversation:%'")
         await self._db.commit()
 
     async def remember(
@@ -240,26 +272,36 @@ class Memory:
     async def save_conversation_turn(
         self, session_id: str, role: str, content: str
     ):
-        """Save a conversation turn to persistent storage."""
-        await self.remember(
-            content,
-            category=f"conversation:{session_id}",
-            metadata={"role": role, "session_id": session_id},
+        """Save raw transcript history outside the durable-memory index."""
+        if not self._should_persist_conversation_turn(role, content):
+            return
+        await self._db.execute(
+            "INSERT INTO conversation_turns (session_id, role, content, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (session_id, role, content, time.time()),
         )
+        await self._db.commit()
+
+    @staticmethod
+    def _should_persist_conversation_turn(role: str, content: str) -> bool:
+        """Keep system/scheduled control traffic out of transcript history."""
+        if str(role).lower() == "system":
+            return False
+        return ":SCHEDULE]" not in str(content).upper()
 
     async def load_conversation(
         self, session_id: str, limit: int = 50
     ) -> list[dict]:
         """Load conversation history for a session from persistent storage."""
         rows = await self._db.execute_fetchall(
-            "SELECT content, metadata, created_at FROM memories "
-            "WHERE category = ? ORDER BY created_at ASC LIMIT ?",
-            (f"conversation:{session_id}", limit),
+            "SELECT role, content FROM conversation_turns "
+            "WHERE session_id = ? ORDER BY created_at ASC, id ASC LIMIT ?",
+            (session_id, limit),
         )
         return [
             {
-                "role": json.loads(row[1]).get("role", "user"),
-                "content": row[0],
+                "role": row[0],
+                "content": row[1],
             }
             for row in rows
         ]
