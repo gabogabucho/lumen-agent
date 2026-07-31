@@ -323,6 +323,61 @@ class Memory:
             for r in rows
         ]
 
+    async def update_session_fact(
+        self,
+        fact_id: int,
+        *,
+        fact: str | None = None,
+        category: str | None = None,
+        importance: float | None = None,
+    ) -> dict | None:
+        """Update selected fields of a durable fact and return its new value."""
+        updates: list[str] = []
+        params: list = []
+        if fact is not None:
+            updates.append("fact = ?")
+            params.append(fact)
+        if category is not None:
+            updates.append("category = ?")
+            params.append(category)
+        if importance is not None:
+            updates.append("importance = ?")
+            params.append(importance)
+        if not updates:
+            return None
+
+        cursor = await self._db.execute(
+            f"UPDATE session_facts SET {', '.join(updates)} WHERE id = ?",
+            (*params, fact_id),
+        )
+        if cursor.rowcount != 1:
+            return None
+        await self._db.commit()
+        row = await self._db.execute_fetchall(
+            "SELECT id, session_id, fact, category, importance, created_at "
+            "FROM session_facts WHERE id = ?",
+            (fact_id,),
+        )
+        if not row:
+            return None
+        value = row[0]
+        return {
+            "id": value[0],
+            "session_id": value[1],
+            "fact": value[2],
+            "category": value[3],
+            "importance": value[4],
+            "created_at": value[5],
+        }
+
+    async def delete_session_fact(self, fact_id: int) -> bool:
+        """Delete a durable fact by id."""
+        cursor = await self._db.execute("DELETE FROM session_facts WHERE id = ?", (fact_id,))
+        if cursor.rowcount != 1:
+            return False
+        await self._db.commit()
+        return True
+
     async def list_session_summaries(
         self,
         limit: int = 20,
