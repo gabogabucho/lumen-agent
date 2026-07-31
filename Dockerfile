@@ -5,8 +5,8 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Runtime dependencies: TLS/certs, health tooling, git, and Node.js 20 for
-# the WhatsApp (Baileys) bridge.
+# Full profile: TLS/certs, health tooling, git, Node.js 20 for the WhatsApp
+# (Baileys) bridge, and the optional LiteLLM provider compatibility layer.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -16,7 +16,7 @@ RUN apt-get update \
 COPY pyproject.toml README.md /app/
 COPY lumen /app/lumen
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[full]"
 
 EXPOSE 3000
 
