@@ -1972,6 +1972,10 @@
           pulse('awaken');
           renderSensePanel();
         }
+        if (data.type === 'scheduler_reminder' && data.payload?.text) {
+          addMessage('assistant', `🔔 Recordatorio: ${data.payload.text}`);
+          pulse('awaken');
+        }
         if (data.type === 'session_reset') {
           typingIndicator.classList.add('hidden');
           sessionId = data.new_session_id;
