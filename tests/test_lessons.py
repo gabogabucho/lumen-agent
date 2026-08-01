@@ -229,6 +229,10 @@ class TestMemoryExtension(unittest.TestCase):
         from lumen.core.memory import Memory
         memory = Memory(db_path=self.db_path)
         asyncio.run(memory.init())
+        # addCleanup and not a close() at the end: an assertion failing midway
+        # would skip the close, and a leaked aiosqlite worker is non-daemon --
+        # it keeps the interpreter alive after the suite is done.
+        self.addCleanup(lambda: asyncio.run(memory.close()))
         
         # Verify tables exist by inserting and querying
         asyncio.run(memory.save_session_fact("s1", "test fact", "general", 0.5))
@@ -242,12 +246,15 @@ class TestMemoryExtension(unittest.TestCase):
         assert len(lessons) == 1
         assert lessons[0]["rule"] == "test rule"
         
-        asyncio.run(memory.close())
 
     def test_session_facts_crud(self):
         from lumen.core.memory import Memory
         memory = Memory(db_path=self.db_path)
         asyncio.run(memory.init())
+        # addCleanup and not a close() at the end: an assertion failing midway
+        # would skip the close, and a leaked aiosqlite worker is non-daemon --
+        # it keeps the interpreter alive after the suite is done.
+        self.addCleanup(lambda: asyncio.run(memory.close()))
         
         # Create
         fid = asyncio.run(memory.save_session_fact("s1", "fact1", "preference", 0.9))
@@ -265,6 +272,10 @@ class TestMemoryExtension(unittest.TestCase):
         from lumen.core.memory import Memory
         memory = Memory(db_path=self.db_path)
         asyncio.run(memory.init())
+        # addCleanup and not a close() at the end: an assertion failing midway
+        # would skip the close, and a leaked aiosqlite worker is non-daemon --
+        # it keeps the interpreter alive after the suite is done.
+        self.addCleanup(lambda: asyncio.run(memory.close()))
         
         asyncio.run(memory.save_session_summary("s1", "Summary text", 3, 10))
         asyncio.run(memory.save_session_summary("s2", "Another summary", 5, 20))
@@ -277,6 +288,10 @@ class TestMemoryExtension(unittest.TestCase):
         from lumen.core.memory import Memory
         memory = Memory(db_path=self.db_path)
         asyncio.run(memory.init())
+        # addCleanup and not a close() at the end: an assertion failing midway
+        # would skip the close, and a leaked aiosqlite worker is non-daemon --
+        # it keeps the interpreter alive after the suite is done.
+        self.addCleanup(lambda: asyncio.run(memory.close()))
         
         asyncio.run(memory.save_session_summary("s1", "First", 1, 5))
         asyncio.run(memory.save_session_summary("s1", "Updated", 3, 10))
@@ -290,6 +305,10 @@ class TestMemoryExtension(unittest.TestCase):
         from lumen.core.memory import Memory
         memory = Memory(db_path=self.db_path)
         asyncio.run(memory.init())
+        # addCleanup and not a close() at the end: an assertion failing midway
+        # would skip the close, and a leaked aiosqlite worker is non-daemon --
+        # it keeps the interpreter alive after the suite is done.
+        self.addCleanup(lambda: asyncio.run(memory.close()))
         
         # Create
         lid = asyncio.run(memory.save_lesson("rule1", "safety", "manual", 0.9))
@@ -319,6 +338,10 @@ class TestMemoryExtension(unittest.TestCase):
         from lumen.core.memory import Memory
         memory = Memory(db_path=self.db_path)
         asyncio.run(memory.init())
+        # addCleanup and not a close() at the end: an assertion failing midway
+        # would skip the close, and a leaked aiosqlite worker is non-daemon --
+        # it keeps the interpreter alive after the suite is done.
+        self.addCleanup(lambda: asyncio.run(memory.close()))
         
         asyncio.run(memory.save_lesson("unpinned", "general", "manual", 0.5))
         asyncio.run(memory.save_lesson("pinned_rule", "safety", "manual", 0.5))
@@ -332,6 +355,10 @@ class TestMemoryExtension(unittest.TestCase):
         from lumen.core.memory import Memory
         memory = Memory(db_path=self.db_path)
         asyncio.run(memory.init())
+        # addCleanup and not a close() at the end: an assertion failing midway
+        # would skip the close, and a leaked aiosqlite worker is non-daemon --
+        # it keeps the interpreter alive after the suite is done.
+        self.addCleanup(lambda: asyncio.run(memory.close()))
         
         asyncio.run(memory.remember("test memory", "general"))
         asyncio.run(memory.save_session_fact("s1", "fact"))
@@ -342,13 +369,16 @@ class TestMemoryExtension(unittest.TestCase):
         assert stats["total_facts"] == 1
         assert stats["total_lessons"] == 1
         
-        asyncio.run(memory.close())
 
     def test_existing_memories_still_work(self):
         """Existing memory methods are not broken by new tables."""
         from lumen.core.memory import Memory
         memory = Memory(db_path=self.db_path)
         asyncio.run(memory.init())
+        # addCleanup and not a close() at the end: an assertion failing midway
+        # would skip the close, and a leaked aiosqlite worker is non-daemon --
+        # it keeps the interpreter alive after the suite is done.
+        self.addCleanup(lambda: asyncio.run(memory.close()))
         
         mid = asyncio.run(memory.remember("hello world", "general"))
         results = asyncio.run(memory.recall("hello"))
@@ -358,7 +388,6 @@ class TestMemoryExtension(unittest.TestCase):
         results = asyncio.run(memory.recall("hello"))
         assert len(results) == 0
         
-        asyncio.run(memory.close())
 
 
 if __name__ == "__main__":
