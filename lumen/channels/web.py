@@ -3483,10 +3483,41 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 continue
 
             try:
-                brain_stream = _brain.think_stream(user_text, session)
+                # Typing on before the stream is created, not after: if
+                # think_stream raises on the way in, the `finally` below still
+                # sends typing off and the client is left toggling an indicator
+                # it was never told to turn on.
                 await websocket.send_text(json.dumps({"type": "typing", "status": True}))
-                async for chunk in brain_stream:
+
+                # `delta` chunks are assembled here rather than forwarded. The
+                # dashboard renders `message` frames and has no `delta` branch,
+                # so streaming them straight through meant the assistant's reply
+                # never appeared: typing on, typing off, nothing said.
+                #
+                # A delta carrying `_result` is the complete final message (tool
+                # rounds and flows emit it that way); the rest are increments.
+                # Mixing the two up would either duplicate the answer or drop it.
+                partes: list[str] = []
+                completo: str | None = None
+
+                async for chunk in _brain.think_stream(user_text, session):
+                    if chunk.get("type") == "delta":
+                        if "_result" in chunk:
+                            completo = chunk.get("content") or ""
+                        else:
+                            partes.append(chunk.get("content") or "")
+                        continue
                     await websocket.send_text(json.dumps({"type": chunk["type"], **chunk}))
+
+                respuesta = completo if completo is not None else "".join(partes)
+                if respuesta.strip():
+                    await websocket.send_text(
+                        json.dumps({
+                            "type": "message",
+                            "role": "assistant",
+                            "content": respuesta,
+                        })
+                    )
             except Exception:
                 logger.exception("websocket_think_stream_failed session_id=%s", session_id)
                 await websocket.send_text(
