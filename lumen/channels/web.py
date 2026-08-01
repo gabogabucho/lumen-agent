@@ -3259,6 +3259,120 @@ async def api_chat(request: Request):
     return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 
+@app.post("/api/session/facts")
+async def api_session_facts_create(request: Request):
+    """Seed a session fact from outside Lumen.
+
+    Body: {"session_id": "...", "fact": "...", "category?": "...", "importance?": 0.5}
+    Response: {"id": 12, "session_id": "..."}
+    Auth: same Bearer token as /api/chat.
+
+    Facts written here are the ones continuity injects every turn, ordered by
+    importance — the same path the brain uses when it distills something on its
+    own. `save_session_fact` and its siblings already existed; what was missing
+    was a door from outside the process.
+
+    That door matters for headless deployments. When another system owns the
+    user record and Lumen is the conversational runtime, the operator knows
+    things the conversation has not revealed yet: who the person is, what not to
+    ask them, which medication matters. Without this endpoint the only ways in
+    are baking it into the image at build time, mounting a per-user module, or
+    prepending it to the message text — where the model reads it as something
+    the user said rather than as context.
+    """
+    auth_error = _validate_bearer_token(request)
+    if auth_error:
+        return JSONResponse(status_code=401, content={"error": auth_error})
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "invalid JSON"})
+
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"error": "expected JSON object"})
+
+    session_id = str(body.get("session_id", "")).strip()
+    if not session_id:
+        return JSONResponse(
+            status_code=400, content={"error": "session_id is required"}
+        )
+
+    fact = str(body.get("fact", "")).strip()
+    if not fact:
+        return JSONResponse(status_code=400, content={"error": "fact is required"})
+
+    category = str(body.get("category", "general")).strip() or "general"
+
+    importance = body.get("importance", 0.5)
+    try:
+        importance = float(importance)
+    except (TypeError, ValueError):
+        return JSONResponse(
+            status_code=400, content={"error": "importance must be a number"}
+        )
+    if not 0.0 <= importance <= 1.0:
+        return JSONResponse(
+            status_code=400, content={"error": "importance must be between 0 and 1"}
+        )
+
+    if not _brain:
+        return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
+
+    try:
+        if _brain.memory._db is None:
+            await _brain.memory.init()
+        payload = _request_auth_payload(request, _load_config())
+        scoped_session_id = _scoped_session_id_from_raw(session_id, payload)
+        fact_id = await _brain.memory.save_session_fact(
+            scoped_session_id, fact, category=category, importance=importance
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return {"id": fact_id, "session_id": scoped_session_id}
+
+
+@app.get("/api/session/facts")
+async def api_session_facts_list(request: Request):
+    """List session facts. Query: ?session_id=...&query=...&limit=10
+
+    Returning them matters as much as writing them: without a read the caller
+    cannot tell a fact it seeded from one the brain distilled, and re-seeding
+    on every restart quietly fills the table with duplicates that then compete
+    for the same top-N slots.
+    """
+    auth_error = _validate_bearer_token(request)
+    if auth_error:
+        return JSONResponse(status_code=401, content={"error": auth_error})
+
+    if not _brain:
+        return JSONResponse(status_code=503, content={"error": "Lumen not ready"})
+
+    session_id = str(request.query_params.get("session_id", "")).strip()
+    query = str(request.query_params.get("query", "")).strip()
+    try:
+        limit = int(request.query_params.get("limit", 10))
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"error": "limit must be an integer"})
+    limit = max(1, min(limit, 100))
+
+    try:
+        if _brain.memory._db is None:
+            await _brain.memory.init()
+        prefix = None
+        if session_id:
+            payload = _request_auth_payload(request, _load_config())
+            prefix = _scoped_session_id_from_raw(session_id, payload)
+        facts = await _brain.memory.list_session_facts(
+            query=query, limit=limit, session_prefix=prefix
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return {"facts": facts}
+
+
 @app.post("/api/whatsapp/send")
 async def api_whatsapp_send(request: Request):
     """Authenticated proactive WhatsApp send endpoint.
