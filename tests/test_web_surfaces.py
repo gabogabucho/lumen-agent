@@ -57,6 +57,22 @@ class BrainStub:
         }
         return {"message": f"Echo: {user_text}"}
 
+    async def think_stream(self, user_text, session):
+        """The websocket path uses this one, not `think`.
+
+        Without it the stub raised AttributeError, the handler sent an error
+        frame instead of a reply, and the test blocked forever on a third frame
+        that was never coming — so a real regression showed up as a hung suite
+        rather than a failure.
+        """
+        self.think_calls += 1
+        self.last_think = {
+            "user_text": user_text,
+            "session_id": session.session_id,
+            "history": list(session.history),
+        }
+        yield {"type": "delta", "content": f"Echo: {user_text}"}
+
 
 class StubMarketplace(Marketplace):
     def __init__(self, *args, payloads=None, **kwargs):
