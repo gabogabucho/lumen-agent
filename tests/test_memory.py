@@ -458,3 +458,22 @@ class TestSessionFactsOrdering:
 
         facts = await memory.list_session_facts(limit=10)
         assert facts[0]["fact"] == "Medicación: Pastilla verde 15:30"
+
+
+class TestRecencyOrderingIsDeterministic:
+    """Three rows written in the same millisecond used to come back in any order.
+
+    `ORDER BY created_at DESC` alone leaves ties undefined in SQLite, so
+    `test_list_by_category_newest_first` passed or failed depending on how
+    fast the machine was that day. Adding an unrelated test to another file
+    was enough to flip it.
+    """
+
+    async def test_same_millisecond_still_comes_back_newest_first(self, memory):
+        for texto in ("first", "second", "third", "fourth", "fifth"):
+            await memory.remember(texto, category="tie")
+
+        resultados = await memory.list_by_category("tie")
+
+        assert [r["content"] for r in resultados] == [
+            "fifth", "fourth", "third", "second", "first"]
