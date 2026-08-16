@@ -1122,19 +1122,42 @@ class Brain:
         )
         return self._to_legacy_response(llm_response)
 
+    async def _short_circuit_events(self, session: Session, message: str, result: dict):
+        """Emit a turn that answered without reaching the LLM.
+
+        Its text as a delta, then the same text as `final`, so every path out
+        of `think_stream` ends the same way and a caller can always rely on
+        `final` arriving.
+        """
+        result = await self._finalize_turn(session, message, result)
+        text = result.get("message", "")
+        yield {"type": "delta", "content": text}
+        yield {"type": "final", "content": text}
+
     async def think_stream(self, message: str, session: Session):
-        """Stream LLM response as an async generator."""
+        """Stream LLM response as an async generator.
+
+        Event types: `reasoning`, `delta`, `tool_*`, `error`, and `final`.
+
+        `final` carries the turn's complete text — the same string persisted to
+        memory. It is not a repeat of the deltas: `_finalize_turn` runs the
+        capability guard and the contradiction retry, both of which can rewrite
+        the message after the deltas are already out the door. A caller that
+        stores the concatenation of deltas can end up holding text Lumen never
+        said. Terminal either way: on failure the stream ends with `error` and
+        no `final`.
+        """
 
         offer_result = await self._maybe_handle_pending_setup_offer(message, session)
         if offer_result is not None:
-            result = await self._finalize_turn(session, message, offer_result)
-            yield {"type": "delta", "content": result.get("message", "")}
+            async for event in self._short_circuit_events(session, message, offer_result):
+                yield event
             return
 
         flow_result = await self._maybe_handle_runtime_flow(message, session)
         if flow_result is not None:
-            result = await self._finalize_turn(session, message, flow_result)
-            yield {"type": "delta", "content": result.get("message", "")}
+            async for event in self._short_circuit_events(session, message, flow_result):
+                yield event
             return
 
         # Check for flow triggers if no active flow
@@ -1144,8 +1167,10 @@ class Brain:
                 session.start_flow(triggered)
                 flow_result = await self._maybe_handle_runtime_flow(message, session)
                 if flow_result is not None:
-                    result = await self._finalize_turn(session, message, flow_result)
-                    yield {"type": "delta", "content": result.get("message", "")}
+                    async for event in self._short_circuit_events(
+                        session, message, flow_result
+                    ):
+                        yield event
                     return
 
             setup_match = self._match_natural_setup(message)
@@ -1153,8 +1178,10 @@ class Brain:
                 session.start_flow(setup_match)
                 flow_result = await self._maybe_handle_runtime_flow(message, session)
                 if flow_result is not None:
-                    result = await self._finalize_turn(session, message, flow_result)
-                    yield {"type": "delta", "content": result.get("message", "")}
+                    async for event in self._short_circuit_events(
+                        session, message, flow_result
+                    ):
+                        yield event
                     return
 
             if self._message_requests_setup(message):
@@ -1167,8 +1194,10 @@ class Brain:
                         message, session
                     )
                     if flow_result is not None:
-                        result = await self._finalize_turn(session, message, flow_result)
-                        yield {"type": "delta", "content": result.get("message", "")}
+                        async for event in self._short_circuit_events(
+                            session, message, flow_result
+                        ):
+                            yield event
                         return
                 elif len(setup_flows) > 1:
                     artifacts = []
@@ -1182,7 +1211,7 @@ class Brain:
                                 ),
                                 "kind": str(flow.get("kind") or "native"),
                             })
-                    result = await self._finalize_turn(
+                    async for event in self._short_circuit_events(
                         session,
                         message,
                         {
@@ -1190,8 +1219,8 @@ class Brain:
                                 artifacts
                             ),
                         },
-                    )
-                    yield {"type": "delta", "content": result.get("message", "")}
+                    ):
+                        yield event
                     return
 
         context, messages, tools = await self._prepare_think_context(message, session)
@@ -1309,8 +1338,11 @@ class Brain:
         else:
             result = {"message": full_content, "tool_calls": []}
 
-        # Finalize turn
-        await self._finalize_turn(session, message, result)
+        # Finalize turn. Its return value is the text that goes to memory —
+        # the capability guard and the contradiction retry may have rewritten
+        # it — so it is what the caller has to be told, not what we streamed.
+        result = await self._finalize_turn(session, message, result)
+        yield {"type": "final", "content": result.get("message", "")}
 
     async def think_proactive(self) -> str | None:
         """Generate a proactive announcement when capabilities changed.

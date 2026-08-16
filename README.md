@@ -530,6 +530,33 @@ Example response:
 }
 ```
 
+#### Streaming
+
+Add `"stream": true` to get `text/event-stream` instead, so the caller can work
+with the answer while it is still being written:
+
+```bash
+curl -N -X POST http://localhost:3000/api/chat \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "hello", "stream": true}'
+```
+
+```txt
+event: session          {"session_id": "..."}
+event: reasoning        {"content": "..."}      thinking tokens, when the model emits them
+event: delta            {"text": "..."}         increments, no sentence boundaries promised
+event: tool_progress    {"tool": "...", ...}    also tool_result, tool_status, tool_confirm_*
+event: final            {"text": "..."}         the turn's complete text
+event: done             [DONE]
+event: error            {"error": "..."}        instead of final; the stream ends here
+```
+
+**Store `final`, not the concatenation of the deltas.** The deltas are what the
+model produced; `final` is what Lumen said. Between the two, the capability
+guard and the contradiction retry can rewrite the message — and `final` is what
+went into memory. When nothing rewrites it, the two are identical.
+
 ### Reload runtime
 
 Bearer auth required:

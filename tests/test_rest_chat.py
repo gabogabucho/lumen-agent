@@ -266,6 +266,30 @@ class RESTChatTests(unittest.TestCase):
         assert events[-1]["event"] == "done"
         assert events[-1]["data"] == "[DONE]"
 
+    def test_chat_stream_forwards_final_as_its_own_event(self):
+        """`final` gets its own SSE event, before `done`.
+
+        Its own event and not a delta: a client that only listens to `delta`
+        must not end up with the answer twice.
+        """
+        os.environ["LUMEN_API_KEY"] = "test-key"
+        web._brain = BrainStreamStub(chunks=[
+            {"type": "delta", "content": "Si, tengo Telegram."},
+            {"type": "final", "content": "No tengo telegram instalado."},
+        ])
+        response = self.client.post(
+            "/api/chat",
+            json={"message": "hello", "stream": True},
+            headers={"Authorization": "Bearer test-key"},
+        )
+        assert response.status_code == 200
+
+        events = _parse_sse_events(response.text)
+        assert [e["event"] for e in events] == ["session", "delta", "final", "done"]
+
+        final = [e for e in events if e["event"] == "final"][0]
+        assert json.loads(final["data"])["text"] == "No tengo telegram instalado."
+
     def test_chat_stream_with_session(self):
         """Session reuse in streaming mode."""
         os.environ["LUMEN_API_KEY"] = "test-key"
