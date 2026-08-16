@@ -3028,3 +3028,77 @@ class TestThinkStreamFinalEvent:
 
         assert events[-1]["type"] == "error"
         assert not [e for e in events if e["type"] == "final"]
+
+
+# ── Session distillation switch ───────────────────────────────────────
+
+
+class TestSessionDistillationSwitch:
+    """The distiller writes durable facts on its own, with importance chosen
+    by the model. An embedder in a regulated domain must be able to turn that
+    off without patching the file. Default stays on."""
+
+    def _distill_call(self, brain):
+        """Finalize one turn on a session that already holds two messages, so
+        the 4-turn threshold is crossed, and return the distiller's mock."""
+        session = Session()
+        session.add_message("user", "hola")
+        session.add_message("assistant", "hola!")
+        brain.memory.save_conversation_turn = AsyncMock()
+        brain._distiller.distill_session = AsyncMock(return_value=[])
+
+        async def run():
+            await brain._finalize_turn(session, "y ahora?", {"message": "esto"})
+            # The trigger is fire-and-forget; let the created task start.
+            await asyncio.sleep(0)
+
+        asyncio.run(run())
+        return brain._distiller.distill_session
+
+    def test_distills_by_default(self):
+        brain = _make_brain()
+        assert brain.distillation_enabled is True
+        self._distill_call(brain).assert_called_once()
+
+    def test_env_off_stops_distillation(self, monkeypatch):
+        monkeypatch.setenv("LUMEN_DISTILL", "0")
+        brain = _make_brain()
+        assert brain.distillation_enabled is False
+        self._distill_call(brain).assert_not_called()
+
+    def test_config_off_stops_distillation(self):
+        brain = _make_brain(config={"distill": False})
+        assert brain.distillation_enabled is False
+        self._distill_call(brain).assert_not_called()
+
+    def test_env_on_overrides_config_off(self, monkeypatch):
+        monkeypatch.setenv("LUMEN_DISTILL", "1")
+        brain = _make_brain(config={"distill": False})
+        assert brain.distillation_enabled is True
+        self._distill_call(brain).assert_called_once()
+
+    def test_empty_env_falls_through_to_config(self, monkeypatch):
+        # An unset variable often arrives as "" through Docker/compose. That
+        # is "I said nothing", not "turn it on".
+        monkeypatch.setenv("LUMEN_DISTILL", "")
+        brain = _make_brain(config={"distill": False})
+        assert brain.distillation_enabled is False
+
+    def test_unparsable_value_keeps_distillation_on(self, monkeypatch):
+        # Failing to parse a switch must not read as "turned off".
+        monkeypatch.setenv("LUMEN_DISTILL", "fasle")
+        brain = _make_brain()
+        assert brain.distillation_enabled is True
+
+    def test_distiller_still_exists_when_off(self, monkeypatch):
+        monkeypatch.setenv("LUMEN_DISTILL", "0")
+        brain = _make_brain()
+        assert brain._distiller is not None
+
+    def test_off_leaves_the_session_undistilled(self, monkeypatch):
+        # Not just "did not run now": the session must not be marked as done,
+        # or turning the switch back on would skip it forever.
+        monkeypatch.setenv("LUMEN_DISTILL", "0")
+        brain = _make_brain()
+        self._distill_call(brain)
+        assert brain._distilled_sessions == set()

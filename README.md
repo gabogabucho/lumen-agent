@@ -818,6 +818,30 @@ User message
 → Final response
 ```
 
+### Session distillation
+
+Once a session reaches four turns, Lumen asks the LLM to extract durable facts
+from the conversation and writes them to memory, where they are recalled in
+later sessions. This is what lets the agent greet you already knowing who you
+are. The model chooses each fact's wording and importance.
+
+It can be turned off — for deployments where memory must hold only what the
+host application put there through `POST /api/memory/facts`:
+
+```bash
+LUMEN_DISTILL=0          # off
+LUMEN_DISTILL=1          # on (default)
+```
+
+Or in `config.yaml`:
+
+```yaml
+distill: false           # optional; default true
+```
+
+The environment variable wins over the file. With the switch off, nothing else
+changes: memory, recall and the facts API work exactly as before.
+
 ### Skills are instructions, not code
 
 Skills are markdown files the LLM reads on demand.
