@@ -715,7 +715,13 @@ class Brain:
             return empty
         return {
             "summary": summaries[0]["summary"] if summaries else "",
-            "facts": [f["fact"] for f in facts],
+            # Keep the category. It is loaded from the DB one line above and
+            # was dropped here, while the `memories` block right below renders
+            # it. Hosts that seed facts through `POST /api/memory/facts` use
+            # the category to say what a fact IS -- a profile, current state,
+            # something a human confirmed -- and none of it reached the model.
+            "facts": [{"fact": f["fact"], "category": f.get("category", "")}
+                      for f in facts],
         }
 
     async def _prepare_think_context(self, message: str, session: Session):
@@ -2300,11 +2306,23 @@ class Brain:
         # Cross-session continuity — who this user is, before any recall match
         continuity = context.get("continuity") or {}
         if continuity.get("summary") or continuity.get("facts"):
-            system_parts.append("\n## What I know from previous sessions")
+            # NOT "from previous sessions". These are durable facts, and a
+            # host application seeds current state through
+            # `POST /api/memory/facts` -- a medication schedule, an open
+            # alert. Labelling that as past made models treat today's truth
+            # as stale chatter and contradict it. The summary keeps its own
+            # prefix, because a summary IS from a previous session.
+            system_parts.append("\n## What I know about this user")
             if continuity.get("summary"):
                 system_parts.append(f"Last session: {continuity['summary']}")
             for fact in continuity.get("facts", []):
-                system_parts.append(f"- {fact}")
+                if isinstance(fact, dict):
+                    category = fact.get("category") or ""
+                    text = fact.get("fact", "")
+                    system_parts.append(
+                        f"- [{category}] {text}" if category else f"- {text}")
+                else:  # callers that still pass plain strings
+                    system_parts.append(f"- {fact}")
 
         # Relevant memories
         if context["memories"]:
