@@ -194,7 +194,7 @@ class Memory:
                 """
                 SELECT id, content, category, metadata, created_at
                 FROM memories
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -223,7 +223,7 @@ class Memory:
                 SELECT id, content, category, metadata, created_at
                 FROM memories
                 WHERE {like_clauses}
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT ?
                 """,
                 (*[f"%{term}%" for term in terms], limit),
@@ -250,7 +250,7 @@ class Memory:
         """List memories in a category, newest first."""
         rows = await self._db.execute_fetchall(
             "SELECT id, content, category, metadata, created_at "
-            "FROM memories WHERE category = ? ORDER BY created_at DESC LIMIT ?",
+            "FROM memories WHERE category = ? ORDER BY created_at DESC, id DESC LIMIT ?",
             (category, limit),
         )
         return [
@@ -438,7 +438,7 @@ class Memory:
         params.append(limit)
         rows = await self._db.execute_fetchall(
             "SELECT id, session_id, summary, fact_count, turn_count, created_at "
-            f"FROM session_summaries {where} ORDER BY created_at DESC LIMIT ?",
+            f"FROM session_summaries {where} ORDER BY created_at DESC, id DESC LIMIT ?",
             params,
         )
         return [
@@ -596,7 +596,7 @@ class Memory:
 
         rows = await self._db.execute_fetchall(
             f"SELECT id, output_id, session_id, type, content, metadata, created_at "
-            f"FROM outputs {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            f"FROM outputs {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
             params,
         )
         return [
