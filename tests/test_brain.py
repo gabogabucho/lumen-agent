@@ -2729,6 +2729,21 @@ class TestPersistenceResilience:
 # ── session continuity (issue #21) ───────────────────────────────────
 
 
+def _continuity_context(*, summary="", facts=None):
+    return {
+        "consciousness": "I am Lumen",
+        "personality": "assistant",
+        "body": "capabilities",
+        "catalog": "",
+        "active_flow": None,
+        "filled_slots": {},
+        "pending_slots": [],
+        "memories": [],
+        "available_flows": [],
+        "continuity": {"summary": summary, "facts": facts or []},
+    }
+
+
 class TestSessionContinuity:
     """The agent must start a conversation knowing the user — latest session
     summary and durable facts injected into context, not only recall()."""
@@ -2751,7 +2766,8 @@ class TestSessionContinuity:
         context, _, _ = await brain._prepare_think_context("Hola", Session())
 
         assert context["continuity"]["summary"] == "Hablamos de su pastilla verde"
-        assert context["continuity"]["facts"] == ["Se llama Humber"]
+        assert context["continuity"]["facts"] == [
+            {"fact": "Se llama Humber", "category": "identity"}]
 
     @pytest.mark.asyncio
     async def test_context_continuity_empty_when_no_history(self):
@@ -2787,10 +2803,48 @@ class TestSessionContinuity:
         }
         system_msg = brain._build_prompt(context, "Hola", Session())[0]["content"]
 
-        assert "previous sessions" in system_msg
+        # Not "previous sessions": a host application seeds current state
+        # through `POST /api/memory/facts`, and calling that past made models
+        # treat today's truth as stale chatter.
+        assert "What I know about this user" in system_msg
+        assert "previous sessions" not in system_msg
         assert "Hablamos de su pastilla verde" in system_msg
         assert "Se llama Humber" in system_msg
         assert "Le gusta el mate amargo" in system_msg
+
+    def test_prompt_shows_the_category_of_each_fact(self):
+        """The category says what a fact IS, and it was being dropped.
+
+        `list_session_facts` returns it, `_load_session_continuity` discarded
+        it one line later, and the `memories` block right below renders it.
+        A host that seeds `profile` and `current_alert` facts had no way to
+        tell the model which was which.
+        """
+        brain = _make_brain()
+        context = _continuity_context(facts=[
+            {"fact": "Takes the blue pill at 21:00", "category": "schedule"},
+            {"fact": "Pressed the help button", "category": "open_alert"},
+        ])
+        system_msg = brain._build_prompt(context, "Hola", Session())[0]["content"]
+
+        assert "[schedule] Takes the blue pill at 21:00" in system_msg
+        assert "[open_alert] Pressed the help button" in system_msg
+
+    def test_prompt_still_accepts_plain_strings(self):
+        """Callers outside this module may still pass strings."""
+        brain = _make_brain()
+        context = _continuity_context(facts=["Se llama Humber"])
+        system_msg = brain._build_prompt(context, "Hola", Session())[0]["content"]
+
+        assert "- Se llama Humber" in system_msg
+
+    def test_the_summary_is_still_labelled_as_past(self):
+        """A summary IS from a previous session. Only the heading was wrong."""
+        brain = _make_brain()
+        context = _continuity_context(summary="Hablamos de su pastilla verde")
+        system_msg = brain._build_prompt(context, "Hola", Session())[0]["content"]
+
+        assert "Last session: Hablamos de su pastilla verde" in system_msg
 
     def test_prompt_omits_continuity_section_when_empty(self):
         brain = _make_brain()
