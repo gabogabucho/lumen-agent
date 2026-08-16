@@ -14,6 +14,7 @@ The brain combines three sources into one prompt:
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import unicodedata
@@ -48,6 +49,47 @@ logger = logging.getLogger(__name__)
 # Resolved at Brain.__init__ time, so monkeypatching
 # `lumen.core.brain._llm_client_factory` takes effect for later instances.
 _llm_client_factory = build_llm_client
+
+_TRUTHY = {"1", "true", "yes", "on"}
+_FALSY = {"0", "false", "no", "off"}
+
+
+def _distillation_enabled(config: dict) -> bool:
+    """Whether session distillation runs. Default: on, as it always has.
+
+    Precedence, highest first:
+      1. `LUMEN_DISTILL` in the environment
+      2. `distill:` in config.yaml
+      3. on
+
+    Why an off switch exists: the distiller writes durable facts on its own,
+    with importance chosen by the model, from a prompt written for a coding
+    assistant ("project details", "auth keys"). An embedder whose domain is
+    regulated — health, care, finance — may need memory to hold only what its
+    own code put there. There was no way to say so short of patching the file.
+
+    An unrecognised value keeps the default and says so, because failing to
+    parse a safety switch must not read as "turned off".
+    """
+    raw = os.environ.get("LUMEN_DISTILL")
+    source = "LUMEN_DISTILL"
+    if raw is None or not raw.strip():
+        raw = config.get("distill")
+        source = "config `distill`"
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return raw
+
+    value = str(raw).strip().lower()
+    if value in _FALSY:
+        return False
+    if value in _TRUTHY:
+        return True
+    logger.warning(
+        "%s=%r is not a boolean; session distillation stays enabled", source, raw
+    )
+    return True
 
 
 class Brain:
@@ -126,11 +168,15 @@ class Brain:
         self._cached_lessons_text: str = ""  # Pre-loaded lessons for prompt injection
         self.workspace_index = workspace_index  # For ACL checks (Phase 3)
         self._last_user_email: str = ""  # Current user for ACL (set per-request)
+        # The distiller is built either way. A capability that exists and does
+        # not fire is easier to audit than one that is missing.
         self._distiller = SessionDistiller(
             memory=self.memory,
             model=self._resolved_model(),
             llm_client=self._llm_client,
         )
+        # Public on purpose: an embedder can flip it without env or config.
+        self.distillation_enabled = _distillation_enabled(self.config)
         self._distilled_sessions: set[str] = set()
 
     async def _persist_tool_output(
@@ -1864,7 +1910,8 @@ class Brain:
 
         # Phase 2.4: Session distillation — extract durable facts after enough turns
         if (
-            len(session.history) >= 4
+            self.distillation_enabled
+            and len(session.history) >= 4
             and scoped_session_id not in self._distilled_sessions
         ):
             self._distilled_sessions.add(scoped_session_id)
