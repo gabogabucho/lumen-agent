@@ -250,8 +250,9 @@ class FakeLLMClient:
         return _to_llm_response(item)
 
     async def stream(self, **kwargs):
-        # No brain test exercises streaming yet; yield the complete() result
-        # as a single chunk if one is ever requested.
+        # Yield the complete() result as a single chunk. Enough for
+        # TestThinkStreamFinalEvent, which is about what happens after the
+        # chunks, not about how many there were.
         response = await self.complete(**kwargs)
         yield LLMChunk(delta_content=response.content, finish_reason="stop")
 
@@ -2939,3 +2940,91 @@ class TestCurrentDateTimeInPrompt:
         brain = _make_brain(config={"locale": {"timezone": "Not/AZone"}})
         system_msg = brain._build_prompt(self._context(), "hola", Session())[0]["content"]
         assert "Current date and time" in system_msg
+
+
+# ── think_stream: the final event ─────────────────────────────────────
+
+
+class TestThinkStreamFinalEvent:
+    """The deltas are what the model produced. `final` is what Lumen said —
+    the string `_finalize_turn` persisted to memory. They diverge whenever the
+    capability guard or the contradiction retry rewrites the message, which
+    happens after the deltas are already out the door."""
+
+    async def _events(self, brain, message="hola"):
+        return [event async for event in brain.think_stream(message, Session())]
+
+    @pytest.mark.asyncio
+    async def test_final_carries_the_turn_text(self):
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+
+        with _patch_brain_llm(brain) as mock_llm:
+            mock_llm.return_value = _mock_llm_response("I can help with that!")
+            events = await self._events(brain)
+
+        assert events[-1]["type"] == "final"
+        assert events[-1]["content"] == "I can help with that!"
+
+    @pytest.mark.asyncio
+    async def test_final_differs_from_the_deltas_when_the_guard_rewrites(self):
+        # The case from TestGuardCapabilityClaims, streamed: the model affirms
+        # a capability that is not installed, the guard replaces the message,
+        # and the deltas that already went out say the opposite.
+        brain = _make_brain(
+            registry=Registry(),
+            catalog=_make_catalog(
+                [
+                    {
+                        "name": "x-lumen-comunicacion-telegram",
+                        "display_name": "Telegram",
+                        "description": "Telegram messaging",
+                        "tags": ["telegram"],
+                    }
+                ]
+            ),
+        )
+        brain.memory.recall = AsyncMock(return_value=[])
+        claim = "Sí, tengo Telegram configurado y listo para usar."
+
+        with _patch_brain_llm(brain) as mock_llm:
+            mock_llm.return_value = _mock_llm_response(claim)
+            events = await self._events(brain)
+
+        streamed = "".join(e["content"] for e in events if e["type"] == "delta")
+        finals = [e for e in events if e["type"] == "final"]
+
+        assert streamed == claim  # what the model produced
+        assert len(finals) == 1
+        assert "no tengo telegram instalado" in finals[0]["content"].lower()
+        # The whole point: a caller that stored the deltas would have kept a
+        # claim Lumen corrected, and memory would disagree with the client.
+        assert finals[0]["content"] != streamed
+
+    @pytest.mark.asyncio
+    async def test_short_circuit_paths_also_end_with_final(self):
+        # Flows and setup offers answer without reaching the LLM. They have to
+        # end the same way, or a caller cannot rely on `final` arriving.
+        brain = _make_brain()
+        events = [
+            event
+            async for event in brain._short_circuit_events(
+                Session(), "hola", {"message": "Listo."}
+            )
+        ]
+
+        assert [e["type"] for e in events] == ["delta", "final"]
+        assert events[-1]["content"] == "Listo."
+
+    @pytest.mark.asyncio
+    async def test_error_ends_the_stream_without_final(self):
+        # `error` is terminal. Emitting `final` after it would tell the caller
+        # the turn produced text when it did not.
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+
+        with _patch_brain_llm(brain, side_effect=RuntimeError("boom")):
+            events = await self._events(brain)
+
+        assert events[-1]["type"] == "error"
+        assert not [e for e in events if e["type"] == "final"]

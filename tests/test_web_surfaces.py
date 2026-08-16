@@ -538,6 +538,37 @@ class WebSurfaceTests(unittest.TestCase):
         self.assertEqual(web._brain.memory.calls, [("session-abc", 50)])
         self.assertIsNone(web.session_manager.get("session-abc"))
 
+    def test_websocket_renders_final_over_the_assembled_deltas(self):
+        """The dashboard has to show what Lumen said, not what the model
+        produced. When the two differ, `final` is the one that went to memory
+        — showing the deltas would leave the screen contradicting the log."""
+
+        class GuardedBrainStub(BrainStub):
+            async def think_stream(self, user_text, session):
+                self.think_calls += 1
+                self.last_think = {
+                    "user_text": user_text,
+                    "session_id": session.session_id,
+                    "history": list(session.history),
+                }
+                yield {"type": "delta", "content": "Si, tengo Telegram "}
+                yield {"type": "delta", "content": "configurado."}
+                yield {"type": "final", "content": "No tengo telegram instalado."}
+
+        web._brain = GuardedBrainStub()
+
+        with self.client.websocket_connect("/ws/session-final") as websocket:
+            websocket.send_text(json.dumps({"content": "tenes telegram?"}))
+
+            typing_on = json.loads(websocket.receive_text())
+            assistant = json.loads(websocket.receive_text())
+            typing_off = json.loads(websocket.receive_text())
+
+        self.assertEqual(typing_on, {"type": "typing", "status": True})
+        self.assertEqual(assistant["type"], "message")
+        self.assertEqual(assistant["content"], "No tengo telegram instalado.")
+        self.assertEqual(typing_off, {"type": "typing", "status": False})
+
     def test_websocket_ping_updates_last_seen_and_skips_brain_and_history(self):
         web._brain = BrainStub()
 

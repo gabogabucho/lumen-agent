@@ -3211,6 +3211,14 @@ async def api_chat(request: Request):
                     if chunk.get("type") == "delta":
                         text = chunk.get("content", "")
                         yield f"event: delta\ndata: {json.dumps({'text': text})}\n\n"
+                    elif chunk.get("type") == "final":
+                        # The turn's complete text, as persisted. Not the sum of
+                        # the deltas: the capability guard and the contradiction
+                        # retry can rewrite the message after they went out. A
+                        # client that persists the conversation should store
+                        # this. Clients that only listen to `delta` are
+                        # unaffected — this is its own event.
+                        yield f"event: final\ndata: {json.dumps({'text': chunk.get('content', '')})}\n\n"
                     elif chunk.get("type") == "error":
                         error_msg = chunk.get("content", "unknown error")
                         yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
@@ -3494,13 +3502,19 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 # so streaming them straight through meant the assistant's reply
                 # never appeared: typing on, typing off, nothing said.
                 #
-                # A delta carrying `_result` is the complete final message (tool
-                # rounds and flows emit it that way); the rest are increments.
-                # Mixing the two up would either duplicate the answer or drop it.
+                # `final` is the turn's text as persisted and wins over anything
+                # assembled here — the capability guard and the contradiction
+                # retry rewrite the message after the deltas are out. A delta
+                # carrying `_result` is the complete message too (tool rounds
+                # and flows emit it that way); the rest are increments. Mixing
+                # them up would either duplicate the answer or drop it.
                 partes: list[str] = []
                 completo: str | None = None
 
                 async for chunk in _brain.think_stream(user_text, session):
+                    if chunk.get("type") == "final":
+                        completo = chunk.get("content") or ""
+                        continue
                     if chunk.get("type") == "delta":
                         if "_result" in chunk:
                             completo = chunk.get("content") or ""
