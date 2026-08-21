@@ -25,7 +25,13 @@ class BrainStub:
         self.think_calls = []
 
     async def think(self, message, session):
-        self.think_calls.append({"message": message, "session_id": session.session_id})
+        self.think_calls.append({
+            "message": message,
+            "session_id": session.session_id,
+            "user_email": getattr(session, "user_email", None),
+            "team": getattr(session, "team", None),
+            "metadata": dict(getattr(session, "metadata", None) or {}),
+        })
         return {"message": f"Reply: {message}"}
 
     async def think_stream(self, message, session):
@@ -149,6 +155,43 @@ class RESTChatTests(unittest.TestCase):
             headers={"Authorization": "Bearer config-key-456"},
         )
         assert response.status_code == 200
+
+    def test_chat_rest_key_applies_actor_and_metadata(self):
+        """A host product names who this turn is for. Cookie not required."""
+        os.environ["LUMEN_API_KEY"] = "test-key-123"
+        web._brain = self.brain_stub
+        response = self.client.post(
+            "/api/chat",
+            json={
+                "message": "move the check-in",
+                "session_id": "turno-1",
+                "actor": {
+                    "email": "mariana@casa",
+                    "team": "familia-1",
+                    "role": "member",
+                    "workspace": "ambar-operador",
+                },
+                "metadata": {"ticket": "abc"},
+            },
+            headers={"Authorization": "Bearer test-key-123"},
+        )
+        assert response.status_code == 200
+        called = self.brain_stub.think_calls[-1]
+        assert called["user_email"] == "mariana@casa"
+        assert called["team"] == "familia-1"
+        assert called["metadata"]["ticket"] == "abc"
+
+    def test_chat_without_actor_leaves_session_unscoped(self):
+        os.environ["LUMEN_API_KEY"] = "test-key-123"
+        web._brain = self.brain_stub
+        self.client.post(
+            "/api/chat",
+            json={"message": "hello", "session_id": "plain"},
+            headers={"Authorization": "Bearer test-key-123"},
+        )
+        called = self.brain_stub.think_calls[-1]
+        assert called["user_email"] is None
+        assert called["metadata"] == {}
 
     # --- REQ-R1: Chat Request ---
 

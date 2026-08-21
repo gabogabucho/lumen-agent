@@ -25,6 +25,9 @@ class Session:
     team: str | None = None
     role: str | None = None
     enabled_skills: list[str] = field(default_factory=list)
+    #: Opaque bag for the caller (e.g. a host product attaching a ticket).
+    #: Tools that accept a `session` parameter can read it; the model cannot.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def touch(self):
         self.last_seen = time.time()

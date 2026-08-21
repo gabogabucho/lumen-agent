@@ -276,7 +276,9 @@ class ConnectorRegistry:
             raise ValueError(f"Unknown connector: {name}")
         return await connector.execute(action, params)
 
-    async def execute_tool(self, name: str, params: dict | None = None) -> Any:
+    async def execute_tool(
+        self, name: str, params: dict | None = None, session=None
+    ) -> Any:
         resolved = self._resolve_tool_name(name)
         tool = self._explicit_tools.get(resolved)
         if not tool:
@@ -285,4 +287,6 @@ class ConnectorRegistry:
         signature = inspect.signature(tool["handler"])
         if "config" in signature.parameters:
             call_params.setdefault("config", self.runtime_config)
+        if session is not None and "session" in signature.parameters:
+            call_params["session"] = session
         return await tool["handler"](**call_params)
