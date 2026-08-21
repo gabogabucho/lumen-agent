@@ -12,6 +12,7 @@ Risk levels:
 """
 
 import logging
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar
@@ -170,32 +171,97 @@ class ToolPolicy:
                     confirm_required=DEFAULT_CONFIRM_REQUIRED.get(risk, False),
                 )
 
+    def _entry_for(self, tool_key: str) -> ToolPolicyEntry:
+        """The entry for this key, creating it when the tool is not built in.
+
+        Overrides used to apply only `if tool_key in self._entries`, so they
+        worked for built-in connector actions and silently did nothing for
+        everything else. That is backwards: a built-in already has a sensible
+        default, and the tool that actually needs a policy written for it is
+        the one an embedder registered from a module or an MCP server. Those
+        fall through `get_policy` as "Unknown tool — requires confirmation",
+        and no config could say otherwise.
+
+        The failure was invisible in the worst way: the key was accepted, no
+        warning was logged, and the tool kept asking for a confirmation the
+        operator believed they had turned off.
+
+        `action=""` on purpose. A standalone tool is named by one string, and
+        `get_policy` matches the full name before it ever composes
+        `tool__action`. Splitting the name here is what forced callers to write
+        the action twice — `tool__action__action` — for `requires_confirmation`
+        to find the same key it had just been given.
+        """
+        entry = self._entries.get(tool_key)
+        if entry is None:
+            entry = ToolPolicyEntry(
+                tool_name=tool_key,
+                action="",
+                risk=ToolRisk.PRIVILEGED.value,
+                confirm_required=True,
+                description="Declared by config",
+            )
+            self._entries[tool_key] = entry
+        return entry
+
+    def _trusted_from_env(self) -> list[str]:
+        """Tools the operator declared safe through the environment.
+
+        Precedence, highest first:
+          1. `LUMEN_TRUSTED_TOOLS` in the environment
+          2. `tool_policy:` in config.yaml
+          3. nothing trusted
+
+        Why an environment switch exists: **a headless deployment has nobody to
+        confirm anything.** There is no dashboard and no operator watching, so
+        every confirmation resolves the same way — "Rejected by user
+        (timeout)" — and the agent, correctly, reports that failure to whoever
+        it is talking to. Confirmation there is not a safety gate; it is a
+        guaranteed denial with a slow clock.
+
+        For a deployment that runs one container per end user and is configured
+        entirely through the environment, editing a `config.yaml` that lives
+        inside a per-user volume is not a knob: it is state that cannot be
+        rebuilt from source.
+
+        Comma-separated. Whitespace and empty items are dropped so a trailing
+        comma cannot quietly trust an empty name.
+        """
+        raw = os.environ.get("LUMEN_TRUSTED_TOOLS")
+        if not raw or not raw.strip():
+            return []
+        return [name.strip() for name in raw.split(",") if name.strip()]
+
     def load_config(self, config: dict | None):
         """Load security config and custom overrides from user config."""
         self._security_config = SecurityConfig.from_config(config)
 
-        # Load custom overrides
-        if not config or not isinstance(config, dict):
-            return
-        overrides = config.get("tool_policy", {})
-        if not isinstance(overrides, dict):
-            return
+        overrides: dict = {}
+        if config and isinstance(config, dict):
+            candidate = config.get("tool_policy", {})
+            if isinstance(candidate, dict):
+                overrides = candidate
 
         # Override confirm_required for specific tools
         confirm_overrides = overrides.get("confirm_required", {})
         if isinstance(confirm_overrides, dict):
             for tool_key, required in confirm_overrides.items():
-                if tool_key in self._entries:
-                    self._entries[tool_key].confirm_required = bool(required)
+                self._entry_for(tool_key).confirm_required = bool(required)
 
         # Override risk for specific tools
         risk_overrides = overrides.get("risk_overrides", {})
         if isinstance(risk_overrides, dict):
             for tool_key, risk in risk_overrides.items():
-                if tool_key in self._entries:
-                    self._entries[tool_key].risk = risk
-                    # Update confirm based on new risk
-                    self._entries[tool_key].confirm_required = DEFAULT_CONFIRM_REQUIRED.get(risk, False)
+                entry = self._entry_for(tool_key)
+                entry.risk = risk
+                # Update confirm based on new risk
+                entry.confirm_required = DEFAULT_CONFIRM_REQUIRED.get(risk, False)
+
+        # The environment wins, because it is the only surface a headless
+        # deployment can set reproducibly from source.
+        for tool_key in self._trusted_from_env():
+            self._entry_for(tool_key).confirm_required = False
+            logger.info("tool %s trusted via LUMEN_TRUSTED_TOOLS", tool_key)
 
     def get_policy(self, tool_name: str, action: str = "") -> ToolPolicyEntry:
         """Get policy for a connector action or standalone tool."""
