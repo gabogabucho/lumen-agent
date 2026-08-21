@@ -3130,9 +3130,16 @@ def _validate_bearer_token(request: Request) -> str | None:
 async def api_chat(request: Request):
     """HTTP REST chat endpoint for external applications.
 
-    Body: {"message": "...", "session_id?": "...", "stream?": false}
+    Body: {"message": "...", "session_id?": "...", "stream?": false,
+           "actor?": {"email", "team", "role", "workspace"},
+           "metadata?": {...}}
     Response: {"response": "...", "session_id": "..."} or SSE stream
     Auth: Bearer token via LUMEN_API_KEY env or config.api.rest_key
+
+    `actor` is service impersonation: a host product (rest_key) names who this
+    turn is for so memory prefixes and skill ACL apply. The dashboard cookie
+    still wins when present. `metadata` is copied onto the session for tools
+    that accept a `session` argument — the model never sees it as a tool arg.
     """
     auth_error = _validate_bearer_token(request)
     if auth_error:
@@ -3159,7 +3166,21 @@ async def api_chat(request: Request):
 
     session_id = body.get("session_id")
     session = session_manager.get_or_create(session_id)
-    _apply_workspace_session_context(session, _request_auth_payload(request, _load_config()))
+    auth_payload = _request_auth_payload(request, _load_config())
+    if not (auth_payload and auth_payload.get("scope") == "workspace"):
+        actor = body.get("actor") if isinstance(body.get("actor"), dict) else None
+        if actor:
+            auth_payload = {
+                "scope": "workspace",
+                "workspace": str(actor.get("workspace") or "default"),
+                "email": actor.get("email"),
+                "team": actor.get("team"),
+                "role": actor.get("role") or "member",
+            }
+    _apply_workspace_session_context(session, auth_payload)
+    meta = body.get("metadata") if isinstance(body.get("metadata"), dict) else None
+    if meta:
+        session.metadata = dict(meta)
 
     # Parse stream flag — only literal True enables streaming
     stream = body.get("stream") is True

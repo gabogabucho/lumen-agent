@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **REST `/api/chat` actor + metadata**: a host authenticated with `rest_key`
+  can name who this turn is for (`actor.email/team/role/workspace`) so workspace
+  memory prefixes apply without a dashboard cookie. `metadata` is copied onto
+  the session. Tool handlers that accept a `session` argument receive it;
+  the model never sees that bag as a parameter. Backward compatible: omit both
+  fields and nothing changes.
+
 ## [1.3.4] - 2026-06-10
 
 ### Fixed

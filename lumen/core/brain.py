@@ -3271,7 +3271,7 @@ class Brain:
                         params = json.loads(func.arguments) if func.arguments else {}
                         params = self._coerce_args(params, func.name, tools)
                         tool_result = await self.connectors.execute_tool(
-                            func.name, params
+                            func.name, params, session=session
                         )
                         all_tool_calls.append(
                             {"name": func.name, "result": tool_result}
@@ -3523,7 +3523,7 @@ class Brain:
                         params = json.loads(func.arguments) if func.arguments else {}
                         params = self._coerce_args(params, tool_name, tools)
                         tool_result = await self.connectors.execute_tool(
-                            tool_name, params
+                            tool_name, params, session=session
                         )
                     else:
                         connector_name, action = self.connectors.parse_tool_name(
