@@ -1,0 +1,7 @@
+feat(ui): clean i18n support and svg favicon
+
+- Extracted SVG favicon from PR #15
+- Replaced logo.png references with favicon.svg across all templates
+- Added language selector dropdown to settings_general.html
+- Injected `ui` object to settings routes in web.py for dynamic translations
+- Added missing translation keys to both es/ui.yaml and en/ui.yaml

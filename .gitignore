@@ -56,3 +56,17 @@ dev-archive/
 .agents/
 .codex/
 .lumen-local/
+# migracion-vps: exclusiones de seguridad
+.env*
+!.env.example
+!.env.sample
+!.env.template
+*.pem
+*.key
+credentials*.json
+*service-account*.json
+node_modules/
+.wrangler/
+.astro/
+__pycache__/
+.claude/worktrees/
