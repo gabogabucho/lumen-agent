@@ -81,6 +81,26 @@ _WS_USER_CONTEXT = None  # WorkspaceUser from JWT for the current WS connection
 LUMEN_DIR = Path.home() / ".lumen"
 CONFIG_PATH = LUMEN_DIR / "config.yaml"
 PKG_DIR = Path(__file__).parent.parent
+
+
+def capability_watch_dirs(lumen_dir: Path, pkg_dir: Path) -> list[Path]:
+    """Directorios que vigila el FilePoller para recargar en caliente.
+
+    Incluye los roots de superficies, especialistas y (aunque el MVP no los
+    procese todavía) máquinas, para que instalar un manifiesto dispare el
+    refresh del Registry sin reiniciar. Solo devuelven los que existen.
+    """
+    candidates = [
+        lumen_dir / "modules",
+        pkg_dir / "skills",
+        lumen_dir / "surfaces",
+        pkg_dir / "surfaces",
+        lumen_dir / "agents",
+        pkg_dir / "agents",
+        lumen_dir / "machines",
+        pkg_dir / "machines",
+    ]
+    return [d for d in candidates if d.exists()]
 OPENROUTER_AUTH_URL = "https://openrouter.ai/auth"
 OPENROUTER_KEYS_URL = "https://openrouter.ai/api/v1/auth/keys"
 OPENROUTER_CURATED_MODELS = {
@@ -1554,9 +1574,7 @@ async def lifespan(app: FastAPI):
     if _brain and _awareness:
         from lumen.core.watchers import FilePoller
 
-        modules_dir = LUMEN_DIR / "modules"
-        skills_dir = PKG_DIR / "skills"
-        watched = [d for d in [modules_dir, skills_dir] if d.exists()]
+        watched = capability_watch_dirs(LUMEN_DIR, PKG_DIR)
 
         async def _on_file_change():
             """Called by FilePoller when filesystem changes detected."""

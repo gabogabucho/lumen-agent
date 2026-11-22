@@ -36,6 +36,7 @@ from lumen.core.personality import Personality
 from lumen.core.registry import CapabilityKind, Registry
 from lumen.core.model_router import ModelRouter, ModelRouterConfig
 from lumen.core.provider_health import ProviderHealthTracker
+from lumen.core.surfaces import build_render_surface_tool, execute_render_surface
 from lumen.core.tool_policy import ToolPolicy, ToolRisk
 from lumen.core.confirmation_gate import ConfirmationGate, ConfirmDecision
 from lumen.core.session import Session
@@ -120,6 +121,7 @@ class Brain:
         provider_health: ProviderHealthTracker | None = None,
         workspace_index=None,
         llm_client: LLMClient | None = None,
+        surface_renderer=None,
     ):
         self.consciousness = consciousness
         self.personality = personality
@@ -165,6 +167,9 @@ class Brain:
         self.confirmation_gate = ConfirmationGate()
         self._last_detected_language: str = self.language
         self._current_messages: list[dict] | None = None  # For contradiction retry
+        # Puente opcional al Surface Service (F4): async (surface, data, id) -> dict.
+        # Sin transport conectado, la tool responde surface_unavailable sin mentir.
+        self._surface_renderer = surface_renderer
         self._cached_lessons_text: str = ""  # Pre-loaded lessons for prompt injection
         self.workspace_index = workspace_index  # For ACL checks (Phase 3)
         self._last_user_email: str = ""  # Current user for ACL (set per-request)
@@ -801,6 +806,13 @@ class Brain:
 
         # 3. Build tools
         tools = self.connectors.as_tools() or []
+
+        # Tool de superficies: enum armado desde el Registry en cada turno.
+        # No se cachea: una superficie instalada o confirmada aparece en el
+        # turno siguiente sin reiniciar.
+        surface_tool = build_render_surface_tool(self.registry)
+        if surface_tool is not None:
+            tools.append(surface_tool)
 
         # Add read_skill tool — progressive disclosure (from OpenClaw pattern)
         tools.append(
@@ -1537,6 +1549,33 @@ class Brain:
             )
 
         return {"found": len(modules), "modules": modules}
+
+    async def _render_surface(self, arguments: str) -> dict:
+        """Puerta de ejecución de render_surface.
+
+        Valida el estado de la superficie ANTES de emitir un render: si la
+        superficie dejó de estar READY, responde con error estructurado y no
+        toca la shell. Con un transport conectado (surface_renderer), delega
+        el render; sin transport, responde surface_unavailable sin mentir.
+        """
+        try:
+            params = json.loads(arguments) if arguments else {}
+        except (TypeError, json.JSONDecodeError):
+            params = {}
+        if not isinstance(params, dict):
+            params = {}
+
+        surface = str(params.get("surface") or "").strip()
+        data = params.get("data") if isinstance(params.get("data"), dict) else {}
+        render_id = params.get("id") if isinstance(params.get("id"), str) else None
+
+        async def _default_render(surface_name: str, _data: dict, _render_id):
+            return {"ok": False, "error": "surface_unavailable", "surface": surface_name}
+
+        renderer = self._surface_renderer or _default_render
+        return await execute_render_surface(
+            self.registry, surface=surface, data=data, render=renderer, id=render_id
+        )
 
     def _check_capability(self, arguments: str) -> dict:
         """Verify whether a specific capability exists and is ready.
@@ -3267,6 +3306,11 @@ class Brain:
                         all_tool_calls.append(
                             {"name": func.name, "result": tool_result}
                         )
+                    elif func.name == "render_surface":
+                        tool_result = await self._render_surface(func.arguments)
+                        all_tool_calls.append(
+                            {"name": func.name, "result": tool_result}
+                        )
                     elif self.connectors.has_tool(func.name):
                         params = json.loads(func.arguments) if func.arguments else {}
                         params = self._coerce_args(params, func.name, tools)
@@ -3519,6 +3563,8 @@ class Brain:
                         tool_result = await self._save_artifact_setup(func.arguments)
                     elif tool_name == "neo__check_capability":
                         tool_result = self._check_capability(func.arguments)
+                    elif tool_name == "render_surface":
+                        tool_result = await self._render_surface(func.arguments)
                     elif self.connectors.has_tool(tool_name):
                         params = json.loads(func.arguments) if func.arguments else {}
                         params = self._coerce_args(params, tool_name, tools)

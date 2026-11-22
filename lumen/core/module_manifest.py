@@ -3,6 +3,9 @@
 Preferred manifest order:
 1. module.yaml
 2. manifest.yaml
+
+Contrato de versión: todo manifiesto declara ``manifest_version``. El alias
+``lumen_api`` sigue aceptándose por compatibilidad con el catálogo anterior.
 """
 
 from __future__ import annotations
@@ -16,6 +19,73 @@ import yaml
 logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAMES = ("module.yaml", "manifest.yaml")
+
+SUPPORTED_MANIFEST_VERSION = 1
+
+_paths_warned_missing_version: set[str] = set()
+
+
+class ManifestVersionError(ValueError):
+    """El manifiesto declara una versión de contrato que no se puede cargar."""
+
+
+def _manifest_major(value: Any, field_name: str) -> int:
+    """Acepta entero o string con semver ("1", "1.2.3") y devuelve el major."""
+    if isinstance(value, bool):
+        raise ManifestVersionError(f"invalid {field_name}: {value!r}")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        major = value.strip().split(".", 1)[0].strip()
+        if major.isdigit():
+            return int(major)
+    raise ManifestVersionError(f"invalid {field_name}: {value!r}")
+
+
+def parse_manifest_version(manifest: dict[str, Any]) -> tuple[int, bool]:
+    """Devuelve (major, defaulted) del manifiesto.
+
+    - ``manifest_version`` es el campo canónico: entero o semver en string.
+    - ``lumen_api`` es alias de compatibilidad; si ambos están y los majors
+      difieren, es un conflicto de contrato.
+    - Si no hay ninguno, se asume v1 (``defaulted=True``).
+    """
+    manifest_version = manifest.get("manifest_version")
+    lumen_api = manifest.get("lumen_api")
+
+    if manifest_version is None and lumen_api is None:
+        return (SUPPORTED_MANIFEST_VERSION, True)
+
+    if manifest_version is not None and lumen_api is not None:
+        major_version = _manifest_major(manifest_version, "manifest_version")
+        major_alias = _manifest_major(lumen_api, "lumen_api")
+        if major_version != major_alias:
+            raise ManifestVersionError(
+                f"manifest_version {major_version} conflicts with lumen_api {major_alias}; supported: 1"
+            )
+        return (major_version, False)
+
+    if manifest_version is not None:
+        return (_manifest_major(manifest_version, "manifest_version"), False)
+    return (_manifest_major(lumen_api, "lumen_api"), False)
+
+
+def validate_manifest_version(manifest: dict[str, Any], *, path: str) -> int:
+    """Valida la versión del manifiesto y devuelve su major.
+
+    Lanza ManifestVersionError si el major no está soportado. En manifiestos
+    sin versión avisa una sola vez por path y sigue con v1.
+    """
+    major, defaulted = parse_manifest_version(manifest)
+
+    if defaulted and path and path not in _paths_warned_missing_version:
+        _paths_warned_missing_version.add(path)
+        logger.warning("manifest missing manifest_version; assuming v1: %s", path)
+
+    if major != SUPPORTED_MANIFEST_VERSION:
+        raise ManifestVersionError(f"unsupported manifest_version {major}; supported: 1")
+
+    return major
 
 _RESERVED_FILENAMES = {
     "CON",

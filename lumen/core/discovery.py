@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 
+from lumen.core.agents import load_agent_manifest, register_agent_manifest
 from lumen.core.artifact_setup import (
     contract_from_mcp_server,
     contract_from_opaque_manifest,
@@ -30,7 +31,11 @@ from lumen.core.cerebellum import (
     normalize_skill_reference,
 )
 from lumen.core.connectors import ConnectorRegistry
-from lumen.core.module_manifest import load_module_manifest
+from lumen.core.module_manifest import (
+    ManifestVersionError,
+    load_module_manifest,
+    validate_manifest_version,
+)
 from lumen.core.module_setup import pending_setup_for_manifest
 from lumen.core.registry import (
     Capability,
@@ -38,6 +43,7 @@ from lumen.core.registry import (
     CapabilityStatus,
     Registry,
 )
+from lumen.core.surfaces import load_surface_manifest, register_surface_manifest
 
 
 def discover_all(
@@ -78,6 +84,29 @@ def discover_all(
 
     _discover_connectors(registry, connectors)
     _discover_modules_multi(registry, module_roots, config=config)
+
+    # Superficies declarativas (surfaces/<name>/surface.yaml): globales y
+    # dentro de cada módulo instalado. Van antes de los agentes para que
+    # agent.yaml pueda resolver sus `surfaces:` contra el Registry.
+    surface_roots: list[Path] = []
+    module_name_by_root: dict[str, str] = {}
+    if lumen_dir is not None:
+        surface_roots.append(lumen_dir / "surfaces")
+    surface_roots.append(pkg_dir / "surfaces")
+    seen_module_dirs: set[str] = set()
+    for modules_dir in module_roots:
+        if not modules_dir.exists():
+            continue
+        for module_dir in modules_dir.iterdir():
+            if not module_dir.is_dir() or module_dir.name.startswith("_") or module_dir.name in seen_module_dirs:
+                continue
+            seen_module_dirs.add(module_dir.name)
+            surfaces_dir = module_dir / "surfaces"
+            if surfaces_dir.exists():
+                surface_roots.append(surfaces_dir)
+                module_name_by_root[str(surfaces_dir)] = module_dir.name
+    _discover_surfaces(registry, surface_roots, module_name_by_root=module_name_by_root)
+
     _discover_channels(registry, active_channels or ["web"])
     _discover_module_channels_multi(registry, module_roots)
 
@@ -93,6 +122,29 @@ def discover_all(
     # Second pass: validate skill dependencies
     # If a skill requires a connector that has no handler, mark it as MISSING_DEPS
     _validate_skill_deps(registry)
+
+    # Especialistas (agents/<name>/agent.yaml) al final: necesitan skills y
+    # superficies ya resueltas en el Registry para no declarar READY algo que
+    # la segunda pasada deja missing_deps.
+    agent_roots: list[Path] = []
+    agent_module_by_root: dict[str, str] = {}
+    if lumen_dir is not None:
+        agent_roots.append(lumen_dir / "agents")
+    agent_roots.append(pkg_dir / "agents")
+    seen_agent_module_dirs: set[str] = set()
+    for modules_dir in module_roots:
+        if not modules_dir.exists():
+            continue
+        for module_dir in modules_dir.iterdir():
+            if not module_dir.is_dir() or module_dir.name.startswith("_") or module_dir.name in seen_agent_module_dirs:
+                continue
+            seen_agent_module_dirs.add(module_dir.name)
+            agents_dir = module_dir / "agents"
+            if agents_dir.exists():
+                agent_roots.append(agents_dir)
+                agent_module_by_root[str(agents_dir)] = module_dir.name
+    _discover_agents(registry, agent_roots, connectors=connectors, module_name_by_root=agent_module_by_root)
+
     annotate_registry(registry, connectors, model=model)
 
     return registry
@@ -383,6 +435,19 @@ def _discover_modules_multi(
                 manifest_file, manifest = load_module_manifest(module_dir)
                 if manifest_file is None:
                     continue
+                try:
+                    validate_manifest_version(manifest, path=str(manifest_file))
+                except ManifestVersionError as exc:
+                    registry.register(
+                        Capability(
+                            kind=CapabilityKind.MODULE,
+                            name=module_dir.name,
+                            description="Failed to parse manifest",
+                            status=CapabilityStatus.ERROR,
+                            metadata={"error": str(exc)},
+                        )
+                    )
+                    continue
                 normalized = normalize_module_manifest(
                     manifest,
                     installed=True,
@@ -448,6 +513,101 @@ def _discover_modules_multi(
                         name=module_dir.name,
                         description="Failed to parse manifest",
                         status=CapabilityStatus.ERROR,
+                    )
+                )
+
+
+def _discover_surfaces(
+    registry: Registry,
+    surface_roots: list[Path],
+    *,
+    module_name_by_root: dict[str, str] | None = None,
+) -> None:
+    """Registra ``CapabilityKind.SURFACE`` desde ``surfaces/*/surface.yaml``.
+
+    Misma forma que ``_discover_modules_multi``: la precedencia la da el
+    orden de los roots (el primero gana si se repite el nombre), los
+    directorios que arrancan con ``_`` se ignoran y cada manifiesto roto
+    queda aislado en ``ERROR`` sin abortar el resto. El discovery es
+    puramente local: no abre el ``renderer`` ni toca la red, y nunca deja
+    una superficie READY (el renderer lo confirma la shell vía hello).
+    """
+    module_name_by_root = module_name_by_root or {}
+    seen: set[str] = set()
+    for surfaces_dir in surface_roots:
+        if not surfaces_dir.exists():
+            continue
+        for surface_dir in surfaces_dir.iterdir():
+            if not surface_dir.is_dir() or surface_dir.name.startswith("_") or surface_dir.name in seen:
+                continue
+            manifest_path = surface_dir / "surface.yaml"
+            if not manifest_path.exists():
+                continue
+            seen.add(surface_dir.name)
+            module_name = module_name_by_root.get(str(surfaces_dir))
+            try:
+                manifest = load_surface_manifest(manifest_path)
+                register_surface_manifest(
+                    registry, manifest, path=surface_dir, module_name=module_name
+                )
+            except Exception as exc:
+                registry.register(
+                    Capability(
+                        kind=CapabilityKind.SURFACE,
+                        name=surface_dir.name,
+                        description="Failed to parse manifest",
+                        status=CapabilityStatus.ERROR,
+                        metadata={
+                            "error": str(exc),
+                            "path": str(surface_dir),
+                            "module_name": module_name,
+                        },
+                    )
+                )
+
+
+def _discover_agents(
+    registry: Registry,
+    agent_roots: list[Path],
+    *,
+    connectors=None,
+    module_name_by_root: dict[str, str] | None = None,
+) -> None:
+    """Registra ``CapabilityKind.AGENT`` desde ``agents/*/agent.yaml``.
+
+    Misma forma que ``_discover_modules_multi``: precedencia por orden de
+    roots, ``_`` ignorado y error por manifiesto aislado.
+    """
+    module_name_by_root = module_name_by_root or {}
+    seen: set[str] = set()
+    for agents_dir in agent_roots:
+        if not agents_dir.exists():
+            continue
+        for agent_dir in agents_dir.iterdir():
+            if not agent_dir.is_dir() or agent_dir.name.startswith("_") or agent_dir.name in seen:
+                continue
+            manifest_path = agent_dir / "agent.yaml"
+            if not manifest_path.exists():
+                continue
+            seen.add(agent_dir.name)
+            module_name = module_name_by_root.get(str(agents_dir))
+            try:
+                manifest = load_agent_manifest(manifest_path)
+                register_agent_manifest(
+                    registry, manifest, connectors=connectors, module_name=module_name
+                )
+            except Exception as exc:
+                registry.register(
+                    Capability(
+                        kind=CapabilityKind.AGENT,
+                        name=agent_dir.name,
+                        description="Failed to parse manifest",
+                        status=CapabilityStatus.ERROR,
+                        metadata={
+                            "error": str(exc),
+                            "path": str(agent_dir),
+                            "module_name": module_name,
+                        },
                     )
                 )
 
