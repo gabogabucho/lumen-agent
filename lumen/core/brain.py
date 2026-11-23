@@ -1550,6 +1550,17 @@ class Brain:
 
         return {"found": len(modules), "modules": modules}
 
+    def set_surface_renderer(self, renderer) -> None:
+        """Conecta (o desconecta con ``None``) el transporte de render.
+
+        Acepta el mismo tipo que el parámetro ``surface_renderer`` del
+        constructor: ``(surface, data, render_id) -> dict`` (sync o async).
+        Se puede llamar en cualquier momento del ciclo de vida del Brain,
+        después de ``bootstrap_runtime`` incluido, para que un kit enchufe su
+        shell sin tocar atributos privados.
+        """
+        self._surface_renderer = renderer
+
     async def _render_surface(self, arguments: str) -> dict:
         """Puerta de ejecución de render_surface.
 

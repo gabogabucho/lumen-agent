@@ -79,23 +79,86 @@ class ConfirmationGate:
     If no handler is set, the gate auto-approves (backward compat).
     """
 
+    # Name reserved for the channel handler installed via ``set_handler``.
+    # ``register_handler`` refuses to reuse it so the legacy slot stays unique.
+    _CHANNEL_HANDLER_NAME = "__channel__"
+
     def __init__(self, timeout: int = 60):
         self.timeout = timeout
-        self._handler: ConfirmHandler | None = None
+        self._handlers: list[dict[str, Any]] = []
+        self._handler_seq = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._history: list[dict[str, Any]] = []
 
     def set_handler(self, handler: ConfirmHandler) -> None:
-        """Register the channel-specific confirmation handler."""
-        self._handler = handler
+        """Register the channel-specific confirmation handler.
+
+        Kept as-is for backward compatibility (``web.py`` uses it): it replaces
+        the channel slot of the ordered chain. Handlers added with
+        ``register_handler`` stay in place, so a module can defer and let the
+        channel decide. With no registered handlers this is the only handler,
+        exactly like before.
+        """
+        self._handlers = [
+            item
+            for item in self._handlers
+            if item["name"] != self._CHANNEL_HANDLER_NAME
+        ]
+        self._add_handler(handler, self._CHANNEL_HANDLER_NAME, 100)
+
+    def register_handler(
+        self,
+        handler: ConfirmHandler,
+        *,
+        name: str,
+        order: int = 100,
+    ) -> Callable[[], None]:
+        """Add a handler to the ordered chain. Returns an unregister token.
+
+        Handlers run by ascending ``order`` (ties keep registration order). The
+        first response that is not a deferral ends the chain; a ``REJECTED``
+        whose message starts with ``deferred:`` passes to the next handler.
+        """
+        if name == self._CHANNEL_HANDLER_NAME:
+            raise ValueError(f"handler name {name!r} is reserved")
+        item = self._add_handler(handler, name, order)
+
+        def _unregister() -> None:
+            if item in self._handlers:
+                self._handlers.remove(item)
+
+        return _unregister
+
+    def _add_handler(
+        self, handler: ConfirmHandler, name: str, order: int
+    ) -> dict[str, Any]:
+        self._handler_seq += 1
+        item = {
+            "handler": handler,
+            "name": name,
+            "order": order,
+            "seq": self._handler_seq,
+        }
+        self._handlers.append(item)
+        return item
 
     def clear_handler(self) -> None:
-        """Remove the handler (e.g. on channel disconnect)."""
-        self._handler = None
+        """Remove the channel handler (e.g. on channel disconnect).
+
+        Module handlers registered with ``register_handler`` are left intact.
+        """
+        self._handlers = [
+            item
+            for item in self._handlers
+            if item["name"] != self._CHANNEL_HANDLER_NAME
+        ]
 
     @property
     def has_handler(self) -> bool:
-        return self._handler is not None
+        return bool(self._handlers)
+
+    def _ordered_handlers(self) -> list[dict[str, Any]]:
+        return sorted(self._handlers, key=lambda item: (item["order"], item["seq"]))
 
     async def ask(
         self,
@@ -122,7 +185,8 @@ class ConfirmationGate:
         )
 
         # No handler — auto-approve (backward compat for CLI/non-interactive)
-        if not self._handler:
+        handlers = self._ordered_handlers()
+        if not handlers:
             logger.debug("No confirmation handler — auto-approving %s", call_id)
             self._record(request, ConfirmDecision.AUTO_APPROVED)
             return ConfirmResponse(
@@ -131,31 +195,86 @@ class ConfirmationGate:
                 message="Auto-approved (no handler)",
             )
 
-        # Create a future that the handler or resolve() will set
+        # Create a future that a handler or resolve() can set
         loop = asyncio.get_running_loop()
         future: asyncio.Future[ConfirmResponse] = loop.create_future()
         self._pending[call_id] = future
 
+        last_rejected: ConfirmResponse | None = None
         try:
-            # Call the handler (non-blocking — it should yield the request to the client)
-            handler_task = asyncio.create_task(self._handler(request))
+            for item in handlers:
+                try:
+                    result = await self._invoke_handler(item["handler"], request, future)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Confirmation timeout for %s (%ds)", call_id, self.timeout
+                    )
+                    self._record(request, ConfirmDecision.TIMEOUT)
+                    return ConfirmResponse(
+                        call_id=call_id,
+                        decision=ConfirmDecision.TIMEOUT,
+                        message=f"Timed out after {self.timeout}s",
+                    )
+                except Exception:
+                    # Pattern of invoke_inbound_hooks: failures pass through.
+                    logger.exception(
+                        "confirmation handler %r failed; passing through", item["name"]
+                    )
+                    continue
 
-            # Wait for response with timeout
-            try:
-                result = await asyncio.wait_for(future, timeout=self.timeout)
+                if result is None:
+                    continue
+
+                if (
+                    result.decision == ConfirmDecision.REJECTED
+                    and str(result.message or "").startswith("deferred:")
+                ):
+                    last_rejected = result
+                    continue
+
+                self._record(request, result.decision)
                 return result
-            except asyncio.TimeoutError:
-                logger.warning("Confirmation timeout for %s (%ds)", call_id, self.timeout)
-                self._record(request, ConfirmDecision.TIMEOUT)
-                # Cancel the handler task if still running
-                handler_task.cancel()
-                return ConfirmResponse(
-                    call_id=call_id,
-                    decision=ConfirmDecision.TIMEOUT,
-                    message=f"Timed out after {self.timeout}s",
-                )
+
+            if last_rejected is not None:
+                self._record(request, last_rejected.decision)
+                return last_rejected
+
+            # Handlers existed but none answered: never auto-approve silently.
+            self._record(request, ConfirmDecision.TIMEOUT)
+            return ConfirmResponse(
+                call_id=call_id,
+                decision=ConfirmDecision.TIMEOUT,
+                message="No confirmation handler responded",
+            )
         finally:
             self._pending.pop(call_id, None)
+
+    async def _invoke_handler(
+        self,
+        handler: ConfirmHandler,
+        request: ConfirmRequest,
+        future: asyncio.Future,
+    ) -> ConfirmResponse | None:
+        """Run one handler, racing its return value with ``resolve()``."""
+        task = asyncio.create_task(handler(request))
+        try:
+            done, _ = await asyncio.wait(
+                {task, future},
+                timeout=self.timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if task in done:
+                result = task.result()
+                if result is not None:
+                    return result
+            if future in done:
+                return future.result()
+            if task in done:
+                return None
+            raise asyncio.TimeoutError
+        finally:
+            if not task.done():
+                task.cancel()
 
     def resolve(self, call_id: str, decision: ConfirmDecision, message: str = "") -> bool:
         """Resolve a pending confirmation (called by the channel when user responds).
