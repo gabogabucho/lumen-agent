@@ -909,6 +909,144 @@ class TestToolUseLoop:
         assert "invoke" not in result
 
 
+class TestDSMLRepeatedPipesVariant:
+    REAL_DSML_RESPONSE = (
+        "<｜｜DSML｜｜ calls>\n"
+        "\n"
+        '<｜｜DSML｜｜ invoke name=\\"neo__read_skill\\">\n'
+        "\n"
+        '<｜｜DSML｜｜ parameter name=\\"skill\\" string=\\"true\\">x-pegaseum-superficies</｜｜DSML｜｜ parameter>\n'
+        "\n"
+        "</｜｜DSML｜｜ invoke>\n"
+        "\n"
+        "</｜｜DSML｜｜ calls>\n"
+    )
+
+    def test_extracts_name_and_params_from_real_response(self):
+        calls = _make_brain()._extract_fallback_tool_calls(
+            self.REAL_DSML_RESPONSE, _test_tools("neo__read_skill")
+        )
+
+        assert len(calls) == 1
+        assert calls[0].function.name == "neo__read_skill"
+        assert json.loads(calls[0].function.arguments) == {
+            "skill": "x-pegaseum-superficies"
+        }
+
+    @pytest.mark.parametrize(
+        "pipes,wrapper,space",
+        [
+            ("｜", "calls", ""),
+            ("|", "calls", " "),
+            ("｜｜", "tool_calls", " "),
+            ("|||", "tool_calls", ""),
+            ("｜|", "calls", "   "),
+        ],
+    )
+    def test_extracts_envelope_with_repeated_pipes_and_optional_spaces(
+        self, pipes, wrapper, space
+    ):
+        opening = f"<{pipes}DSML{pipes}{space}{wrapper}>"
+        closing = f"</{pipes}DSML{pipes}{space}{wrapper}>"
+        content = (
+            f'{opening}[{{"name":"test_conn","arguments":{{"input":"check"}}}}]{closing}'
+        )
+
+        calls = _make_brain()._extract_fallback_tool_calls(content, _test_tools("test_conn"))
+
+        assert len(calls) == 1
+        assert calls[0].function.name == "test_conn"
+        assert json.loads(calls[0].function.arguments) == {"input": "check"}
+
+    def test_extracts_invoke_with_repeated_pipes_and_unescaped_quotes(self):
+        content = (
+            "<||DSML|| invoke name=\"test_conn\">"
+            "<||DSML|| parameter name=\"input\" string=\"true\">check</||DSML|| parameter>"
+            "</||DSML|| invoke>"
+        )
+
+        calls = _make_brain()._extract_fallback_tool_calls(content, _test_tools("test_conn"))
+
+        assert len(calls) == 1
+        assert json.loads(calls[0].function.arguments) == {"input": "check"}
+
+    def test_legacy_single_bar_invoke_still_parses(self):
+        content = (
+            '<｜DSML｜invoke name="test_conn">'
+            '<｜DSML｜parameter name="input" string="true">check</｜DSML｜parameter>'
+            "</｜DSML｜invoke>"
+        )
+
+        calls = _make_brain()._extract_fallback_tool_calls(content, _test_tools("test_conn"))
+
+        assert len(calls) == 1
+        assert calls[0].function.name == "test_conn"
+        assert json.loads(calls[0].function.arguments) == {"input": "check"}
+
+    def test_legacy_ascii_single_bar_envelope_still_parses(self):
+        content = (
+            '<|DSML|tool_calls>[{"name":"test_conn","arguments":{"input":"check"}}]'
+            "</|DSML|tool_calls>"
+        )
+
+        calls = _make_brain()._extract_fallback_tool_calls(content, _test_tools("test_conn"))
+
+        assert len(calls) == 1
+        assert json.loads(calls[0].function.arguments) == {"input": "check"}
+
+    def test_shape_detection_and_sanitization_for_real_response(self):
+        assert Brain._has_serialized_tool_call_shape(self.REAL_DSML_RESPONSE) is True
+
+        cleaned = Brain._sanitize_raw_tool_content(self.REAL_DSML_RESPONSE)
+
+        assert "DSML" not in cleaned
+        assert "invoke" not in cleaned
+        assert "calls" not in cleaned
+        assert cleaned == ""
+
+    def test_sanitization_keeps_surrounding_text(self):
+        raw = f"antes\n{self.REAL_DSML_RESPONSE}después"
+
+        cleaned = Brain._sanitize_raw_tool_content(raw)
+
+        assert "DSML" not in cleaned
+        assert "antes" in cleaned
+        assert "después" in cleaned
+
+    @pytest.mark.asyncio
+    async def test_real_response_runs_tool_and_final_message_is_clean(self):
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+        brain._read_skill = MagicMock(return_value={"ok": True})
+        fallback_response = _mock_llm_response(content=self.REAL_DSML_RESPONSE)
+        final_response = _mock_llm_response("Done!")
+
+        with _patch_brain_llm(brain) as mock_llm:
+            mock_llm.side_effect = [fallback_response, final_response]
+            result = await brain.think("use the skill", Session())
+
+        assert result["message"] == "Done!"
+        brain._read_skill.assert_called_once_with('{"skill": "x-pegaseum-superficies"}')
+
+    @pytest.mark.asyncio
+    async def test_real_response_never_leaks_when_parser_is_disabled(self):
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+        fallback_response = _mock_llm_response(content=self.REAL_DSML_RESPONSE)
+        final_response = _mock_llm_response("Done!")
+
+        with _patch_brain_llm(brain) as mock_llm, patch.object(
+            brain, "_extract_fallback_tool_calls", return_value=[]
+        ):
+            mock_llm.side_effect = [fallback_response, final_response]
+            result = await brain.think("use the skill", Session())
+
+        assert "DSML" not in result["message"]
+        assert "invoke" not in result["message"]
+
+
 # ---- _coerce_args ------------------------------------------------------------
 
 
