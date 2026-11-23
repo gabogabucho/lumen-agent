@@ -21,11 +21,57 @@ def classify_capability(capability: "Capability | dict[str, Any]") -> dict[str, 
 
     kind = _value(_read(capability, "kind"))
     name = str(_read(capability, "name") or "this capability")
+    status = _value(_read(capability, "status"))
     metadata = _read(capability, "metadata") or {}
     tags = {str(tag).lower() for tag in metadata.get("tags", [])}
     path = str(metadata.get("path") or "").replace("\\", "/").lower()
     x_lumen = metadata.get("x_lumen") or metadata.get("x-lumen") or {}
     adoption_note = awareness_interoperability_note(capability)
+
+    # Specialist kits must win over the generic kit heuristic so a new agent
+    # with personality tags is announced as a specialist, not as a persona.
+    if kind == "agent":
+        if status == "ready":
+            announce_text = f"Tengo un especialista nuevo: {name}. Puedo delegarle trabajo."
+        else:
+            blocker = _status_blocker_label(status)
+            announce_text = f"{name} está instalado, pero todavía le falta {blocker}."
+        if adoption_note:
+            announce_text = f"{announce_text} {adoption_note['sentence']}"
+        return {
+            "kind_label": "agent",
+            "body_effect": _append_note(
+                "This adds a specialist I can delegate work to.", adoption_note
+            ),
+            "mind_effect": _append_note(
+                "It extends who I can coordinate with inside my own team.",
+                adoption_note,
+            ),
+            "announce_text": announce_text,
+        }
+
+    if kind == "surface":
+        if status == "ready":
+            announce_text = f"Ahora puedo mostrarte {name}."
+        else:
+            announce_text = (
+                f"Guardé la superficie {name}, pero la interfaz todavía no me "
+                "confirmó cómo dibujarla."
+            )
+        if adoption_note:
+            announce_text = f"{announce_text} {adoption_note['sentence']}"
+        return {
+            "kind_label": "surface",
+            "body_effect": _append_note(
+                "This adds something new I can draw in the interface.",
+                adoption_note,
+            ),
+            "mind_effect": _append_note(
+                "It changes how I can make what I know visible.",
+                adoption_note,
+            ),
+            "announce_text": announce_text,
+        }
 
     is_kit = kind == "kit" or x_lumen.get("product_kind") == "kit"
     if "personality" in tags or "/catalog/kits/" in path or path.startswith("kits/"):
@@ -92,3 +138,8 @@ def _append_note(base: str, note: dict[str, str] | None) -> str:
     if not note:
         return base
     return f"{base} {note['sentence']}"
+
+
+def _status_blocker_label(status: Any) -> str:
+    label = str(status or "").strip().replace("_", " ")
+    return label or "configuración"

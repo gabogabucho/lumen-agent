@@ -83,7 +83,20 @@ class CapabilityAwareness:
                     f"I sensed {cap.name}. It is with me now, but it still needs "
                     f"{missing} setup value{'s' if missing != 1 else ''} before I can use it fully."
                 )
+            # Una superficie sin renderer solo se anuncia en el prompt: afirmar
+            # que ya se puede mostrar sería mentir sobre la interfaz.
+            if (
+                cap.kind.value == "surface"
+                and cap.status.value == "no_renderer"
+            ):
+                return None
             announce = event.announce_text()
+            # Descubierto no significa usable. Si todavía no está listo, el
+            # pensamiento repite el anuncio honesto en vez de "ya puedo".
+            if not cap.is_ready():
+                return announce or (
+                    f"I sensed {cap.name}, but it is not ready to use yet."
+                )
             if announce:
                 return f"I sensed {cap.name}. I know I can work with it now. {announce}"
             return f"I sensed {cap.name}. I know I can work with it now."
@@ -92,6 +105,10 @@ class CapabilityAwareness:
         if event.is_removal():
             return f"I stopped sensing {cap.name}. I no longer have it with me."
         if event.kind == "capability_degraded":
+            if cap.kind.value == "surface":
+                return event.announce_text() or (
+                    f"Perdí el renderer de {cap.name}; ya no puedo mostrarla."
+                )
             to_status = event.details.get("to", "unknown")
             return f"My connection with {cap.name} weakened and is now {to_status}."
         return None
@@ -121,9 +138,18 @@ class CapabilityAwareness:
         self._pending_thoughts.clear()
         self._proactive_done = True
 
+        # No anunciar más de cinco ítems. Si hay más, mostramos tres y
+        # ofrecemos contar el resto cuando el usuario pregunte.
+        extra = 0
+        if len(thoughts) > 5:
+            extra = len(thoughts) - 3
+            thoughts = thoughts[:3]
+
         lines = ["## Something shifted in what I sense and know", ""]
         for thought in thoughts:
             lines.append(f"- {thought}")
+        if extra:
+            lines.append(f"- y {extra} cambios más que puedo contarte si preguntás.")
         lines.append("")
         lines.append(
             "Briefly and naturally tell the user about this. "
@@ -147,17 +173,29 @@ class CapabilityAwareness:
         # or proactive wasn't needed)
         self._pending_thoughts.clear()
 
-        lines = ["## Something shifted in what I sense and know", ""]
-
-        for event in events:
-            lines.append(f"- {event.summary()}")
-
-        lines.append("")
-        lines.append(
+        header = ["## Something shifted in what I sense and know", ""]
+        footer = [
+            "",
             "You may mention this naturally if it seems relevant. "
-            "Use your own words — not technical jargon."
-        )
-        return "\n".join(lines)
+            "Use your own words — not technical jargon.",
+        ]
+
+        event_lines = [f"- {event.summary()}" for event in events]
+        shown = event_lines[:40]
+        omitted = len(event_lines) - len(shown)
+
+        while True:
+            note = f"- (+{omitted} cambios más)" if omitted else None
+            lines = header + shown + footer
+            if note:
+                lines.append(note)
+            text = "\n".join(lines)
+            if len(text) <= 4000:
+                return text
+            if not shown:
+                return text[:4000]
+            shown.pop()
+            omitted += 1
 
     def peek_summary(self) -> dict:
         """Structured awareness payload for runtime surfaces and UI."""

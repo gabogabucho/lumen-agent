@@ -30,11 +30,14 @@ class CapabilityKind(str, Enum):
     CHANNEL = "channel"
     MCP = "mcp"
     LIBRARY = "library"
+    SURFACE = "surface"  # Declarative surface with schema + renderer
+    AGENT = "agent"  # Specialist kit (personality + skills + tools)
 
 
 class CapabilityStatus(str, Enum):
     READY = "ready"  # Fully functional
     AVAILABLE = "available"  # Declared but not configured
+    NO_RENDERER = "no_renderer"  # Surface with schema but no confirmed renderer
     MISSING_HANDLER = "no_handler"  # Connector without implementation
     MISSING_DEPS = "missing_deps"  # Requirements not met
     ERROR = "error"  # Failed to load/connect
@@ -317,6 +320,9 @@ def _describe_not_ready_blocker(capability: Capability) -> str:
     if capability.status == CapabilityStatus.ERROR:
         return "currently failing and cannot be used"
 
+    if capability.status == CapabilityStatus.NO_RENDERER:
+        return "missing a renderer confirmed by the shell before it can be shown"
+
     if capability.status == CapabilityStatus.MISSING_DEPS:
         return "missing required dependencies before it can work"
 
@@ -378,7 +384,7 @@ def _readiness_event_kind(capability: Capability) -> str | None:
     if not capability.is_ready():
         return None
     kind_label = classify_capability(capability)["kind_label"]
-    if kind_label in {"mind", "transformation"}:
+    if kind_label in {"mind", "transformation", "agent"}:
         return "capability_integrated"
     return "capability_connected"
 
@@ -407,6 +413,7 @@ def _status_rank(status: CapabilityStatus) -> int:
     return {
         CapabilityStatus.READY: 4,
         CapabilityStatus.AVAILABLE: 3,
+        CapabilityStatus.NO_RENDERER: 2,
         CapabilityStatus.MISSING_HANDLER: 2,
         CapabilityStatus.MISSING_DEPS: 2,
         CapabilityStatus.ERROR: 1,

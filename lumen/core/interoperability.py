@@ -146,6 +146,8 @@ def _value(raw: Any) -> Any:
 
 def _runtime_source_type(capability: "Capability | dict[str, Any]") -> str:
     kind = str(_value(_read(capability, "kind")) or "").strip().lower()
-    if kind in {"skill", "module", "mcp", "connector", "channel"}:
+    # Los manifiestos propios (surface.yaml, agent.yaml, machine.yaml) son
+    # nativos: no vienen de un ecosistema externo ni van con nota de puente.
+    if kind in {"skill", "module", "mcp", "connector", "channel", "surface", "agent"}:
         return "runtime"
     return kind or "runtime"

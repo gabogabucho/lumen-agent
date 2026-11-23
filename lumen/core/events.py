@@ -85,6 +85,14 @@ class CapabilityEvent:
         cap = self.capability
         lens = _display_lens(self.classification()["kind_label"])
         note = awareness_interoperability_note(cap)
+        if cap.kind.value == "surface":
+            return _append_interoperability_summary(
+                _surface_summary(self.kind, cap, self.details), note
+            )
+        if cap.kind.value == "agent":
+            return _append_interoperability_summary(
+                _agent_summary(self.kind, cap, self.details), note
+            )
         if self.kind == "capability_discovered":
             summary = f"+ discovered {cap.name} ({cap.kind.value}, {lens}): {cap.description}"
             pending_setup = self.details.get("pending_setup") or cap.metadata.get("pending_setup")
@@ -126,6 +134,8 @@ _LENS_DISPLAY = {
     "hands": "connection",
     "mind": "thinking",
     "transformation": "transformation",
+    "surface": "surface",
+    "agent": "agent",
 }
 
 
@@ -151,3 +161,47 @@ def _pending_setup_names(pending_setup: dict[str, Any] | None) -> str:
     specs = (pending_setup or {}).get("env_specs") or []
     names = [str(spec.get("name") or "").strip() for spec in specs if spec.get("name")]
     return ", ".join(names)
+
+
+def _surface_summary(kind: str, cap: Any, details: dict[str, Any]) -> str:
+    if kind == "capability_discovered":
+        if cap.status.value == "no_renderer":
+            return (
+                f"~ superficie {cap.name}: definida, sin renderer confirmado; "
+                "disponible como artifact si hace falta"
+            )
+        return f"+ superficie {cap.name}: lista para mostrarse — {_surface_hint(cap)}"
+    if kind in {"capability_connected", "capability_integrated"}:
+        return f"+ superficie {cap.name}: lista para mostrarse — {_surface_hint(cap)}"
+    if kind == "capability_degraded":
+        frm = details.get("from", "?")
+        to = details.get("to", "?")
+        return f"~ superficie {cap.name} (degraded): {frm} → {to}"
+    if kind == "capability_removed":
+        return f"- superficie {cap.name}: ya no está"
+    return f"? superficie {cap.name}: {kind}"
+
+
+def _surface_hint(cap: Any) -> str:
+    metadata = cap.metadata or {}
+    hint = str(metadata.get("when_to_use") or cap.description or "").strip()
+    return " ".join(hint.split()) or "lista para mostrarse"
+
+
+def _agent_summary(kind: str, cap: Any, details: dict[str, Any]) -> str:
+    metadata = cap.metadata or {}
+    if kind in {"capability_discovered", "capability_integrated", "capability_connected"}:
+        skills = ", ".join(metadata.get("skills") or []) or "ninguna"
+        surfaces = ", ".join(metadata.get("surfaces") or []) or "ninguna"
+        min_capability = metadata.get("min_capability") or "tier-1"
+        return (
+            f"+ especialista {cap.name}: {cap.description} "
+            f"[skills: {skills}; superficies: {surfaces}; modelo mínimo: {min_capability}]"
+        )
+    if kind == "capability_degraded":
+        frm = details.get("from", "?")
+        to = details.get("to", "?")
+        return f"~ especialista {cap.name} (degraded): {frm} → {to}"
+    if kind == "capability_removed":
+        return f"- especialista {cap.name}: ya no está"
+    return f"? especialista {cap.name}: {kind}"
