@@ -158,12 +158,50 @@ class ToolPolicy:
         self._entries: dict[str, ToolPolicyEntry] = {}
         self._security_config = SecurityConfig()
         self._custom_overrides: dict[str, dict[str, Any]] = {}
+        self._module_keys: set[str] = set()
+        self._config_keys: set[str] = set()
+
+    def upsert_entry(
+        self,
+        tool_name: str,
+        action: str = "",
+        *,
+        risk: str,
+        confirm_required: bool,
+        description: str = "",
+    ) -> None:
+        """Declare or replace the policy of a tool at runtime.
+
+        Keys match ``get_policy`` (tool_policy.py:266): a standalone tool is
+        keyed by its name, a connector action by ``tool_name__action``.
+        An explicit config entry wins over a module declaration.
+        """
+        key = f"{tool_name}__{action}" if action else tool_name
+        if key in self._config_keys:
+            return
+        entry = self._entries.get(key)
+        if entry is None:
+            entry = ToolPolicyEntry(
+                tool_name=tool_name,
+                action=action,
+                risk=risk,
+                confirm_required=confirm_required,
+                description=description,
+            )
+            self._entries[key] = entry
+        else:
+            entry.risk = risk
+            entry.confirm_required = confirm_required
+            entry.description = description
+        self._module_keys.add(key)
 
     def load_defaults(self):
         """Load default risk assignments for built-in connectors."""
         for connector, actions in DEFAULT_TOOL_RISK.items():
             for action, risk in actions.items():
                 key = f"{connector}__{action}"
+                if key in self._module_keys:
+                    continue
                 self._entries[key] = ToolPolicyEntry(
                     tool_name=connector,
                     action=action,
@@ -247,6 +285,7 @@ class ToolPolicy:
         if isinstance(confirm_overrides, dict):
             for tool_key, required in confirm_overrides.items():
                 self._entry_for(tool_key).confirm_required = bool(required)
+                self._config_keys.add(tool_key)
 
         # Override risk for specific tools
         risk_overrides = overrides.get("risk_overrides", {})
@@ -256,11 +295,13 @@ class ToolPolicy:
                 entry.risk = risk
                 # Update confirm based on new risk
                 entry.confirm_required = DEFAULT_CONFIRM_REQUIRED.get(risk, False)
+                self._config_keys.add(tool_key)
 
         # The environment wins, because it is the only surface a headless
         # deployment can set reproducibly from source.
         for tool_key in self._trusted_from_env():
             self._entry_for(tool_key).confirm_required = False
+            self._config_keys.add(tool_key)
             logger.info("tool %s trusted via LUMEN_TRUSTED_TOOLS", tool_key)
 
     def get_policy(self, tool_name: str, action: str = "") -> ToolPolicyEntry:

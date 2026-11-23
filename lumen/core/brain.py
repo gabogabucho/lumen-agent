@@ -12,6 +12,7 @@ The brain combines three sources into one prompt:
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -19,8 +20,9 @@ import re
 import time
 import unicodedata
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 from types import SimpleNamespace
 
 import yaml
@@ -44,6 +46,36 @@ from lumen.core.distiller import SessionDistiller
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolAuditEvent:
+    """A single tool execution, observable by external auditors."""
+
+    tool_name: str
+    action: str
+    params: dict[str, Any]
+    result: Any = None
+    error: str = ""
+    duration_ms: float = 0.0
+    session_id: str = ""
+
+
+def _audit_params(arguments: str | None) -> dict[str, Any]:
+    try:
+        params = json.loads(arguments) if arguments else {}
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return params if isinstance(params, dict) else {}
+
+
+def _audit_error(result: Any, explicit: str = "") -> str:
+    if explicit:
+        return explicit
+    if isinstance(result, dict) and result.get("error"):
+        return str(result["error"])
+    return ""
+
 
 # Module-level seam: tests (and embedders) can override the default client
 # factory without threading an LLMClient through every Brain() call.
@@ -165,6 +197,8 @@ class Brain:
         self.tool_policy.load_defaults()
         self.tool_policy.load_config(config)
         self.confirmation_gate = ConfirmationGate()
+        self._tool_audit_hooks: list[dict[str, Any]] = []
+        self._tool_audit_seq = 0
         self._last_detected_language: str = self.language
         self._current_messages: list[dict] | None = None  # For contradiction retry
         # Puente opcional al Surface Service (F4): async (surface, data, id) -> dict.
@@ -255,6 +289,57 @@ class Brain:
             description=policy.description,
         )
         return response.decision
+
+    def register_tool_audit_hook(
+        self,
+        hook: Callable[[ToolAuditEvent], Awaitable[None]],
+        *,
+        name: str,
+    ) -> Callable[[], None]:
+        """Subscribe an auditor to tool executions. Returns an unregister token."""
+        if not callable(hook):
+            raise TypeError("tool audit hook must be callable")
+        self._tool_audit_seq += 1
+        item = {"hook": hook, "name": name, "seq": self._tool_audit_seq}
+        self._tool_audit_hooks.append(item)
+
+        def _unregister() -> None:
+            if item in self._tool_audit_hooks:
+                self._tool_audit_hooks.remove(item)
+
+        return _unregister
+
+    async def _emit_tool_audit_event(
+        self,
+        *,
+        tool_name: str,
+        action: str,
+        params: dict[str, Any],
+        result: Any,
+        error: str,
+        started_at: float,
+        session: Session | None,
+    ) -> None:
+        if not self._tool_audit_hooks:
+            return
+        event = ToolAuditEvent(
+            tool_name=tool_name,
+            action=action,
+            params=params,
+            result=result,
+            error=_audit_error(result, error),
+            duration_ms=max((time.perf_counter() - started_at) * 1000, 0.001),
+            session_id=str(getattr(session, "session_id", "") or ""),
+        )
+        for item in list(self._tool_audit_hooks):
+            try:
+                outcome = item["hook"](event)
+                if inspect.isawaitable(outcome):
+                    await outcome
+            except Exception:
+                logger.exception(
+                    "tool audit hook %r failed; continuing turn", item["name"]
+                )
 
     def _tool_key_to_skill(self, tool_name: str, action: str) -> str:
         if tool_name.startswith("neo__"):
@@ -3290,6 +3375,8 @@ class Brain:
                     logger.info("Tool %s blocked: %s", tool_name, reason)
                     continue
 
+                tool_error = ""
+                started_at = time.perf_counter()
                 try:
                     # Introspection tools (neo__*) are handled by the brain
                     if func.name == "neo__read_skill":
@@ -3349,13 +3436,26 @@ class Brain:
                             }
                         )
                 except Exception as e:
-                    tool_result = {"error": str(e)}
-                    all_tool_calls.append({"name": func.name, "error": str(e)})
+                    tool_error = str(e)
+                    tool_result = {"error": tool_error}
+                    all_tool_calls.append({"name": func.name, "error": tool_error})
                     consecutive_errors += 1
                 else:
                     consecutive_errors = 0
                     # Persist non-trivial tool results as structured outputs
                     await self._persist_tool_output(func.name, tool_result)
+
+                # Only executions are audited; ACL and confirmation denials
+                # never reach a tool handler (brain.py:3249, 3274).
+                await self._emit_tool_audit_event(
+                    tool_name=func.name,
+                    action=action,
+                    params=_audit_params(func.arguments),
+                    result=tool_result,
+                    error=tool_error,
+                    started_at=started_at,
+                    session=session,
+                )
 
                 # Add tool result to messages for the LLM
                 messages.append(
@@ -3562,6 +3662,7 @@ class Brain:
                     "total_calls": len(all_tool_calls) + 1,
                 }
 
+                started_at = time.perf_counter()
                 try:
                     # Execute tool (same logic as _tool_use_loop)
                     if tool_name == "neo__read_skill":
@@ -3619,6 +3720,16 @@ class Brain:
                     }
                 else:
                     consecutive_errors = 0
+
+                await self._emit_tool_audit_event(
+                    tool_name=tool_name,
+                    action=act,
+                    params=_audit_params(func.arguments),
+                    result=tool_result,
+                    error=tool_error or "",
+                    started_at=started_at,
+                    session=session,
+                )
 
                 # Add tool result to messages for the LLM
                 messages.append(
