@@ -186,6 +186,31 @@ class ModuleRuntimeContext:
         if name not in self.registered_tools:
             self.registered_tools.append(name)
 
+    def register_tool_policy(
+        self,
+        tool_name: str,
+        action: str = "",
+        *,
+        risk: str,
+        confirm_required: bool,
+        description: str = "",
+    ) -> None:
+        """Declare a tool's policy in the Brain used by the confirmation gate.
+
+        ``Brain._check_tool_confirmation`` reads ``brain.tool_policy``
+        (brain.py:241), so modules declare there instead of owning a policy.
+        """
+        policy = getattr(self.brain, "tool_policy", None)
+        if policy is None:
+            raise RuntimeError("Brain tool policy not available")
+        policy.upsert_entry(
+            tool_name,
+            action,
+            risk=risk,
+            confirm_required=confirm_required,
+            description=description,
+        )
+
     def unregister_registered_tools(self) -> None:
         if self.connectors is None:
             return
