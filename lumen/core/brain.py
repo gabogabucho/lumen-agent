@@ -86,6 +86,28 @@ _llm_client_factory = build_llm_client
 _TRUTHY = {"1", "true", "yes", "on"}
 _FALSY = {"0", "false", "no", "off"}
 
+# DSML tags: one or more fullwidth/ASCII pipes, optional spaces, and either
+# wrapper name.  Shared by the parser, shape detector and sanitizer
+# (lumen/core/brain.py:2748, :2934 and :3187).
+_DSML_OPEN = r"<\s*[｜|]+\s*DSML\s*[｜|]+\s*"
+_DSML_CLOSE = r"<\s*/\s*[｜|]+\s*DSML\s*[｜|]+\s*"
+_DSML_QUOTE = r'\\?"'
+_DSML_ENVELOPE_RE = re.compile(
+    rf"{_DSML_OPEN}(?P<wrapper>tool_calls|calls)\s*>(?P<payload>.*?)"
+    rf"{_DSML_CLOSE}(?P=wrapper)\s*>",
+    re.DOTALL,
+)
+_DSML_INVOKE_RE = re.compile(
+    rf'{_DSML_OPEN}invoke\s+name={_DSML_QUOTE}(?P<name>[^"\\]+){_DSML_QUOTE}\s*>'
+    rf"(?P<params>.*?){_DSML_CLOSE}invoke\s*>",
+    re.DOTALL,
+)
+_DSML_PARAM_RE = re.compile(
+    rf'{_DSML_OPEN}parameter\s+name={_DSML_QUOTE}(?P<name>[^"\\]+){_DSML_QUOTE}'
+    rf"[^>]*>(?P<value>.*?){_DSML_CLOSE}parameter\s*>",
+    re.DOTALL,
+)
+
 
 def _distillation_enabled(config: dict) -> bool:
     """Whether session distillation runs. Default: on, as it always has.
@@ -2762,14 +2784,10 @@ class Brain:
         if parsed:
             return parsed
 
-        # DeepSeek DSML tool_calls envelope
-        # <｜DSML｜tool_calls>[{"name":"tool__action","arguments":{...}}]</｜DSML｜tool_calls>
-        # Also accepts <|DSML|tool_calls> with ASCII pipe (U+007C).
-        for match in re.finditer(
-            r"<[｜|]DSML[｜|]tool_calls>(.*?)</[｜|]DSML[｜|]tool_calls>", msg_content, re.DOTALL
-        ):
+        # DeepSeek DSML tool_calls/calls envelope
+        for match in _DSML_ENVELOPE_RE.finditer(msg_content):
             try:
-                raw = match.group(1).strip()
+                raw = match.group("payload").strip()
                 if raw.startswith("["):
                     payloads = json.loads(raw)
                 else:
@@ -2784,22 +2802,13 @@ class Brain:
             return parsed
 
         # DeepSeek DSML format
-        # <｜DSML｜invoke name="tool__action">
-        #   <｜DSML｜parameter name="command" string="true">value</｜DSML｜parameter>
-        # </｜DSML｜invoke>
-        # Also accepts <|DSML|...> with ASCII pipe (U+007C).
-        dsml_pattern = r'<[｜|]DSML[｜|]invoke name="([^"]+)">(.*?)</[｜|]DSML[｜|]invoke>'
-        for match in re.finditer(dsml_pattern, msg_content, re.DOTALL):
+        for match in _DSML_INVOKE_RE.finditer(msg_content):
             try:
-                name = match.group(1)
-                params_block = match.group(2)
+                name = match.group("name")
+                params_block = match.group("params")
                 arguments = {}
-                for param_match in re.finditer(
-                    r'<[｜|]DSML[｜|]parameter name="([^"]+)"[^>]*>(.*?)</[｜|]DSML[｜|]parameter>',
-                    params_block,
-                    re.DOTALL,
-                ):
-                    arguments[param_match.group(1)] = param_match.group(2)
+                for param_match in _DSML_PARAM_RE.finditer(params_block):
+                    arguments[param_match.group("name")] = param_match.group("value")
                 _materialize({"name": name, "arguments": arguments})
             except Exception:
                 pass
@@ -2933,10 +2942,6 @@ class Brain:
 
         markers = (
             "<tool_call>",
-            "<｜DSML｜tool_calls>",
-            "<|DSML|tool_calls>",
-            "<｜DSML｜invoke ",
-            "<|DSML|invoke ",
             '<invoke name="',
             "[TOOL_CALLS]",
             "<functions>",
@@ -2947,6 +2952,8 @@ class Brain:
             '<function name="',
         )
         if any(marker in stripped for marker in markers):
+            return True
+        if re.search(rf"{_DSML_OPEN}(?:tool_calls|calls|invoke)\b", stripped):
             return True
 
         if stripped.startswith("{") and stripped.endswith("}"):
@@ -3186,19 +3193,9 @@ class Brain:
         """
         if not content:
             return content
-        # DSML (Unicode fullwidth or ASCII pipe)
-        content = re.sub(
-            r"<[｜|]DSML[｜|]tool_calls>.*?</[｜|]DSML[｜|]tool_calls>",
-            "",
-            content,
-            flags=re.DOTALL,
-        )
-        content = re.sub(
-            r"<[｜|]DSML[｜|]invoke\b[^>]*>.*?</[｜|]DSML[｜|]invoke>",
-            "",
-            content,
-            flags=re.DOTALL,
-        )
+        # DSML (Unicode fullwidth or ASCII pipes, repeated or single)
+        content = _DSML_ENVELOPE_RE.sub("", content)
+        content = _DSML_INVOKE_RE.sub("", content)
         # Generic XML tags that look like tool calls
         for tag in ("tool_call", "tool_calls", "function_call", "function_calls"):
             content = re.sub(
