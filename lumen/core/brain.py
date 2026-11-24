@@ -1178,7 +1178,9 @@ class Brain:
 
         return await self._finalize_turn(session, message, result)
 
-    def _build_synthetic_response(self, content: str, buffered_tool_calls: list[dict]):
+    def _build_synthetic_response(
+        self, content: str, buffered_tool_calls: list[dict], finish_reason: str | None = None
+    ):
         """Build a synthetic response object from streamed tool call fragments."""
         from types import SimpleNamespace
 
@@ -1219,7 +1221,7 @@ class Brain:
             },
         )
 
-        choice = SimpleNamespace(message=msg)
+        choice = SimpleNamespace(message=msg, finish_reason=finish_reason)
         return SimpleNamespace(choices=[choice])
 
     @staticmethod
@@ -1422,9 +1424,14 @@ class Brain:
         buffered_tool_calls = []
         has_tool_calls = False
         content_buffer = ""  # Buffer content when tool_calls are detected
+        stream_finish_reason = None
 
         async for chunk in _chained_chunks():
             finish_reason = chunk.finish_reason
+            if finish_reason and (
+                finish_reason == "length" or not stream_finish_reason
+            ):
+                stream_finish_reason = finish_reason
 
             # Emit reasoning/thinking tokens (DeepSeek R1, Claude extended thinking, etc.)
             rc = chunk.delta_reasoning_content
@@ -1473,7 +1480,7 @@ class Brain:
         if has_tool_calls and buffered_tool_calls:
             # Build synthetic response and run tool use loop (streaming version)
             synthetic_response = self._build_synthetic_response(
-                full_content, buffered_tool_calls
+                full_content, buffered_tool_calls, finish_reason=stream_finish_reason
             )
             result = None
             async for event in self._tool_use_loop_streaming(
@@ -2675,7 +2682,7 @@ class Brain:
             "supports_native_tools": True,
             "requires_parser_fallback": False,
             "completion_temperature": 0.7,
-            "completion_max_tokens": 1024,
+            "completion_max_tokens": self._max_completion_tokens(),
             "proactive_temperature": 0.7,
             "proactive_max_tokens": 150,
             "role_style": "system",
@@ -3240,6 +3247,62 @@ class Brain:
         except Exception:
             return 3
 
+    def _max_completion_tokens(self) -> int:
+        """Read llm.max_tokens from config (default 1024)."""
+        try:
+            llm_config = self.config.get("llm", {})
+            value = llm_config.get("max_tokens", 1024)
+            if isinstance(value, bool) or not isinstance(value, (int, str)):
+                return 1024
+            max_tokens = int(value)
+            return max_tokens if max_tokens > 0 else 1024
+        except (AttributeError, TypeError, ValueError):
+            return 1024
+
+    @classmethod
+    def _invalid_tool_call_feedback(cls, msg, finish_reason: str | None) -> str | None:
+        """Explain an unusable native tool call back to the model."""
+        native_calls = getattr(msg, "tool_calls", None) or []
+        if not native_calls:
+            return None
+        name = next(
+            (
+                found
+                for call in native_calls
+                if (found := cls._tool_call_name(call))
+            ),
+            "unknown",
+        )
+        if finish_reason == "length":
+            detail = (
+                "The call was cut off by the token limit (finish_reason=length): "
+                "send a shorter payload or split it into parts."
+            )
+        else:
+            detail = "The JSON arguments were invalid or incomplete."
+        return (
+            f"Your tool call to {name} arrived with invalid or truncated arguments. "
+            f"{detail} Retry with complete, valid JSON arguments."
+        )
+
+    async def _retry_invalid_tool_call(self, msg, choice, messages, tools):
+        """Give the model another iteration after an unusable tool call."""
+        finish_reason = getattr(choice, "finish_reason", None)
+        feedback = self._invalid_tool_call_feedback(msg, finish_reason)
+        if feedback is None:
+            return None
+        logger.warning(
+            "invalid_tool_call: native tool call unresolved (finish_reason=%s) — retrying with feedback",
+            finish_reason,
+        )
+        messages.append({"role": "user", "content": feedback})
+        try:
+            options = self._completion_options(purpose="main", tools=tools)
+            return await self._acomplete(options=options, messages=messages)
+        except Exception:
+            logger.exception("invalid_tool_call: retry completion failed")
+            return None
+
     async def _tool_use_loop(
         self,
         response,
@@ -3263,7 +3326,7 @@ class Brain:
         partial_text = ""
         consecutive_errors = 0
 
-        for _ in range(max_iterations):
+        for iteration in range(max_iterations):
             choice = response.choices[0]
             msg = choice.message
             if msg.content:
@@ -3276,6 +3339,15 @@ class Brain:
             )
 
             tool_calls = self._resolve_tool_calls(msg, tools)
+
+            # Native call present but unusable: tell the model and retry
+            if not tool_calls and iteration + 1 < max_iterations:
+                retried = await self._retry_invalid_tool_call(
+                    msg, choice, messages, tools
+                )
+                if retried is not None:
+                    response = retried
+                    continue
 
             # No tool calls — we have the final text response
             if not tool_calls:
@@ -3535,6 +3607,15 @@ class Brain:
                 partial_text = msg.content
 
             tool_calls = self._resolve_tool_calls(msg, tools)
+
+            # Native call present but unusable: tell the model and retry
+            if not tool_calls and iteration + 1 < max_iterations:
+                retried = await self._retry_invalid_tool_call(
+                    msg, choice, messages, tools
+                )
+                if retried is not None:
+                    response = retried
+                    continue
 
             # No tool calls — we have the final text response
             if not tool_calls:
