@@ -883,8 +883,22 @@ class Brain:
                       for f in facts],
         }
 
-    async def _prepare_think_context(self, message: str, session: Session):
+    async def _prepare_think_context(
+        self,
+        message: str,
+        session: Session,
+        *,
+        internal_instruction: str | None = None,
+        ephemeral_history: list[dict] | None = None,
+        append_user_message: bool = True,
+    ):
         """Prepare context, messages, and tools for the LLM call.
+
+        `internal_instruction` is runtime-only context for this turn (a flow
+        continuation, for example). It goes into the system prompt and is
+        never treated as a user turn. `ephemeral_history` adds messages to the
+        prompt without touching `session.history`, and `append_user_message`
+        can be disabled when there is no new user message for this call.
 
         Returns (context, messages, tools) tuple.
         """
@@ -910,6 +924,7 @@ class Brain:
             "memories": memories,
             "continuity": continuity,
             "available_flows": self.flows,
+            "internal_instruction": internal_instruction,
         }
 
         # 3. Build tools
@@ -1069,7 +1084,14 @@ class Brain:
         )
 
         # 4. Build prompt (tools must be built first for Phase 2.4)
-        messages = self._build_prompt(context, message, session, tools)
+        messages = self._build_prompt(
+            context,
+            message,
+            session,
+            tools,
+            ephemeral_history=ephemeral_history,
+            append_user_message=append_user_message,
+        )
 
         # Store messages for contradiction retry (Phase 2.3)
         self._current_messages = messages[:]
@@ -1149,14 +1171,31 @@ class Brain:
         result = await self._think_core(message, session)
         return await self._finalize_turn(session, message, result)
 
-    async def _think_core(self, message: str, session: Session) -> dict:
+    async def _think_core(
+        self,
+        message: str,
+        session: Session,
+        *,
+        internal_instruction: str | None = None,
+        ephemeral_history: list[dict] | None = None,
+        append_user_message: bool = True,
+    ) -> dict:
         """context → LLM → tool loop, WITHOUT `_finalize_turn`.
 
-        The caller decides which `message` ends the turn. `_finish_flow_turn`
-        finalizes twice (flow then continuation) and therefore needs the core
-        on its own.
+        The caller decides how the turn is finalized. `_finish_flow_turn` needs
+        the core on its own so it can run the flow part and the continuation
+        before persisting one combined assistant reply.
+
+        `internal_instruction`/`ephemeral_history` let a flow continuation run
+        with runtime-only context instead of a synthetic user turn.
         """
-        context, messages, tools = await self._prepare_think_context(message, session)
+        context, messages, tools = await self._prepare_think_context(
+            message,
+            session,
+            internal_instruction=internal_instruction,
+            ephemeral_history=ephemeral_history,
+            append_user_message=append_user_message,
+        )
 
         try:
             options = self._completion_options(purpose="main", tools=tools)
@@ -1197,26 +1236,44 @@ class Brain:
         usual and then a normal `think` runs with the slots already snapshotted
         before `complete_flow()` cleared them. Without the option this is
         exactly the old `_finalize_turn` behaviour.
+
+        The continuation instruction is internal: it reaches the LLM as prompt
+        context, never as a user turn, and the flow text plus the follow-up are
+        persisted as a single assistant reply to the real user message.
         """
         cont = flow_result.pop("_continue", None)
         if not cont:
             return await self._finalize_turn(session, message, flow_result)
-        flow_result = await self._finalize_turn(session, message, flow_result)
-        follow = await self._think_core(cont["prompt"], session)
-        follow = await self._finalize_turn(session, cont["prompt"], follow)
-        return {
+
+        # Guard/annotate the flow text without writing it to memory yet: the
+        # real user message and the combined assistant reply are persisted once
+        # at the end.
+        flow_result = await self._finalize_turn(
+            session, message, flow_result, persist=False
+        )
+        flow_text = flow_result.get("message", "")
+        user_history = flow_result.get("user_message_for_history", message)
+        ephemeral = [{"role": "user", "content": user_history}]
+        if flow_text:
+            ephemeral.append({"role": "assistant", "content": flow_text})
+
+        follow = await self._think_core(
+            user_history,
+            session,
+            internal_instruction=cont["prompt"],
+            ephemeral_history=ephemeral,
+            append_user_message=False,
+        )
+        combined = {
             "message": "\n\n".join(
-                t
-                for t in (
-                    flow_result.get("message", ""),
-                    follow.get("message", ""),
-                )
-                if t
+                t for t in (flow_text, follow.get("message", "")) if t
             ),
             "tool_calls": follow.get("tool_calls", []),
             "action_result": flow_result.get("action_result"),
+            "user_message_for_history": user_history,
             "continued": True,
         }
+        return await self._finalize_turn(session, message, combined)
 
     def _build_synthetic_response(
         self, content: str, buffered_tool_calls: list[dict], finish_reason: str | None = None
@@ -1435,14 +1492,33 @@ class Brain:
         async for event in self._think_stream_turn(message, session):
             yield event
 
-    async def _think_stream_turn(self, message: str, session: Session):
+    async def _think_stream_turn(
+        self,
+        message: str,
+        session: Session,
+        *,
+        internal_instruction: str | None = None,
+        ephemeral_history: list[dict] | None = None,
+        append_user_message: bool = True,
+        persist: bool = True,
+    ):
         """context → stream → tool loop → `_finalize_turn` → `final`.
 
         The normal `think_stream` path forwards every event from here. A flow
         continuation (`_finish_flow_turn_stream`) consumes this generator and
         swallows its `final` so it can emit a single combined one.
+
+        `internal_instruction`/`ephemeral_history` carry runtime-only context
+        instead of a synthetic user turn. With `persist=False` the turn is not
+        written to memory/history; the caller finalizes the combined turn once.
         """
-        context, messages, tools = await self._prepare_think_context(message, session)
+        context, messages, tools = await self._prepare_think_context(
+            message,
+            session,
+            internal_instruction=internal_instruction,
+            ephemeral_history=ephemeral_history,
+            append_user_message=append_user_message,
+        )
 
         try:
             options = self._completion_options(purpose="main", tools=tools, stream=True)
@@ -1565,7 +1641,8 @@ class Brain:
         # Finalize turn. Its return value is the text that goes to memory —
         # the capability guard and the contradiction retry may have rewritten
         # it — so it is what the caller has to be told, not what we streamed.
-        result = await self._finalize_turn(session, message, result)
+        if persist:
+            result = await self._finalize_turn(session, message, result)
         yield {"type": "final", "content": result.get("message", "")}
 
     async def _finish_flow_turn_stream(
@@ -1577,6 +1654,10 @@ class Brain:
         deltas first and the follow-up's own `final` is folded into a single
         combined one — two finals would make the dashboard overwrite the text
         (`channels/web.py`).
+
+        The continuation instruction is internal: it is prompt-only, never a
+        streamed delta, and the whole turn is persisted once as the real user
+        message plus the combined assistant reply.
         """
         cont = flow_result.pop("_continue", None)
         if not cont:
@@ -1585,19 +1666,39 @@ class Brain:
             ):
                 yield event
             return
-        flow_text = (
-            await self._finalize_turn(session, message, flow_result)
-        ).get("message", "")
+        flow_result = await self._finalize_turn(
+            session, message, flow_result, persist=False
+        )
+        flow_text = flow_result.get("message", "")
+        user_history = flow_result.get("user_message_for_history", message)
         if flow_text:
             yield {"type": "delta", "content": flow_text}
         parts = [flow_text] if flow_text else []
-        async for event in self._think_stream_turn(cont["prompt"], session):
+        ephemeral = [{"role": "user", "content": user_history}]
+        if flow_text:
+            ephemeral.append({"role": "assistant", "content": flow_text})
+        async for event in self._think_stream_turn(
+            user_history,
+            session,
+            internal_instruction=cont["prompt"],
+            ephemeral_history=ephemeral,
+            append_user_message=False,
+            persist=False,
+        ):
             if event.get("type") == "final":
                 if event.get("content"):
                     parts.append(event["content"])
                 continue
             yield event
-        yield {"type": "final", "content": "\n\n".join(parts)}
+        combined = {
+            "message": "\n\n".join(parts),
+            "tool_calls": [],
+            "action_result": flow_result.get("action_result"),
+            "user_message_for_history": user_history,
+            "continued": True,
+        }
+        result = await self._finalize_turn(session, message, combined)
+        yield {"type": "final", "content": result.get("message", "")}
 
     async def think_proactive(self) -> str | None:
         """Generate a proactive announcement when capabilities changed.
@@ -2122,7 +2223,9 @@ class Brain:
             "message": "Listo."
         }
 
-    async def _finalize_turn(self, session: Session, message: str, result: dict) -> dict:
+    async def _finalize_turn(
+        self, session: Session, message: str, result: dict, *, persist: bool = True
+    ) -> dict:
         original_message = result["message"]
         result["message"] = self._guard_capability_claims(result["message"])
         self._update_pending_setup_offer(session, result)
@@ -2154,6 +2257,9 @@ class Brain:
                         f"{self._guard_capability_claims(original_message)}"
                     )
             self._current_messages = None
+
+        if not persist:
+            return result
 
         user_history = result.get("user_message_for_history", message)
 
@@ -2450,7 +2556,14 @@ class Brain:
         )
 
     def _build_prompt(
-        self, context: dict, message: str, session: Session, tools: list[dict] | None = None
+        self,
+        context: dict,
+        message: str,
+        session: Session,
+        tools: list[dict] | None = None,
+        *,
+        ephemeral_history: list[dict] | None = None,
+        append_user_message: bool = True,
     ) -> list[dict]:
         """Assemble the system prompt from Consciousness + Personality + Body.
 
@@ -2673,6 +2786,20 @@ class Brain:
             for mem in context["memories"]:
                 system_parts.append(f"- [{mem['category']}] {mem['content']}")
 
+        # Internal runtime directive — instructions that belong to THIS turn
+        # (a flow continuation, for example) but are not user input. They live
+        # in the system prompt so they are never persisted or shown as a turn.
+        internal_instruction = context.get("internal_instruction")
+        if internal_instruction:
+            system_parts.append("")
+            system_parts.append("## Internal runtime directive (NOT from the user)")
+            system_parts.append(
+                "The following is an internal instruction from the runtime for "
+                "this turn. Follow it, but do NOT treat it as something the user "
+                "said, do not quote it back, and do not mention it to the user."
+            )
+            system_parts.append(internal_instruction)
+
         system_message = "\n".join(system_parts)
 
         # Build messages array
@@ -2682,8 +2809,13 @@ class Brain:
         for msg in session.history[-10:]:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
+        # Ephemeral history — prompt-only context that is not persisted.
+        for msg in ephemeral_history or []:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
         # Current message
-        messages.append({"role": "user", "content": message})
+        if append_user_message:
+            messages.append({"role": "user", "content": message})
 
         return messages
 

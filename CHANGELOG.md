@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Flow `continue_message` no longer leaks as a user turn**: the continuation instruction is now internal prompt context (system-level, ephemeral) instead of a synthetic user message. It is neither persisted in `conversation_turns`/session history nor emitted to the channel or stream, and the visible turn is the real user message plus a single assistant reply that closes the flow and delivers the continuation. `think` and `think_stream` both persist that combined turn exactly once.
 - **Surface confirmations survive a runtime refresh**: `refresh_runtime_registry` now migrates the renderer-confirmation store to the new `Registry` and re-promotes only the surfaces that still exist with a valid schema. Hot installs (`/api/modules/install` → sync → refresh) no longer drop confirmed surfaces back to `no_renderer` until the next `hello`.
 - **Catalog path traversal is refused**: installing a catalog entry whose `path` escapes the root of the catalog source that defined it now returns an error and copies nothing, instead of silently generating a stub module.
 - **Truncated tool calls are no longer silent**: when a model returns native tool calls with invalid/truncated JSON, the tool loops now append feedback to the conversation (including `finish_reason=length` when the response was cut off by the token limit) and spend another iteration retrying instead of ending the turn with a promise and no action. `max_iterations` remains the hard cap.

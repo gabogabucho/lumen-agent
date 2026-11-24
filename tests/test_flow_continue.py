@@ -146,14 +146,21 @@ async def test_flow_continue_corre_el_seguimiento_en_el_mismo_turno():
     assert third["message"] == "Listo, demo configurado.\n\nTe propongo el pack mínimo."
     assert third["continued"] is True
     assert fake.call_count == 1
-    assert session.history[-4:] == [
+    # The visible turn is the real user message followed by ONE assistant
+    # message that closes the flow and delivers the continuation.
+    assert session.history[-2:] == [
         {"role": "user", "content": "para vender"},
-        {"role": "assistant", "content": "Listo, demo configurado."},
-        {"role": "user", "content": "Seguí con hago pan"},
-        {"role": "assistant", "content": "Te propongo el pack mínimo."},
+        {
+            "role": "assistant",
+            "content": "Listo, demo configurado.\n\nTe propongo el pack mínimo.",
+        },
     ]
-    # Four turns, two messages each, no duplicated pairs.
-    assert len(session.history) == 8
+    # Three turns, two messages each, no synthetic user turn.
+    assert len(session.history) == 6
+    # The internal continuation instruction never becomes conversation.
+    assert all(
+        "Seguí con hago pan" not in msg["content"] for msg in session.history
+    )
 
 
 @pytest.mark.asyncio
@@ -166,7 +173,15 @@ async def test_flow_continue_usa_los_slots_en_el_prompt():
 
     await _reach_completion(brain, session)
 
+    # The LLM receives the internal directive as prompt context...
     assert "Seguí con hago pan" in _last_prompt(fake)
+    # ...but never as a user turn.
+    user_contents = [
+        m["content"]
+        for m in fake.calls[-1]["messages"]
+        if m["role"] == "user"
+    ]
+    assert "Seguí con hago pan" not in user_contents
 
 
 @pytest.mark.asyncio
@@ -210,6 +225,22 @@ async def test_flow_continue_stream_emite_un_solo_final():
     # The flow text and the follow-up are each present exactly once.
     assert deltas == "Listo, demo configurado.Te propongo el pack mínimo."
     assert fake.call_count == 1
+    # The internal continuation instruction is neither streamed nor stored.
+    streamed = "".join(
+        str(event.get("content", "")) for event in events
+    )
+    assert "Seguí con hago pan" not in streamed
+    assert session.history[-2:] == [
+        {"role": "user", "content": "para vender"},
+        {
+            "role": "assistant",
+            "content": "Listo, demo configurado.\n\nTe propongo el pack mínimo.",
+        },
+    ]
+    assert all(
+        "Seguí con hago pan" not in msg["content"] for msg in session.history
+    )
+    assert "Seguí con hago pan" in _last_prompt(fake)
 
 
 @pytest.mark.asyncio
@@ -253,11 +284,49 @@ async def test_flow_continue_finaliza_cada_parte_una_vez():
     await _reach_completion(brain, session)
 
     saved = [call.args for call in brain.memory.save_conversation_turn.await_args_list]
+    combined = "Listo, demo configurado.\n\nTe propongo el pack mínimo."
     assert saved.count((session.session_id, "user", "para vender")) == 1
-    assert saved.count((session.session_id, "assistant", "Listo, demo configurado.")) == 1
-    assert saved.count((session.session_id, "user", "Seguí con hago pan")) == 1
-    assert saved.count((session.session_id, "assistant", "Te propongo el pack mínimo.")) == 1
-    assert len(saved) == 8
+    assert saved.count((session.session_id, "assistant", combined)) == 1
+    # The continuation instruction is internal: never persisted as a turn.
+    assert all("Seguí con hago pan" not in args[2] for args in saved)
+    # Three turns, two messages each.
+    assert len(saved) == 6
+
+
+@pytest.mark.asyncio
+async def test_continue_message_no_ensucia_memoria_ni_historial():
+    brain, fake = _make_brain(
+        flows=[_flow(**{"continue": True, "continue_message": "Seguí con $que_hace"})],
+        handler=_handler(),
+    )
+    session = Session()
+
+    await _reach_completion(brain, session)
+
+    instruction = "Seguí con hago pan"
+    assert instruction not in [m["content"] for m in session.history]
+    saved = [call.args[2] for call in brain.memory.save_conversation_turn.await_args_list]
+    assert instruction not in saved
+    # Yet the model did receive it, as internal prompt context.
+    assert instruction in _last_prompt(fake)
+
+
+@pytest.mark.asyncio
+async def test_continue_message_no_emite_eventos_en_stream():
+    brain, fake = _make_brain(
+        flows=[_flow(**{"continue": True, "continue_message": "Seguí con $que_hace"})],
+        handler=_handler(),
+    )
+    session = Session()
+
+    await brain.think("setup:demo", session)
+    await brain.think("hago pan", session)
+    events = [event async for event in brain.think_stream("para vender", session)]
+
+    instruction = "Seguí con hago pan"
+    assert all(
+        instruction not in str(event.get("content", "")) for event in events
+    )
 
 
 @pytest.mark.asyncio
