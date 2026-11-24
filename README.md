@@ -758,6 +758,17 @@ lumen config delete <module>.<key> [--instance <name>]
 lumen config list <module> [--instance <name>]
 ```
 
+LLM completion and tool-loop limits are set in the same `config.yaml`:
+
+```yaml
+llm:
+  max_tokens: 1024       # default; applies to main, +256 for contradiction retries
+tool_loop:
+  max_iterations: 3      # default tool-call loop cap
+```
+
+If `llm.max_tokens` is missing or not a positive integer, 1024 is used. Proactive announcements always use 150.
+
 ### Instance isolation
 
 Run multiple independent Lumen instances on the same machine:

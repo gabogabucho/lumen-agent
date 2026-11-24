@@ -2238,6 +2238,217 @@ class TestContradictionRetryLayer:
         assert profile["completion_max_tokens"] + 256 > profile["completion_max_tokens"]
 
 
+# ── max_tokens configuration ─────────────────────────────────────────
+
+
+class TestMaxTokensConfig:
+    def test_default_max_tokens_is_1024(self):
+        brain = _make_brain()
+        assert brain._model_profile()["completion_max_tokens"] == 1024
+
+    def test_llm_max_tokens_is_configurable_for_main_and_contradiction(self):
+        brain = _make_brain(config={"llm": {"max_tokens": 4096}})
+
+        assert brain._model_profile()["completion_max_tokens"] == 4096
+        assert brain._completion_options(purpose="main")["max_tokens"] == 4096
+        assert brain._completion_options(purpose="contradiction")["max_tokens"] == 4352
+        assert brain._completion_options(purpose="proactive")["max_tokens"] == 150
+
+    def test_numeric_string_max_tokens_is_accepted(self):
+        brain = _make_brain(config={"llm": {"max_tokens": "2048"}})
+        assert brain._model_profile()["completion_max_tokens"] == 2048
+
+    @pytest.mark.parametrize("value", [0, -1, "abc", None, True, 1.5])
+    def test_invalid_max_tokens_falls_back_to_default(self, value):
+        brain = _make_brain(config={"llm": {"max_tokens": value}})
+        assert brain._model_profile()["completion_max_tokens"] == 1024
+
+    @pytest.mark.asyncio
+    async def test_think_uses_configured_max_tokens(self):
+        brain = _make_brain(config={"llm": {"max_tokens": 2048}})
+        brain.memory.recall = AsyncMock(return_value=[])
+
+        with _patch_brain_llm(brain) as mock_llm:
+            mock_llm.return_value = _mock_llm_response("ok")
+            await brain.think("hola", Session())
+
+        assert mock_llm.call_args.kwargs["max_tokens"] == 2048
+
+
+# ── invalid / truncated tool call recovery ────────────────────────────
+
+
+class TestInvalidToolCallRetry:
+    @staticmethod
+    def _truncated_response():
+        truncated = _mock_tool_call(
+            "test_conn__run", '{"input": "<svg><path d=\\"M0 0 L10 10'
+        )
+        response = _mock_llm_response("Lo hago ahora", tool_calls=[truncated])
+        response.choices[0].finish_reason = "length"
+        return response
+
+    @staticmethod
+    def _feedback_messages(mock_llm, call_index):
+        return [
+            m
+            for m in mock_llm.call_args_list[call_index].kwargs["messages"]
+            if str(m.get("content", "")).startswith("Your tool call to")
+        ]
+
+    @pytest.mark.asyncio
+    async def test_truncated_tool_call_gets_feedback_then_executes_on_retry(self):
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+
+        valid = _mock_llm_response(
+            tool_calls=[_mock_tool_call("test_conn__run", '{"input": "short"}')]
+        )
+        final = _mock_llm_response("Listo")
+
+        with _patch_brain_llm(brain) as mock_llm:
+            mock_llm.side_effect = [self._truncated_response(), valid, final]
+            with patch.object(
+                brain.connectors,
+                "execute",
+                new=AsyncMock(return_value={"ok": True}),
+            ) as mock_exec:
+                result = await brain.think("dibuja un svg", Session())
+
+        assert mock_llm.call_count == 3
+        feedback = self._feedback_messages(mock_llm, 1)
+        assert len(feedback) == 1
+        assert feedback[0]["role"] in ("system", "user")
+        assert "test_conn__run" in feedback[0]["content"]
+        assert "length" in feedback[0]["content"]
+        assert "token" in feedback[0]["content"].lower()
+        mock_exec.assert_awaited_once()
+        assert result["message"] == "Listo"
+        assert any(tc.get("connector") == "test_conn" for tc in result["tool_calls"])
+
+    @pytest.mark.asyncio
+    async def test_retry_respects_max_iterations(self):
+        brain = _make_brain(config={"tool_loop": {"max_iterations": 2}})
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+
+        with _patch_brain_llm(brain) as mock_llm:
+            mock_llm.side_effect = [self._truncated_response(), self._truncated_response()]
+            result = await brain.think("dibuja un svg", Session())
+
+        assert mock_llm.call_count == 2
+        assert len(self._feedback_messages(mock_llm, 1)) == 1
+        assert result["tool_calls"] == []
+
+    @pytest.mark.asyncio
+    async def test_think_stream_retries_with_length_feedback(self):
+        class ScriptedStreamClient(FakeLLMClient):
+            def __init__(self):
+                super().__init__(
+                    side_effect=[
+                        _mock_llm_response(
+                            tool_calls=[
+                                _mock_tool_call(
+                                    "test_conn__run", '{"input": "short"}'
+                                )
+                            ]
+                        ),
+                        _mock_llm_response("Listo"),
+                    ]
+                )
+                self.batches = [
+                    [
+                        LLMChunk(
+                            delta_content="Lo hago ahora",
+                            delta_tool_calls=[
+                                {
+                                    "index": 0,
+                                    "id": "call-123",
+                                    "function": {
+                                        "name": "test_conn__run",
+                                        "arguments": '{"input": "<svg>',
+                                    },
+                                }
+                            ],
+                            finish_reason="length",
+                        )
+                    ]
+                ]
+
+            async def stream(self, **kwargs):
+                self.calls.append(kwargs)
+                for chunk in self.batches.pop(0):
+                    yield chunk
+
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+        client = ScriptedStreamClient()
+
+        with patch.object(brain, "_llm_client", client):
+            with patch.object(
+                brain.connectors,
+                "execute",
+                new=AsyncMock(return_value={"ok": True}),
+            ) as mock_exec:
+                events = [
+                    event
+                    async for event in brain.think_stream("dibuja un svg", Session())
+                ]
+
+        feedback = self._feedback_messages(client, 1)
+        assert len(feedback) == 1
+        assert "length" in feedback[0]["content"]
+        mock_exec.assert_awaited_once()
+        assert events[-1]["content"] == "Listo"
+
+    @pytest.mark.asyncio
+    async def test_streaming_loop_gives_feedback_for_truncated_tool_call(self):
+        brain = _make_brain()
+        brain.memory.recall = AsyncMock(return_value=[])
+        brain.memory.save_conversation_turn = AsyncMock()
+        messages = [{"role": "user", "content": "dibuja un svg"}]
+        tools = _test_tools("test_conn__run")
+        synthetic = brain._build_synthetic_response(
+            "Lo hago ahora",
+            [
+                {
+                    "id": "call-123",
+                    "function": {
+                        "name": "test_conn__run",
+                        "arguments": '{"input": "<svg>',
+                    },
+                }
+            ],
+        )
+
+        valid = _mock_llm_response(
+            tool_calls=[_mock_tool_call("test_conn__run", '{"input": "short"}')]
+        )
+        final = _mock_llm_response("Listo")
+
+        with _patch_brain_llm(brain) as mock_llm:
+            mock_llm.side_effect = [valid, final]
+            with patch.object(
+                brain.connectors,
+                "execute",
+                new=AsyncMock(return_value={"ok": True}),
+            ) as mock_exec:
+                events = [
+                    event
+                    async for event in brain._tool_use_loop_streaming(
+                        synthetic, messages, tools
+                    )
+                ]
+
+        feedback = self._feedback_messages(mock_llm, 0)
+        assert len(feedback) == 1
+        assert "test_conn__run" in feedback[0]["content"]
+        mock_exec.assert_awaited_once()
+        assert events[-1]["_result"]["message"] == "Listo"
+
+
 # ── _build_prompt ────────────────────────────────────────────────────
     def test_prompt_contains_consciousness(self):
         brain = _make_brain()

@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Truncated tool calls are no longer silent**: when a model returns native tool calls with invalid/truncated JSON, the tool loops now append feedback to the conversation (including `finish_reason=length` when the response was cut off by the token limit) and spend another iteration retrying instead of ending the turn with a promise and no action. `max_iterations` remains the hard cap.
+
 ### Added
+- **Configurable `llm.max_tokens`**: `config.yaml` now accepts `llm.max_tokens` (positive integer, default 1024) alongside `tool_loop.max_iterations`. Main completions use it, contradiction retries use the value +256, and proactive announcements stay at 150. Invalid values fall back to 1024.
 - **REST `/api/chat` actor + metadata**: a host authenticated with `rest_key`
   can name who this turn is for (`actor.email/team/role/workspace`) so workspace
   memory prefixes apply without a dashboard cookie. `metadata` is copied onto
@@ -64,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Pre-tool text leaked to user**: En `think_stream()`, `delta.content` se emitía inmediatamente al stream incluso cuando había `tool_calls`. DeepSeek envía texto como "Completed tool terminal__execute." junto con los tool calls. Fix: suprimir `delta.content` cuando se detectan `tool_calls` — solo emitir el contenido final después de que el tool loop termina.
   - **`neo__*` tools no registrados en ToolPolicy**: `neo__read_skill`, `neo__search_modules`, `neo__save_module_setup`, `neo__save_artifact_setup`, `neo__check_capability` no estaban en `DEFAULT_TOOL_RISK`, causando "Unknown tool" → `confirm_required=True` → 60s timeout. Fix: agregados como `READ_ONLY` (excepto `save_*` como `MUTATING`).
   - **Non-standard tool formats no detectados**: Agregados patrones adicionales a `_has_serialized_tool_call_shape` y `_extract_fallback_tool_calls`: `<functions>`, `<function>`, `<｜tool｜>`, `<|tool|>`, y formatos JSON dentro de code blocks.
-  - **`max_iterations` hardcodeado a 3**: DeepSeek necesita más iteraciones para recuperarse de errores. Fix: `_max_tool_iterations()` lee `config.tool_loop.max_iterations` (default 3). Configurable vía `config.yaml`.
+  - **`max_iterations` hardcodeado a 3**: DeepSeek necesita más iteraciones para recuperarse de errores. Fix: `_max_tool_iterations()` lee `config.tool_loop.max_iterations` (default 3). Configurable vía `config.yaml`, al igual que `llm.max_tokens` para el límite de tokens de completado.
   - **Errores consecutivos consumen iteraciones**: Cuando un tool falla (ej: `command_not_allowed`), DeepSeek intenta otro comando y consume iteraciones rápidamente. Fix: contador `consecutive_errors` en ambos tool loops — si hay 2+ errores consecutivos, se aborta temprano con mensaje informativo.
 
 ## [1.1.9] - 2026-04-28
