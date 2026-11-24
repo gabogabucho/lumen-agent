@@ -135,6 +135,40 @@ class Memory:
             CREATE INDEX IF NOT EXISTS idx_outputs_session ON outputs(session_id);
             CREATE INDEX IF NOT EXISTS idx_outputs_type ON outputs(type);
             CREATE INDEX IF NOT EXISTS idx_outputs_created ON outputs(created_at);
+
+            CREATE TABLE IF NOT EXISTS system_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL,
+                scope_key TEXT NOT NULL DEFAULT '',
+                event_key TEXT,
+                text TEXT NOT NULL,
+                category TEXT DEFAULT 'system',
+                importance REAL DEFAULT 0.5,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_system_events_scope
+                ON system_events(scope, scope_key);
+            CREATE INDEX IF NOT EXISTS idx_system_events_key
+                ON system_events(event_key);
+
+            CREATE TABLE IF NOT EXISTS proactive_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope_key TEXT NOT NULL DEFAULT '*',
+                role TEXT NOT NULL DEFAULT 'assistant',
+                content TEXT NOT NULL,
+                channel TEXT,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_proactive_messages_scope
+                ON proactive_messages(scope_key, created_at);
+
+            CREATE TABLE IF NOT EXISTS proactive_deliveries (
+                message_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                delivered_at REAL NOT NULL,
+                PRIMARY KEY (message_id, session_id)
+            );
             """
         )
         await self._db.commit()
@@ -270,10 +304,17 @@ class Memory:
         await self._db.commit()
 
     async def save_conversation_turn(
-        self, session_id: str, role: str, content: str
+        self, session_id: str, role: str, content: str, *, allow_system: bool = False
     ):
-        """Save raw transcript history outside the durable-memory index."""
-        if not self._should_persist_conversation_turn(role, content):
+        """Save raw transcript history outside the durable-memory index.
+
+        ``allow_system`` is only for deliberate system-role messages emitted
+        by modules; scheduled control traffic (``:SCHEDULE]``) is still kept
+        out of the transcript.
+        """
+        if str(role).lower() == "system" and not allow_system:
+            return
+        if ":SCHEDULE]" in str(content).upper():
             return
         await self._db.execute(
             "INSERT INTO conversation_turns (session_id, role, content, created_at) "
@@ -419,6 +460,182 @@ class Memory:
             return False
         await self._db.commit()
         return True
+
+    # ── Durable system events (module hook #2) ──────────────────────────
+
+    async def save_system_event(
+        self,
+        *,
+        scope: str,
+        scope_key: str,
+        text: str,
+        category: str = "system",
+        importance: float = 0.5,
+        key: str | None = None,
+    ) -> dict:
+        """Create or update a durable system event.
+
+        ``key`` is optional. When provided it upserts within
+        ``(scope, scope_key, key)`` so modules can update the same fact
+        instead of accumulating stale copies.
+        """
+        now = time.time()
+        if key is not None:
+            rows = await self._db.execute_fetchall(
+                "SELECT id FROM system_events "
+                "WHERE scope = ? AND scope_key = ? AND event_key = ?",
+                (scope, scope_key, key),
+            )
+            if rows:
+                event_id = rows[0][0]
+                await self._db.execute(
+                    "UPDATE system_events SET text = ?, category = ?, "
+                    "importance = ?, updated_at = ? WHERE id = ?",
+                    (text, category, importance, now, event_id),
+                )
+                await self._db.commit()
+                return {
+                    "id": event_id,
+                    "scope": scope,
+                    "scope_key": scope_key,
+                    "key": key,
+                    "text": text,
+                    "category": category,
+                    "importance": importance,
+                }
+
+        cursor = await self._db.execute(
+            "INSERT INTO system_events "
+            "(scope, scope_key, event_key, text, category, importance, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (scope, scope_key, key, text, category, importance, now, now),
+        )
+        await self._db.commit()
+        return {
+            "id": cursor.lastrowid,
+            "scope": scope,
+            "scope_key": scope_key,
+            "key": key,
+            "text": text,
+            "category": category,
+            "importance": importance,
+        }
+
+    async def list_system_events(
+        self,
+        *,
+        scope_keys: list[tuple[str, str]] | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """List durable system events visible to a set of scope keys."""
+        clauses: list[str] = []
+        params: list = []
+        for scope, scope_key in scope_keys or []:
+            if not scope:
+                continue
+            clauses.append("(scope = ? AND scope_key = ?)")
+            params.extend([scope, scope_key])
+        where = f"WHERE {' OR '.join(clauses)}" if clauses else ""
+        rows = await self._db.execute_fetchall(
+            "SELECT id, scope, scope_key, event_key, text, category, importance, "
+            "created_at, updated_at FROM system_events "
+            f"{where} ORDER BY importance DESC, updated_at DESC LIMIT ?",
+            (*params, limit),
+        )
+        return [
+            {
+                "id": row[0],
+                "scope": row[1],
+                "scope_key": row[2],
+                "key": row[3],
+                "text": row[4],
+                "category": row[5],
+                "importance": row[6],
+                "created_at": row[7],
+                "updated_at": row[8],
+            }
+            for row in rows
+        ]
+
+    async def delete_system_event(
+        self,
+        *,
+        key: str,
+        scope: str | None = None,
+        scope_key: str | None = None,
+    ) -> bool:
+        """Delete durable system events by key (optionally narrowed by scope)."""
+        clauses = ["event_key = ?"]
+        params: list = [key]
+        if scope is not None:
+            clauses.append("scope = ?")
+            params.append(scope)
+        if scope_key is not None:
+            clauses.append("scope_key = ?")
+            params.append(scope_key)
+        cursor = await self._db.execute(
+            f"DELETE FROM system_events WHERE {' AND '.join(clauses)}",
+            tuple(params),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    # ── Proactive message outbox (module hook #1) ───────────────────────
+
+    async def save_proactive_message(
+        self,
+        *,
+        content: str,
+        role: str = "assistant",
+        scope_key: str = "*",
+        channel: str | None = None,
+    ) -> int:
+        """Queue a message emitted outside a chat turn for durable delivery."""
+        cursor = await self._db.execute(
+            "INSERT INTO proactive_messages "
+            "(scope_key, role, content, channel, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (scope_key, role, content, channel, time.time()),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def list_pending_proactive_messages(
+        self, session_id: str, *, limit: int = 20
+    ) -> list[dict]:
+        """Pending messages addressed to this session or broadcast to all."""
+        rows = await self._db.execute_fetchall(
+            "SELECT pm.id, pm.scope_key, pm.role, pm.content, pm.channel, pm.created_at "
+            "FROM proactive_messages pm "
+            "WHERE pm.scope_key IN (?, '*') "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM proactive_deliveries d "
+            "  WHERE d.message_id = pm.id AND d.session_id = ?"
+            ") ORDER BY pm.created_at ASC, pm.id ASC LIMIT ?",
+            (session_id, session_id, limit),
+        )
+        return [
+            {
+                "id": row[0],
+                "scope_key": row[1],
+                "role": row[2],
+                "content": row[3],
+                "channel": row[4],
+                "created_at": row[5],
+            }
+            for row in rows
+        ]
+
+    async def mark_proactive_message_delivered(
+        self, message_id: int, session_id: str
+    ) -> None:
+        """Remember that a session already received a queued message."""
+        await self._db.execute(
+            "INSERT OR IGNORE INTO proactive_deliveries "
+            "(message_id, session_id, delivered_at) VALUES (?, ?, ?)",
+            (message_id, session_id, time.time()),
+        )
+        await self._db.commit()
 
     async def list_session_summaries(
         self,
