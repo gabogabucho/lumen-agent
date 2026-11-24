@@ -13,7 +13,7 @@ from lumen.core.awareness import CapabilityAwareness
 from lumen.core.artifact_setup import collect_pending_artifact_setup_flows
 from lumen.core.secrets_store import migrate_from_config
 from lumen.core.brain import Brain
-from lumen.core.catalog import Catalog
+from lumen.core.catalog import Catalog, catalog_paths_from_config
 from lumen.core.connectors import ConnectorRegistry
 from lumen.core.consciousness import Consciousness
 from lumen.core.discovery import discover_all
@@ -25,6 +25,7 @@ from lumen.core.marketplace import Marketplace
 from lumen.core.module_manifest import load_module_manifest
 from lumen.core.personality import Personality
 from lumen.core.registry import Registry
+from lumen.core.surfaces import carry_over_confirmations
 
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,13 @@ def refresh_runtime_registry(
         ),
     )
     brain.registry = registry
+
+    # Migrar las confirmaciones de renderers del registry anterior: sin esto
+    # el refresh deja todas las superficies en no_renderer hasta el próximo
+    # hello y la shell pierde superficies vivas. Solo se re-promueven las que
+    # siguen existiendo con schema válido (misma validación que
+    # apply_renderer_added).
+    carry_over_confirmations(old_registry, registry)
 
     # Re-attach awareness subscription to the new registry
     if brain.capability_awareness:
@@ -257,7 +265,9 @@ async def bootstrap_runtime(
     awareness = CapabilityAwareness(registry)
     awareness.ingest_snapshot_diff({}, registry.snapshot())
 
-    catalog = Catalog()
+    catalog = Catalog(
+        extra_paths=catalog_paths_from_config(config, lumen_dir=lumen_dir)
+    )
     marketplace = Marketplace(
         catalog=catalog,
         registry=registry,

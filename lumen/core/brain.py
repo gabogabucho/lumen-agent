@@ -1656,6 +1656,7 @@ class Brain:
                     "display_name": mod.get("display_name", mod["name"]),
                     "description": mod.get("description", ""),
                     "price": mod.get("price", "free"),
+                    "use_cases": list(mod.get("use_cases") or []),
                     "compatibility": (mod.get("compatibility") or {}).get("status"),
                     "install_hint": f"Install from the Modules panel in the dashboard, "
                     f"or tell me 'install {mod['name']}' and I'll guide you.",

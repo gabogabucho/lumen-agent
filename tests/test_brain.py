@@ -1247,6 +1247,45 @@ class TestSearchModules:
         result = brain._search_modules('{"query": "search"}')
         assert result["found"] <= 3
 
+    def test_search_matches_use_cases(self):
+        brain = _make_brain(
+            catalog=_make_catalog(
+                [
+                    {
+                        "name": "x-lumen-redes",
+                        "display_name": "Redes",
+                        "description": "Publicar contenido",
+                        "use_cases": ["publicar en instagram"],
+                    }
+                ]
+            )
+        )
+        result = brain._search_modules('{"query": "publicar en instagram"}')
+        assert result["found"] >= 1
+        assert any(m["name"] == "x-lumen-redes" for m in result["modules"])
+
+    def test_neo_search_modules_includes_use_cases(self):
+        brain = _make_brain(
+            catalog=_make_catalog(
+                [
+                    {
+                        "name": "x-lumen-redes",
+                        "display_name": "Redes",
+                        "description": "Publicar contenido",
+                        "use_cases": ["publicar en instagram", "programar publicaciones"],
+                        "fills_gaps": ["redes sociales"],
+                    }
+                ]
+            )
+        )
+        result = brain._search_modules('{"query": "redes sociales"}')
+        assert result["found"] >= 1
+        entry = next(m for m in result["modules"] if m["name"] == "x-lumen-redes")
+        assert entry["use_cases"] == [
+            "publicar en instagram",
+            "programar publicaciones",
+        ]
+
 
 # ── _check_capability ─────────────────────────────────────────────────
 

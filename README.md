@@ -989,6 +989,42 @@ lumen/modules/_template/module.yaml
 
 ---
 
+## Module catalog sources
+
+Lumen ships with its own catalog (`lumen/catalog/index.yaml`). You can merge
+additional **local** catalog indexes with it — no fork, no copy:
+
+```yaml
+# ~/.lumen/config.yaml
+catalog:
+  sources:
+    - catalogo-local/index.yaml   # relative to ~/.lumen
+```
+
+```bash
+LUMEN_CATALOG_PATHS=~/.pegaseum/modules/index.yaml:/opt/catalogs/index.yaml lumen run
+```
+
+How the merge works:
+
+| Rule | Behavior |
+|---|---|
+| Order | The package index loads first, then each extra source in order |
+| Key | Entries merge by `name` |
+| Lists | `tags`, `fills_gaps`, `use_cases`, `provides` and `requires.*` are unioned (stable order) |
+| Scalars | The last source that defines them wins |
+| `path` | Resolved relative to **the index that defined it**; the first source that sets `path` wins, so an overlay can never redirect an installation |
+| `Catalog.source_root(name)` | The root the `Installer` copies from for that module |
+| `LUMEN_CATALOG_PATHS` | Loaded after the config, so it wins on conflicts; separated by `os.pathsep` or `,` |
+| Missing source | Logs a warning and is ignored |
+| Broken YAML | Fails closed with the file path in the error |
+
+`use_cases` is a generic search field: natural-language phrases that score in
+`search`, appear as `[casos: ...]` in the prompt catalog block, and are returned
+by `neo__search_modules`. It works for any catalog, not just yours.
+
+---
+
 ## Supported Models
 
 Lumen uses LiteLLM as its model abstraction layer. Any provider supported by LiteLLM can work.
