@@ -128,6 +128,9 @@ class ModuleRuntimeContext:
     brain: Any = None
     registered_tools: list[str] = field(default_factory=list)
     inbox: Any = None
+    #: Optional session to bind proactive messages/system events to. Hosts
+    #: that act outside a chat turn can pass a session explicitly per call.
+    session: Any = None
     _broadcast_callback: Any = None
     _inbound_hooks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
@@ -135,6 +138,207 @@ class ModuleRuntimeContext:
         if self._broadcast_callback is not None:
             return await self._broadcast_callback(event_type, payload)
         return 0
+
+    async def notify(
+        self,
+        text: str,
+        kind: str = "assistant",
+        persist: bool = True,
+        channel: str | None = None,
+        *,
+        session: Any = None,
+    ) -> int:
+        """Emit a proactive assistant/system message to live channels.
+
+        The module does not know the transport: the Brain fans the message out
+        to every registered message sink (web chat, Telegram, a product bus,
+        ...). Returns how many recipients received it. Missing sinks, memory
+        or session are non-fatal.
+        """
+        text_value = str(text or "").strip()
+        if not text_value:
+            return 0
+        target_session = session if session is not None else self.session
+
+        notifier = getattr(self.brain, "notify", None)
+        if callable(notifier):
+            try:
+                return await notifier(
+                    text_value,
+                    kind=kind,
+                    persist=persist,
+                    channel=channel,
+                    session=target_session,
+                )
+            except Exception:
+                logger.exception("proactive notify failed; continuing without it")
+
+        delivered = 0
+        if self._broadcast_callback is not None:
+            try:
+                delivered = await self._broadcast_callback(
+                    "proactive_message",
+                    {"text": text_value, "kind": kind, "channel": channel},
+                )
+                if not isinstance(delivered, int):
+                    delivered = 1 if delivered else 0
+            except Exception:
+                logger.exception("proactive broadcast failed")
+                delivered = 0
+
+        if persist and self.memory is not None:
+            try:
+                await self._persist_notify_fallback(
+                    text_value, kind, channel, target_session
+                )
+            except Exception:
+                logger.exception("proactive notify persistence failed")
+
+        return delivered
+
+    async def _persist_notify_fallback(
+        self,
+        text: str,
+        kind: str,
+        channel: str | None,
+        session: Any,
+    ) -> None:
+        role = "system" if str(kind).lower() == "system" else "assistant"
+        if session is not None:
+            session.add_message(role, text)
+            session_id = getattr(session, "session_id", None)
+            if session_id:
+                await self.memory.save_conversation_turn(
+                    str(session_id),
+                    role,
+                    text,
+                    allow_system=role == "system",
+                )
+            return
+        save = getattr(self.memory, "save_proactive_message", None)
+        if callable(save):
+            await save(content=text, role=role, scope_key="*", channel=channel)
+
+    async def record_system_event(
+        self,
+        text: str,
+        scope: str = "session",
+        category: str = "system",
+        importance: float = 0.5,
+        key: str | None = None,
+        *,
+        session: Any = None,
+    ) -> dict | None:
+        """Persist a durable system fact the Brain injects into future prompts.
+
+        ``scope`` is ``session``, ``user`` or ``global``. Supplying ``key``
+        makes the fact updatable: the same key replaces the previous text.
+        """
+        text_value = str(text or "").strip()
+        if not text_value:
+            return None
+        target_session = session if session is not None else self.session
+
+        recorder = getattr(self.brain, "record_system_event", None)
+        if callable(recorder):
+            try:
+                return await recorder(
+                    text_value,
+                    scope=scope,
+                    category=category,
+                    importance=importance,
+                    key=key,
+                    session=target_session,
+                )
+            except Exception:
+                logger.exception("record_system_event failed; continuing")
+
+        if self.memory is None:
+            return None
+        save = getattr(self.memory, "save_system_event", None)
+        if not callable(save):
+            return None
+        scope_value = str(scope or "session").strip().lower()
+        if scope_value not in {"session", "user", "global"}:
+            scope_value = "session"
+        try:
+            return await save(
+                scope=scope_value,
+                scope_key=self._scope_key_for(scope_value, target_session),
+                text=text_value,
+                category=str(category or "system"),
+                importance=float(importance),
+                key=key,
+            )
+        except Exception:
+            logger.exception("record_system_event persistence failed")
+            return None
+
+    async def delete_system_event(
+        self,
+        key: str,
+        *,
+        scope: str | None = None,
+        session: Any = None,
+    ) -> bool:
+        """Delete durable system events by key (across scopes if omitted)."""
+        if not key:
+            return False
+        target_session = session if session is not None else self.session
+
+        deleter = getattr(self.brain, "delete_system_event", None)
+        if callable(deleter):
+            try:
+                return await deleter(key, scope=scope, session=target_session)
+            except Exception:
+                logger.exception("delete_system_event failed; continuing")
+
+        if self.memory is None:
+            return False
+        delete = getattr(self.memory, "delete_system_event", None)
+        if not callable(delete):
+            return False
+        scope_value = None
+        scope_key = None
+        if scope is not None:
+            scope_value = str(scope).strip().lower()
+            if scope_value not in {"session", "user", "global"}:
+                scope_value = "session"
+            scope_key = self._scope_key_for(scope_value, target_session)
+        try:
+            return await delete(key=key, scope=scope_value, scope_key=scope_key)
+        except Exception:
+            logger.exception("delete_system_event persistence failed")
+            return False
+
+    @staticmethod
+    def _scope_key_for(scope: str, session: Any) -> str:
+        workspace = str(getattr(session, "workspace", "") or "").strip() or "default"
+        if scope == "global":
+            return f"global:{workspace}"
+        if scope == "user":
+            team = str(getattr(session, "team", "") or "").strip() or "no-team"
+            email = (
+                str(getattr(session, "user_email", "") or "").strip().lower()
+                or "anon"
+            )
+            return f"user:{workspace}:{team}:{email}"
+        if session is None:
+            return "*"
+        # Mirrors Brain._scoped_session_id without importing Brain here.
+        role = str(getattr(session, "role", "") or "").strip().lower()
+        team = str(getattr(session, "team", "") or "").strip() or "no-team"
+        email = (
+            str(getattr(session, "user_email", "") or "").strip().lower() or "anon"
+        )
+        raw = getattr(session, "session_id", "") or ""
+        if role == "admin":
+            return f"global:{workspace}:{raw}"
+        if role == "team_admin":
+            return f"team:{workspace}:{team}:{raw}"
+        if role:
+            return f"user:{workspace}:{team}:{email}:{raw}"
+        return str(raw) if raw else "*"
 
     def ensure_runtime_dir(self) -> Path:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)

@@ -1009,6 +1009,67 @@ lumen/modules/_template/module.yaml
 
 ---
 
+## Proactive module hooks
+
+A module sometimes finishes work **outside a chat turn** (an approval surface,
+a scheduled job, an external product). These public APIs let that event reach
+the user and the agent's next turn without knowing the transport:
+
+```python
+async def activate(context):
+    # 1) Assistant/system message to every live channel.
+    delivered = await context.notify(
+        "Listo, instalé Navegador y SEO. Falta configurar la API key.",
+        kind="assistant",   # "assistant" or "system", never "user"
+        persist=True,       # stored as assistant/system in the session
+        channel=None,       # None = all; "web" = only sinks for web
+    )
+
+    # 2) Durable system fact injected into future prompts.
+    await context.record_system_event(
+        "El cliente aprobó el pack pack-123. Se instalaron Navegador y SEO.",
+        scope="session",    # "session" | "user" | "global"
+        category="sistema:instalacion",
+        importance=0.9,
+        key="pack-123",     # same key updates instead of duplicating
+    )
+
+    # Updating changes the text; deleting removes it (e.g. on uninstall).
+    await context.record_system_event("Pack pack-123 desinstalado.", key="pack-123")
+    await context.delete_system_event("pack-123")
+```
+
+How it behaves:
+
+- `notify()` returns the number of recipients reported by the live sinks, and
+  returns `0` when there is no channel. Missing memory/session is non-fatal.
+- The text is delivered to sinks registered through
+  `Brain.register_message_sink(fn, channel="web", name="my-transport")`; each
+  sink receives a `ProactiveMessage(text, kind, channel, metadata)`. The Lumen
+  web dashboard registers one automatically and renders it as an assistant
+  message (`type: "proactive_message"`).
+- With `persist=True` and a `session`, the message is appended as
+  `assistant`/`system` and saved to durable conversation history. Without a
+  session it goes to a durable outbox and is injected once into the next session
+  that thinks.
+- System events are injected into the system prompt on every following turn
+  under `## System events (durable, current state)`. They do not depend on
+  `recall()` and never appear as user history. `scope="global"` is scoped to the
+  workspace, `user` to the workspace/team/email identity, and `session` to that
+  conversation. Recording a session-scoped event without a session makes it
+  visible to the next session (useful right after an out-of-band action).
+- Products can also contribute arbitrary prompt lines with
+  `Brain.register_prompt_context_provider(fn, name=...)`; `fn(session)` may be
+  sync or async and return a string or a list of strings.
+- `refresh_runtime_registry()` and `CapabilityAwareness` keep working exactly as
+  before; these hooks are additive, and a product that does not use them sees
+  the same prompts and behavior as today.
+- `Brain.think_proactive()` accepts optional `details`, `announce_text`,
+  `deliver`, `channel`, `persist` and `session` so a product can relay an
+  authoritative result instead of letting the LLM invent names or states.
+
+---
+
 ## Module catalog sources
 
 Lumen ships with its own catalog (`lumen/catalog/index.yaml`). You can merge

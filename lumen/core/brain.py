@@ -21,7 +21,7 @@ import string
 import time
 import unicodedata
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from types import SimpleNamespace
@@ -60,6 +60,20 @@ class ToolAuditEvent:
     error: str = ""
     duration_ms: float = 0.0
     session_id: str = ""
+
+
+@dataclass(frozen=True)
+class ProactiveMessage:
+    """A message emitted by a module outside a normal chat turn.
+
+    Transport-agnostic on purpose: message sinks decide how to deliver it
+    (web chat, Telegram, a product bus, ...).
+    """
+
+    text: str
+    kind: str = "assistant"
+    channel: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def _audit_params(arguments: str | None) -> dict[str, Any]:
@@ -240,6 +254,325 @@ class Brain:
         # Public on purpose: an embedder can flip it without env or config.
         self.distillation_enabled = _distillation_enabled(self.config)
         self._distilled_sessions: set[str] = set()
+        # Public extension points for products/modules that act outside a turn.
+        self._message_sinks: list[dict[str, Any]] = []
+        self._prompt_context_providers: list[dict[str, Any]] = []
+
+    # ── Public module hooks ─────────────────────────────────────────────
+
+    def register_message_sink(
+        self,
+        fn: Callable[[ProactiveMessage], Any],
+        *,
+        channel: str | None = None,
+        name: str | None = None,
+    ) -> Callable[[], None]:
+        """Register a transport that can receive proactive messages.
+
+        Returns a token that unregisters the sink. Registering the same
+        ``name`` twice replaces the previous sink instead of duplicating
+        deliveries.
+        """
+        item = {"fn": fn, "channel": channel, "name": name}
+        if name:
+            for existing in self._message_sinks:
+                if existing.get("name") == name:
+                    existing.update(item)
+                    return self._unregister_message_sink(existing)
+        self._message_sinks.append(item)
+        return self._unregister_message_sink(item)
+
+    def _unregister_message_sink(self, item: dict[str, Any]) -> Callable[[], None]:
+        def _unregister() -> None:
+            if item in self._message_sinks:
+                self._message_sinks.remove(item)
+
+        return _unregister
+
+    def register_prompt_context_provider(
+        self, fn: Callable[[Session], Any], *, name: str | None = None
+    ) -> Callable[[], None]:
+        """Register a callable that returns extra system-prompt lines.
+
+        The callable receives the current ``Session`` and may return a
+        string, a list of strings, or ``None``. Both sync and async
+        callables are supported.
+        """
+        item = {"fn": fn, "name": name}
+        if name:
+            for existing in self._prompt_context_providers:
+                if existing.get("name") == name:
+                    existing.update(item)
+                    return self._unregister_prompt_context_provider(existing)
+        self._prompt_context_providers.append(item)
+        return self._unregister_prompt_context_provider(item)
+
+    def _unregister_prompt_context_provider(
+        self, item: dict[str, Any]
+    ) -> Callable[[], None]:
+        def _unregister() -> None:
+            if item in self._prompt_context_providers:
+                self._prompt_context_providers.remove(item)
+
+        return _unregister
+
+    async def notify(
+        self,
+        text: str,
+        kind: str = "assistant",
+        persist: bool = True,
+        channel: str | None = None,
+        *,
+        session: Session | None = None,
+    ) -> int:
+        """Emit a proactive message to every live sink that matches ``channel``.
+
+        Returns the number of recipients reported by the sinks. A missing
+        transport or memory never raises; it just delivers to fewer places.
+        """
+        text_value = str(text or "").strip()
+        if not text_value:
+            return 0
+        message = ProactiveMessage(
+            text=text_value,
+            kind=str(kind or "assistant"),
+            channel=channel,
+        )
+        delivered = await self._deliver_proactive_message(message)
+
+        if persist:
+            try:
+                await self._persist_proactive_message(
+                    text_value, message.kind, channel, session
+                )
+            except Exception:
+                logger.exception("proactive message persistence failed")
+
+        return delivered
+
+    async def _deliver_proactive_message(self, message: ProactiveMessage) -> int:
+        total = 0
+        for item in list(self._message_sinks):
+            sink_channel = item.get("channel")
+            if (
+                message.channel is not None
+                and sink_channel is not None
+                and str(sink_channel) != message.channel
+            ):
+                continue
+            try:
+                result = item["fn"](message)
+                if inspect.isawaitable(result):
+                    result = await result
+            except Exception:
+                logger.exception(
+                    "message sink %s failed", item.get("name") or item["fn"]
+                )
+                continue
+            if isinstance(result, bool):
+                total += int(result)
+            elif isinstance(result, int):
+                total += result
+            else:
+                # A sink that ran without reporting a count received it.
+                total += 1
+        return total
+
+    async def _persist_proactive_message(
+        self,
+        text: str,
+        kind: str,
+        channel: str | None,
+        session: Session | None,
+    ) -> None:
+        if self.memory is None:
+            return
+        role = "system" if str(kind).lower() == "system" else "assistant"
+        if session is not None:
+            session.add_message(role, text)
+            await self.memory.save_conversation_turn(
+                self._scoped_session_id(session),
+                role,
+                text,
+                allow_system=role == "system",
+            )
+            return
+        save = getattr(self.memory, "save_proactive_message", None)
+        if save is not None:
+            await save(content=text, role=role, scope_key="*", channel=channel)
+
+    async def _load_pending_proactive_messages(self, session: Session) -> None:
+        if self.memory is None:
+            return
+        loader = getattr(self.memory, "list_pending_proactive_messages", None)
+        marker = getattr(self.memory, "mark_proactive_message_delivered", None)
+        if loader is None:
+            return
+        scoped_session_id = self._scoped_session_id(session)
+        try:
+            messages = await loader(scoped_session_id)
+        except Exception:
+            logger.exception("could not load pending proactive messages")
+            return
+        if not isinstance(messages, (list, tuple)):
+            return
+        for message in messages:
+            content = str(message.get("content") or "")
+            if not content:
+                continue
+            role = str(message.get("role") or "assistant")
+            session.add_message(role, content)
+            try:
+                await self.memory.save_conversation_turn(
+                    scoped_session_id,
+                    role,
+                    content,
+                    allow_system=role == "system",
+                )
+            except Exception:
+                pass
+            if marker is not None:
+                try:
+                    await marker(message["id"], scoped_session_id)
+                except Exception:
+                    pass
+
+    async def record_system_event(
+        self,
+        text: str,
+        scope: str = "session",
+        category: str = "system",
+        importance: float = 0.5,
+        key: str | None = None,
+        *,
+        session: Session | None = None,
+    ) -> dict | None:
+        """Store a durable system fact injected into future prompts.
+
+        ``scope`` is ``session``, ``user`` or ``global``. ``key`` makes the
+        fact updatable: recording the same key again replaces its text.
+        """
+        text_value = str(text or "").strip()
+        if not text_value or self.memory is None:
+            return None
+        scope_value = str(scope or "session").strip().lower()
+        if scope_value not in {"session", "user", "global"}:
+            scope_value = "session"
+        save = getattr(self.memory, "save_system_event", None)
+        if save is None:
+            return None
+        try:
+            return await save(
+                scope=scope_value,
+                scope_key=self._system_scope_key(scope_value, session),
+                text=text_value,
+                category=str(category or "system"),
+                importance=float(importance),
+                key=key,
+            )
+        except Exception:
+            logger.exception("could not save system event")
+            return None
+
+    async def delete_system_event(
+        self,
+        key: str,
+        *,
+        scope: str | None = None,
+        session: Session | None = None,
+    ) -> bool:
+        """Delete durable system events by key.
+
+        Without ``scope`` the key is removed across every scope (useful on
+        uninstall, when the original scope may not be known anymore).
+        """
+        if self.memory is None or not key:
+            return False
+        delete = getattr(self.memory, "delete_system_event", None)
+        if delete is None:
+            return False
+        scope_value = None
+        scope_key = None
+        if scope is not None:
+            scope_value = str(scope).strip().lower()
+            if scope_value not in {"session", "user", "global"}:
+                scope_value = "session"
+            scope_key = self._system_scope_key(scope_value, session)
+        try:
+            return await delete(key=key, scope=scope_value, scope_key=scope_key)
+        except Exception:
+            logger.exception("could not delete system event")
+            return False
+
+    @staticmethod
+    def _workspace_name(session: Session | None) -> str:
+        return str(getattr(session, "workspace", "") or "").strip() or "default"
+
+    @classmethod
+    def _user_scope_key(cls, session: Session | None) -> str:
+        workspace = cls._workspace_name(session)
+        team = str(getattr(session, "team", "") or "").strip() or "no-team"
+        email = (
+            str(getattr(session, "user_email", "") or "").strip().lower() or "anon"
+        )
+        return f"user:{workspace}:{team}:{email}"
+
+    @classmethod
+    def _system_scope_key(cls, scope: str, session: Session | None) -> str:
+        if scope == "global":
+            return f"global:{cls._workspace_name(session)}"
+        if scope == "user":
+            return cls._user_scope_key(session)
+        if session is None:
+            # A module reacting outside a chat turn has no session yet.
+            # The event stays visible to the next session that thinks.
+            return "*"
+        return cls._scoped_session_id(session)
+
+    def _system_scope_keys(self, session: Session) -> list[tuple[str, str]]:
+        return [
+            ("session", self._scoped_session_id(session)),
+            ("session", "*"),
+            ("user", self._user_scope_key(session)),
+            ("global", f"global:{self._workspace_name(session)}"),
+        ]
+
+    async def _load_system_events(self, session: Session) -> list[dict]:
+        if self.memory is None:
+            return []
+        loader = getattr(self.memory, "list_system_events", None)
+        if loader is None:
+            return []
+        try:
+            events = await loader(scope_keys=self._system_scope_keys(session))
+        except Exception:
+            logger.exception("could not load system events")
+            return []
+        return list(events) if isinstance(events, (list, tuple)) else []
+
+    async def _collect_prompt_context(self, session: Session) -> list[str]:
+        lines: list[str] = []
+        for provider in list(self._prompt_context_providers):
+            try:
+                result = provider["fn"](session)
+                if inspect.isawaitable(result):
+                    result = await result
+            except Exception:
+                logger.exception(
+                    "prompt context provider %s failed",
+                    provider.get("name") or provider["fn"],
+                )
+                continue
+            if result is None:
+                continue
+            if isinstance(result, str):
+                lines.append(result)
+            else:
+                try:
+                    lines.extend(str(item) for item in result if item)
+                except TypeError:
+                    lines.append(str(result))
+        return lines
 
     async def _persist_tool_output(
         self, tool_name: str, result: Any, session_id: str = ""
@@ -905,6 +1238,9 @@ class Brain:
         # 1. Recall relevant memories + cross-session continuity
         memories = await self.memory.recall(message, limit=5)
         continuity = await self._load_session_continuity(session)
+        await self._load_pending_proactive_messages(session)
+        system_events = await self._load_system_events(session)
+        prompt_context = await self._collect_prompt_context(session)
 
         # 2. Build context — Consciousness + Personality + Body + Catalog + State
         context = {
@@ -923,6 +1259,8 @@ class Brain:
             "pending_slots": session.get_pending_slots(),
             "memories": memories,
             "continuity": continuity,
+            "system_events": system_events,
+            "prompt_context": prompt_context,
             "available_flows": self.flows,
             "internal_instruction": internal_instruction,
         }
@@ -1700,44 +2038,76 @@ class Brain:
         result = await self._finalize_turn(session, message, combined)
         yield {"type": "final", "content": result.get("message", "")}
 
-    async def think_proactive(self) -> str | None:
-        """Generate a proactive announcement when capabilities changed.
+    async def think_proactive(
+        self,
+        *,
+        details: dict | None = None,
+        announce_text: str | None = None,
+        deliver: bool = False,
+        channel: str | None = None,
+        persist: bool = False,
+        session: Session | None = None,
+    ) -> str | None:
+        """Generate (or relay) a proactive announcement.
 
-        Called by the heartbeat when awareness has pending changes.
-        Uses consciousness + awareness only — no conversation context needed.
-        The LLM decides whether and how to announce. Returns None if
-        awareness is empty or the LLM has nothing to say.
+        Called by the heartbeat when awareness has pending changes. When a
+        product already knows the exact text it can pass ``announce_text``
+        (and optional authoritative ``details``) instead of letting the LLM
+        invent names or states. ``deliver=True`` routes the result through
+        ``notify()`` so it reaches the same live channels as module messages.
         """
-        if not self.capability_awareness or not self.capability_awareness.has_pending_proactive():
-            return None
+        announcement = str(announce_text or "").strip() or None
 
-        awareness_text = self.capability_awareness.format_for_proactive()
-        if not awareness_text:
-            return None
+        if announcement is None:
+            awareness_text = None
+            if (
+                self.capability_awareness
+                and self.capability_awareness.has_pending_proactive()
+            ):
+                awareness_text = self.capability_awareness.format_for_proactive()
+            if not awareness_text and not details:
+                return None
 
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    f"{self.consciousness.as_context()}\n\n"
-                    f"{self._language_directive(language_override=self._last_detected_language)}\n\n"
-                    f"{awareness_text}\n\n"
-                    "You just noticed something changed in your capabilities. "
-                    "Briefly and naturally tell the user about it. "
-                    "One or two sentences max. Use your own words. "
-                    "If the change seems minor or irrelevant, respond with "
-                    "an empty string — don't force an announcement."
-                ),
-            }
-        ]
+            if details:
+                details_text = json.dumps(details, ensure_ascii=False, default=str)
+                prefix = f"{awareness_text}\n\n" if awareness_text else ""
+                awareness_text = (
+                    f"{prefix}## Authoritative event details\n{details_text}"
+                )
 
-        try:
-            options = self._completion_options(purpose="proactive")
-            response = await self._acomplete(options=options, messages=messages)
-            content = self._safe_extract_content(response)
-            return content.strip() if content.strip() else None
-        except Exception:
-            return None
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        f"{self.consciousness.as_context()}\n\n"
+                        f"{self._language_directive(language_override=self._last_detected_language)}\n\n"
+                        f"{awareness_text}\n\n"
+                        "You just noticed something changed in your capabilities. "
+                        "Briefly and naturally tell the user about it. "
+                        "One or two sentences max. Use your own words. "
+                        "If the change seems minor or irrelevant, respond with "
+                        "an empty string — don't force an announcement."
+                    ),
+                }
+            ]
+
+            try:
+                options = self._completion_options(purpose="proactive")
+                response = await self._acomplete(options=options, messages=messages)
+                content = self._safe_extract_content(response)
+                announcement = content.strip() if content.strip() else None
+            except Exception:
+                announcement = None
+
+        if announcement and deliver:
+            await self.notify(
+                announcement,
+                kind="assistant",
+                persist=persist,
+                channel=channel,
+                session=session,
+            )
+        return announcement
 
     def _read_skill(self, arguments: str) -> dict:
         """Read full SKILL.md content for on-demand loading (progressive disclosure).
@@ -2779,6 +3149,28 @@ class Brain:
                         f"- [{category}] {text}" if category else f"- {text}")
                 else:  # callers that still pass plain strings
                     system_parts.append(f"- {fact}")
+
+        # Durable system events registered by modules (module hook #2).
+        # They are current state, not recalled chatter: inject them on every
+        # turn without waiting for a recall() match.
+        system_events = context.get("system_events") or []
+        if system_events:
+            system_parts.append("\n## System events (durable, current state)")
+            for event in system_events:
+                if not isinstance(event, dict):
+                    system_parts.append(f"- {event}")
+                    continue
+                category = event.get("category") or ""
+                text = event.get("text") or ""
+                system_parts.append(
+                    f"- [{category}] {text}" if category else f"- {text}"
+                )
+
+        # Extra prompt lines contributed by registered providers.
+        prompt_context = context.get("prompt_context") or []
+        if prompt_context:
+            system_parts.append("\n## Context from extensions")
+            system_parts.extend(f"- {line}" for line in prompt_context)
 
         # Relevant memories
         if context["memories"]:

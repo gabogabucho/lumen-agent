@@ -180,6 +180,14 @@ def _schedule_conversation_purge():
     loop.create_task(_run_purge())
 
 
+async def _web_message_sink(message) -> int:
+    """Deliver a proactive module message to every live web chat client."""
+    return await broadcast_event(
+        "proactive_message",
+        {"text": message.text, "kind": message.kind},
+    )
+
+
 def _attach_brain_runtime_handlers():
     if _brain is not None:
         _brain.flow_action_handler = _handle_flow_action
@@ -187,6 +195,9 @@ def _attach_brain_runtime_handlers():
         manager = getattr(_brain, "module_manager", None)
         if manager and hasattr(manager, "set_broadcast_callback"):
             manager.set_broadcast_callback(broadcast_event)
+        register_sink = getattr(_brain, "register_message_sink", None)
+        if callable(register_sink):
+            register_sink(_web_message_sink, channel="web", name="lumen-web")
 
 
 _inbox_consumer_task = None
