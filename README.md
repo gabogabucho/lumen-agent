@@ -829,6 +829,26 @@ User message
 → Final response
 ```
 
+### Flows that continue into a normal turn
+
+A runtime flow can hand its collected slots to the Brain instead of ending the
+turn on its closing message. Add `continue: true` to the flow and the same turn
+runs a normal `think` right after `on_complete`, with the slots as context:
+
+```yaml
+on_complete: "save_artifact_env:manual:x-pegaseum-onboarding"
+continue: true
+continue_message: |
+  El onboarding terminó. Con lo que el cliente contó ($que_hace, $para_que),
+  proponé ahora el equipo mínimo sin preguntar nada más.
+```
+
+`continue_message` is optional and rendered with `string.Template`
+(`safe_substitute`) over the slots. Without it, the default prompt includes the
+slots as JSON. Slots are snapshotted before `complete_flow()` clears them, and
+the turn ends with one combined response (one `final` event when streaming).
+Flows without `continue` behave exactly as before.
+
 ### Session distillation
 
 Once a session reaches four turns, Lumen asks the LLM to extract durable facts
