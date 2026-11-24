@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import string
 import time
 import unicodedata
 import uuid
@@ -1086,7 +1087,7 @@ class Brain:
 
         flow_result = await self._maybe_handle_runtime_flow(message, session)
         if flow_result is not None:
-            return await self._finalize_turn(session, message, flow_result)
+            return await self._finish_flow_turn(session, message, flow_result)
 
         # 2. Check for flow triggers if no active flow
         if not session.active_flow:
@@ -1095,7 +1096,7 @@ class Brain:
                 session.start_flow(triggered)
                 flow_result = await self._maybe_handle_runtime_flow(message, session)
                 if flow_result is not None:
-                    return await self._finalize_turn(session, message, flow_result)
+                    return await self._finish_flow_turn(session, message, flow_result)
 
             # 2b. Natural-language setup: if the user mentions a module that
             # has pending setup (by alias), start the flow directly. This
@@ -1106,7 +1107,7 @@ class Brain:
                 session.start_flow(setup_match)
                 flow_result = await self._maybe_handle_runtime_flow(message, session)
                 if flow_result is not None:
-                    return await self._finalize_turn(session, message, flow_result)
+                    return await self._finish_flow_turn(session, message, flow_result)
 
             # 2c. User explicitly requests setup ("configurémolo", "setup")
             # and there's exactly one pending flow — start it without making
@@ -1121,7 +1122,7 @@ class Brain:
                         message, session
                     )
                     if flow_result is not None:
-                        return await self._finalize_turn(session, message, flow_result)
+                        return await self._finish_flow_turn(session, message, flow_result)
                 elif len(setup_flows) > 1:
                     # Multiple flows — ask which one, don't guess
                     artifacts = []
@@ -1145,6 +1146,16 @@ class Brain:
                         },
                     )
 
+        result = await self._think_core(message, session)
+        return await self._finalize_turn(session, message, result)
+
+    async def _think_core(self, message: str, session: Session) -> dict:
+        """context → LLM → tool loop, WITHOUT `_finalize_turn`.
+
+        The caller decides which `message` ends the turn. `_finish_flow_turn`
+        finalizes twice (flow then continuation) and therefore needs the core
+        on its own.
+        """
         context, messages, tools = await self._prepare_think_context(message, session)
 
         try:
@@ -1172,11 +1183,40 @@ class Brain:
             return {"message": f"I had trouble thinking: {e}", "tool_calls": []}
 
         # 6. Tool use loop — if LLM called tools, execute and send results back
-        result = await self._tool_use_loop(
+        return await self._tool_use_loop(
             response, messages, tools, session=session, max_iterations=self._max_tool_iterations()
         )
 
-        return await self._finalize_turn(session, message, result)
+    async def _finish_flow_turn(
+        self, session: Session, message: str, flow_result: dict
+    ) -> dict:
+        """Close a flow turn, optionally chaining a follow-up think in the same turn.
+
+        A flow may declare `continue: true` (plus an optional
+        `continue_message` template). When it does, the flow is finalized as
+        usual and then a normal `think` runs with the slots already snapshotted
+        before `complete_flow()` cleared them. Without the option this is
+        exactly the old `_finalize_turn` behaviour.
+        """
+        cont = flow_result.pop("_continue", None)
+        if not cont:
+            return await self._finalize_turn(session, message, flow_result)
+        flow_result = await self._finalize_turn(session, message, flow_result)
+        follow = await self._think_core(cont["prompt"], session)
+        follow = await self._finalize_turn(session, cont["prompt"], follow)
+        return {
+            "message": "\n\n".join(
+                t
+                for t in (
+                    flow_result.get("message", ""),
+                    follow.get("message", ""),
+                )
+                if t
+            ),
+            "tool_calls": follow.get("tool_calls", []),
+            "action_result": flow_result.get("action_result"),
+            "continued": True,
+        }
 
     def _build_synthetic_response(
         self, content: str, buffered_tool_calls: list[dict], finish_reason: str | None = None
@@ -1323,7 +1363,9 @@ class Brain:
 
         flow_result = await self._maybe_handle_runtime_flow(message, session)
         if flow_result is not None:
-            async for event in self._short_circuit_events(session, message, flow_result):
+            async for event in self._finish_flow_turn_stream(
+                session, message, flow_result
+            ):
                 yield event
             return
 
@@ -1334,7 +1376,7 @@ class Brain:
                 session.start_flow(triggered)
                 flow_result = await self._maybe_handle_runtime_flow(message, session)
                 if flow_result is not None:
-                    async for event in self._short_circuit_events(
+                    async for event in self._finish_flow_turn_stream(
                         session, message, flow_result
                     ):
                         yield event
@@ -1345,7 +1387,7 @@ class Brain:
                 session.start_flow(setup_match)
                 flow_result = await self._maybe_handle_runtime_flow(message, session)
                 if flow_result is not None:
-                    async for event in self._short_circuit_events(
+                    async for event in self._finish_flow_turn_stream(
                         session, message, flow_result
                     ):
                         yield event
@@ -1361,7 +1403,7 @@ class Brain:
                         message, session
                     )
                     if flow_result is not None:
-                        async for event in self._short_circuit_events(
+                        async for event in self._finish_flow_turn_stream(
                             session, message, flow_result
                         ):
                             yield event
@@ -1390,6 +1432,16 @@ class Brain:
                         yield event
                     return
 
+        async for event in self._think_stream_turn(message, session):
+            yield event
+
+    async def _think_stream_turn(self, message: str, session: Session):
+        """context → stream → tool loop → `_finalize_turn` → `final`.
+
+        The normal `think_stream` path forwards every event from here. A flow
+        continuation (`_finish_flow_turn_stream`) consumes this generator and
+        swallows its `final` so it can emit a single combined one.
+        """
         context, messages, tools = await self._prepare_think_context(message, session)
 
         try:
@@ -1515,6 +1567,37 @@ class Brain:
         # it — so it is what the caller has to be told, not what we streamed.
         result = await self._finalize_turn(session, message, result)
         yield {"type": "final", "content": result.get("message", "")}
+
+    async def _finish_flow_turn_stream(
+        self, session: Session, message: str, flow_result: dict
+    ):
+        """Streaming counterpart of `_finish_flow_turn`.
+
+        Emits exactly one `final`. With `continue`, the flow text goes out as
+        deltas first and the follow-up's own `final` is folded into a single
+        combined one — two finals would make the dashboard overwrite the text
+        (`channels/web.py`).
+        """
+        cont = flow_result.pop("_continue", None)
+        if not cont:
+            async for event in self._short_circuit_events(
+                session, message, flow_result
+            ):
+                yield event
+            return
+        flow_text = (
+            await self._finalize_turn(session, message, flow_result)
+        ).get("message", "")
+        if flow_text:
+            yield {"type": "delta", "content": flow_text}
+        parts = [flow_text] if flow_text else []
+        async for event in self._think_stream_turn(cont["prompt"], session):
+            if event.get("type") == "final":
+                if event.get("content"):
+                    parts.append(event["content"])
+                continue
+            yield event
+        yield {"type": "final", "content": "\n\n".join(parts)}
 
     async def think_proactive(self) -> str | None:
         """Generate a proactive announcement when capabilities changed.
@@ -1942,19 +2025,35 @@ class Brain:
         flow = session.active_flow or {}
         slots = dict(session.slots)
         action = str(flow.get("on_complete") or "").strip()
+        wants_continue = bool(flow.get("continue"))
+        continue_tpl = str(flow.get("continue_message") or "").strip()
         session.complete_flow()
 
-        if not action:
-            return {"message": "Listo."}
-        if self.flow_action_handler is None:
-            return {"message": "Listo."}
+        if not action or self.flow_action_handler is None:
+            result: dict = {"message": "Listo."}
+        else:
+            outcome = await self.flow_action_handler(action, slots, session=session)
+            if isinstance(outcome, dict) and str(outcome.get("message") or "").strip():
+                result = {
+                    "message": str(outcome["message"]).strip(),
+                    "action_result": outcome,
+                }
+            else:
+                result = {"message": "Listo.", "action_result": outcome}
+        if wants_continue:
+            result["_continue"] = {
+                "prompt": self._render_continue_prompt(continue_tpl, slots)
+            }
+        return result
 
-        outcome = await self.flow_action_handler(action, slots, session=session)
-        if isinstance(outcome, dict):
-            message = str(outcome.get("message") or "").strip()
-            if message:
-                return {"message": message, "action_result": outcome}
-        return {"message": "Listo.", "action_result": outcome}
+    @staticmethod
+    def _render_continue_prompt(template: str, slots: dict) -> str:
+        if template:
+            return string.Template(template).safe_substitute(slots)
+        return (
+            "The flow just completed. Without asking anything else, act on it now "
+            f"using these filled slots: {json.dumps(slots, ensure_ascii=False)}"
+        )
 
     async def _maybe_handle_pending_setup_offer(
         self, message: str, session: Session
