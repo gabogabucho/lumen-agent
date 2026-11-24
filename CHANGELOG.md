@@ -8,9 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Surface confirmations survive a runtime refresh**: `refresh_runtime_registry` now migrates the renderer-confirmation store to the new `Registry` and re-promotes only the surfaces that still exist with a valid schema. Hot installs (`/api/modules/install` → sync → refresh) no longer drop confirmed surfaces back to `no_renderer` until the next `hello`.
+- **Catalog path traversal is refused**: installing a catalog entry whose `path` escapes the root of the catalog source that defined it now returns an error and copies nothing, instead of silently generating a stub module.
 - **Truncated tool calls are no longer silent**: when a model returns native tool calls with invalid/truncated JSON, the tool loops now append feedback to the conversation (including `finish_reason=length` when the response was cut off by the token limit) and spend another iteration retrying instead of ending the turn with a promise and no action. `max_iterations` remains the hard cap.
 
 ### Added
+- **Additional catalog sources (E5)**: `Catalog(catalog_path=None, *, extra_paths=())` merges extra local `index.yaml` files with the package index, by module name. Sources come from `config.catalog.sources` (relative to `lumen_dir`) and/or `LUMEN_CATALOG_PATHS` (`os.pathsep` or comma separated; loaded last, so it wins). Lists (`tags`, `fills_gaps`, `use_cases`, `provides`, `requires.*`) are unioned, scalars are won by the last source, and `path` is resolved relative to **its own** index — `Catalog.source_root(name)` tells the `Installer` which root to copy from, and an overlay without `path` can never redirect an installation. A missing source only warns; a broken YAML fails closed naming the file. `bootstrap_runtime` wires it up.
+- **`use_cases` in module search**: entries can declare natural-language use cases; they score in `Catalog.search`, show as `[casos: ...]` in the prompt catalog block, and come back from `neo__search_modules` (still capped at 3 results).
 - **Configurable `llm.max_tokens`**: `config.yaml` now accepts `llm.max_tokens` (positive integer, default 1024) alongside `tool_loop.max_iterations`. Main completions use it, contradiction retries use the value +256, and proactive announcements stay at 150. Invalid values fall back to 1024.
 - **REST `/api/chat` actor + metadata**: a host authenticated with `rest_key`
   can name who this turn is for (`actor.email/team/role/workspace`) so workspace

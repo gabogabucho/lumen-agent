@@ -43,6 +43,10 @@ from lumen.core.module_setup import pending_setup_for_manifest
 # Where installed modules live
 INSTALLED_DIR = Path(__file__).parent.parent / "modules"
 
+# Sentinel returned by _resolve_catalog_module_dir when an entry's `path`
+# escapes the root of the catalog source that defined it.
+_INVALID_CATALOG_DIR = "__invalid__"
+
 
 def _set_readonly(path: Path) -> None:
     """Recursively set *path* and all its contents to read-only."""
@@ -242,10 +246,21 @@ class Installer:
         if not module_info:
             return {"status": "not_found", "name": name}
 
+        catalog_module_dir = self._resolve_catalog_module_dir(module_info)
+        if catalog_module_dir.name == _INVALID_CATALOG_DIR:
+            # `path` escapó de la raíz de su fuente: no se copia nada.
+            return {
+                "status": "error",
+                "name": name,
+                "error": (
+                    f"Catalog entry for '{name}' points outside its catalog "
+                    f"source root; refusing to install"
+                ),
+            }
+
         module_dir = self.installed_dir / name
         module_dir.mkdir(parents=True, exist_ok=True)
 
-        catalog_module_dir = self._resolve_catalog_module_dir(module_info)
         if catalog_module_dir.exists():
             # Copy real module files
             for src_file in catalog_module_dir.rglob("*"):
@@ -575,13 +590,24 @@ class Installer:
         return "\n".join(lines)
 
     def _resolve_catalog_module_dir(self, module_info: dict) -> Path:
-        """Resolve the source directory for a catalog module safely."""
-        catalog_root = (self.pkg_dir / "catalog").resolve()
-        relative_path = module_info.get("path") or f"modules/{module_info['name']}"
-        candidate = (catalog_root / relative_path).resolve()
+        """Resolve the source directory for a catalog module safely.
 
-        if candidate != catalog_root and catalog_root not in candidate.parents:
-            return catalog_root / "__invalid__"
+        El ``path`` de la entrada se resuelve contra el directorio del index
+        que lo definió (``Catalog.source_root``); si esa fuente no existe o la
+        entrada no tiene ``path``, se usa el catálogo del paquete como
+        default. El guard rechaza cualquier ``candidate`` fuera de esa raíz.
+        """
+        name = module_info.get("name") or ""
+        source_root = self.catalog.source_root(name) if self.catalog else None
+        if source_root is None:
+            source_root = self.pkg_dir / "catalog"
+        source_root = Path(source_root).resolve()
+
+        relative_path = module_info.get("path") or f"modules/{name}"
+        candidate = (source_root / relative_path).resolve()
+
+        if candidate != source_root and source_root not in candidate.parents:
+            return source_root / _INVALID_CATALOG_DIR
         return candidate
 
     def _external_module_warnings(self, module_name: str) -> list[str]:

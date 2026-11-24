@@ -390,6 +390,33 @@ def drop_connection(registry: Registry, *, connection_id: str) -> list:
     return collected
 
 
+def carry_over_confirmations(old_registry: Registry, new_registry: Registry) -> None:
+    """Migra las confirmaciones de renderer de un registry a otro.
+
+    ``refresh_runtime_registry`` reemplaza el ``Registry`` entero; sin migrar
+    el store, toda superficie confirmada vuelve a ``no_renderer`` hasta el
+    próximo ``hello``. Se re-promueven solo las confirmaciones cuya
+    superficie siga existiendo en el registry nuevo con schema válido: una
+    confirmación vieja (superficie renombrada o con schema roto) no se cuela.
+    """
+    store = getattr(old_registry, "_surface_renderers", None)
+    if not store:
+        return
+
+    new_registry._surface_renderers = store  # noqa: SLF001 — store compartido
+
+    for connection_id, confirmations in list(store.items()):
+        for confirmation in list(confirmations.values()):
+            apply_renderer_added(
+                new_registry,
+                connection_id=str(connection_id),
+                renderer={
+                    "name": confirmation.name,
+                    "version": confirmation.version,
+                },
+            )
+
+
 # ---------------------------------------------------------------------------
 # Tool render_surface
 # ---------------------------------------------------------------------------

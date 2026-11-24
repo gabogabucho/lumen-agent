@@ -1234,11 +1234,14 @@ def _is_installed_personality_module(module_name: str) -> bool:
 
 
 def _build_setup_installer():
-    from lumen.core.catalog import Catalog
+    from lumen.core.catalog import Catalog, catalog_paths_from_config
     from lumen.core.connectors import ConnectorRegistry
     from lumen.core.installer import Installer
 
-    catalog = Catalog(PKG_DIR / "catalog" / "index.yaml")
+    catalog = Catalog(
+        PKG_DIR / "catalog" / "index.yaml",
+        extra_paths=catalog_paths_from_config(_config, lumen_dir=LUMEN_DIR),
+    )
     installer = Installer(PKG_DIR, ConnectorRegistry(), memory=None, catalog=catalog)
     return catalog, installer
 
