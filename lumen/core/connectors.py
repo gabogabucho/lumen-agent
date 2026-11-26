@@ -136,6 +136,12 @@ class ConnectorRegistry:
         self._tool_name_map = {}
         self._tool_alias_map = {}
         tools = []
+        # A module can register file__read / web__search on top of the built-in
+        # connector action. One name must appear once, and the explicit tool
+        # wins because it carries the real schema and effect metadata.
+        explicit_names = {
+            self._sanitize_tool_name(name) for name in self._explicit_tools
+        }
 
         def _make_tool(name: str, description: str, parameters: dict) -> dict:
             """Build a tool dict and optionally annotate with risk metadata."""
@@ -162,6 +168,8 @@ class ConnectorRegistry:
 
         def _add(tool: dict, conn_name: str, act: str) -> None:
             """Annotate and append a tool to the list."""
+            if tool["function"]["name"] in explicit_names:
+                return
             _annotate(tool, conn_name, act)
             tools.append(tool)
 
@@ -230,16 +238,18 @@ class ConnectorRegistry:
             sanitized = self._sanitize_tool_name(name)
             if sanitized != name:
                 self._tool_name_map[sanitized] = name
-            tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": sanitized,
-                        "description": tool["description"],
-                        "parameters": tool["parameters"],
-                    },
-                }
-            )
+            built = _make_tool(sanitized, tool["description"], tool["parameters"])
+            meta = tool.get("metadata") or {}
+            annotations: dict = {}
+            if meta.get("effect"):
+                annotations["effect"] = meta["effect"]
+            if meta.get("risk"):
+                annotations["risk"] = meta["risk"]
+            if "confirm_required" in meta:
+                annotations["confirm_required"] = bool(meta["confirm_required"])
+            if annotations:
+                built["function"]["annotations"] = annotations
+            tools.append(built)
         return tools
 
     def has_tool(self, name: str) -> bool:

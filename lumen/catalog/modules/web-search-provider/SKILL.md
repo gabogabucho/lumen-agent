@@ -1,6 +1,6 @@
 ---
 name: web-search-provider
-description: "Search the web and extract content from URLs"
+description: "Search the public web and extract text from public URLs"
 min_capability: tier-2
 requires:
   connectors: [web]
@@ -30,8 +30,24 @@ Do the following:
 - If search returns no results, suggest refining the query
 - For time-sensitive info (weather, news), note that results may not be real-time
 
+## Tools
+
+`web__search` and `web__extract` are live once this module is installed.
+Search returns titles, URLs, and snippets. Extract reads one public page.
+
+The default provider is DuckDuckGo and needs no API key. Set `LUMEN_WEB_PROVIDER`
+to `brave`, `tavily`, or `searxng` when the user has configured one:
+
+- Brave: `BRAVE_API_KEY` or `LUMEN_BRAVE_API_KEY`
+- Tavily: `TAVILY_API_KEY` or `LUMEN_TAVILY_API_KEY`
+- SearXNG: `LUMEN_SEARXNG_URL`, and that base URL must be public
+
+If a call returns `missing_configuration`, tell the user which variable is missing.
+Do not invent a key.
+
 ## Limitations
 
-Web search depends on the web connector handler being configured.
-For full functionality, consider connecting an MCP server like
-@anthropic/mcp-server-fetch or using a search API (Tavily, Brave).
+Only public http(s) URLs are fetched. Localhost, private ranges, and link-local
+addresses are refused, including after a redirect. If extract returns
+`blocked_url` or `unverified_host`, say so and do not retry with a rewritten
+address. A SearXNG on localhost will not work; the provider URL has to be public.
