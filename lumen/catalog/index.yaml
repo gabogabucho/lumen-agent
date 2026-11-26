@@ -145,7 +145,7 @@ modules:
 
   - name: file-manager
     display_name: "File Manager"
-    description: "Read, write, and list local files. Powers the file connector."
+    description: "Read, write, list, move, and delete files inside a configured root. Powers the file connector."
     version: "1.0.0"
     author: "Lumen Team"
     price: free
@@ -156,10 +156,14 @@ modules:
       - "list files"
       - "open file"
       - "save file"
+      - "move file"
+      - "delete file"
     provides:
       - file.read
       - file.write
       - file.list
+      - file.move
+      - file.delete
     tags: [files, filesystem, storage]
 
   - name: peluqueria

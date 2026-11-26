@@ -903,6 +903,38 @@ memory
 terminal
 ```
 
+The `web` and `file` connectors ship in the core without handlers. Installing
+the catalog modules `web-search-provider` and `file-manager` registers the
+real ones. Until then, discovery reports those connectors as `no_handler`.
+
+Web search (`web__search`, `web__extract`) calls a provider selected with
+`LUMEN_WEB_PROVIDER`:
+
+```txt
+duckduckgo   default, no API key
+brave        BRAVE_API_KEY or LUMEN_BRAVE_API_KEY
+tavily       TAVILY_API_KEY or LUMEN_TAVILY_API_KEY
+searxng      LUMEN_SEARXNG_URL
+```
+
+`LUMEN_WEB_TIMEOUT` defaults to 10 seconds (1–60). `LUMEN_WEB_MAX_BYTES`
+defaults to 1000000. `LUMEN_WEB_MAX_RESULTS` defaults to 5 (1–10). Redirects
+are followed by hand, at most five hops, and each hop is checked again.
+Localhost, private ranges, and link-local addresses are refused, including
+after a redirect. A provider URL has to be public; a SearXNG on localhost
+is refused. A missing key or base URL returns `missing_configuration` and
+names the variable.
+
+File tools (`file__read`, `file__list`, `file__write`, `file__move`,
+`file__delete`) stay inside `LUMEN_FILE_ROOT`. When that is unset, the root
+is `<runtime>/files`. Relative roots resolve against the module runtime
+directory. `LUMEN_FILE_MAX_BYTES` defaults to 1000000. `..`, absolute paths
+outside the root, and symlinks are refused. Tool metadata follows the
+confirmation gate: read and list are `read_only`, write and move are
+`mutating` and do not require confirmation, delete is `destructive` and does.
+`security.confirm_deletions: false` clears the delete confirmation. Write can
+still replace a file; the module skill tells the model to ask first.
+
 Anything else can plug in via MCP servers or modules.
 
 ---

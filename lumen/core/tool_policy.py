@@ -46,6 +46,8 @@ DEFAULT_TOOL_RISK: dict[str, dict[str, str]] = {
         "read": ToolRisk.READ_ONLY.value,
         "list": ToolRisk.READ_ONLY.value,
         "write": ToolRisk.MUTATING.value,
+        "move": ToolRisk.MUTATING.value,
+        "delete": ToolRisk.DESTRUCTIVE.value,
     },
     "task": {
         "create": ToolRisk.MUTATING.value,
